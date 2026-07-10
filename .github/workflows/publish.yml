@@ -42,9 +42,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || contains(github.ref, 'test')
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-      url: https://test.pypi.org/project/protoprompt/
     permissions:
       id-token: write
     steps:
@@ -65,9 +62,6 @@ jobs:
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/protoprompt/
     permissions:
       id-token: write
     steps:
