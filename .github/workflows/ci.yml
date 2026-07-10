@@ -31,7 +31,7 @@ jobs:
 
       - name: Run tests with coverage
         run: |
-          pytest --cov=protoprompt --cov-report=xml --cov-report=term
+          pytest -m "not integration" --cov=protoprompt --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
@@ -40,6 +40,20 @@ jobs:
           file: coverage.xml
           flags: unittests
           fail_ci_if_error: false
+
+  integration:
+    name: integration tests (3.12)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip
+      - run: python -m pip install ".[chroma,dev]"
+      - name: Run integration tests
+        run: pytest -m integration -v
 
   lint:
     name: lint
