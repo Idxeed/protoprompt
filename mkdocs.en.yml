@@ -1,8 +1,8 @@
 site_name: protoprompt
 site_description: Layered context builder for LLM prompts
-site_url: https://EnergoAI-Hub.github.io/protoprompt/
-repo_url: https://github.com/EnergoAI-Hub/protoprompt
-repo_name: EnergoAI-Hub/protoprompt
+site_url: https://idxeed.github.io/protoprompt/
+repo_url: https://github.com/Idxeed/protoprompt
+repo_name: Idxeed/protoprompt
 copyright: MIT
 
 docs_dir: docs/en

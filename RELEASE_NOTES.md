@@ -86,7 +86,7 @@ asyncio.run(main())
 
 ## Links
 
-- Source: https://github.com/EnergoAI-Hub/protoprompt
-- Docs: https://EnergoAI-Hub.github.io/protoprompt/
-- Issues: https://github.com/EnergoAI-Hub/protoprompt/issues
-- Changelog: https://github.com/EnergoAI-Hub/protoprompt/blob/main/CHANGELOG.md
+- Source: https://github.com/Idxeed/protoprompt
+- Docs: https://idxeed.github.io/protoprompt/
+- Issues: https://github.com/Idxeed/protoprompt/issues
+- Changelog: https://github.com/Idxeed/protoprompt/blob/main/CHANGELOG.md

@@ -1,7 +1,7 @@
 # protoprompt
 
-[![CI](https://github.com/EnergoAI-Hub/protoprompt/actions/workflows/ci.yml/badge.svg)](https://github.com/EnergoAI-Hub/protoprompt/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/codecov/c/github/EnergoAI-Hub/protoprompt)](https://codecov.io/gh/EnergoAI-Hub/protoprompt)
+[![CI](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml/badge.svg)](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/codecov/c/github/Idxeed/protoprompt)](https://codecov.io/gh/Idxeed/protoprompt)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.ru.md)
@@ -138,8 +138,8 @@ asyncio.run(main())
 
 Полная документация собирается в двух языковых версиях:
 
-- 🇷🇺 Русская: <https://EnergoAI-Hub.github.io/protoprompt/ru/>
-- 🇬🇧 English: <https://EnergoAI-Hub.github.io/protoprompt/en/>
+- 🇷🇺 Русская: <https://idxeed.github.io/protoprompt/ru/>
+- 🇬🇧 English: <https://idxeed.github.io/protoprompt/en/>
 
 Локальная сборка:
 
@@ -151,7 +151,7 @@ python scripts/build_docs.py --serve  # обе версии на разных п
 ## Разработка
 
 ```bash
-git clone https://github.com/EnergoAI-Hub/protoprompt
+git clone https://github.com/Idxeed/protoprompt
 cd protoprompt
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[chroma,dev]"
