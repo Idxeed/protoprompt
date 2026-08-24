@@ -1,0 +1,46 @@
+name: Continuous Integration
+permissions: read-all
+
+on:
+  # No `branches:` filter: that matches the *base* branch, so restricting it to
+  # `main` silently skipped CI on every stacked pull request, whose base is the
+  # branch below it in the stack rather than `main`.
+  pull_request:
+
+concurrency:
+  # yamllint disable-line rule:line-length
+  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
+  cancel-in-progress: true
+
+jobs:
+  test:
+    timeout-minutes: 20
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        include:
+          - python: "3.10"
+            task: check
+          - python: "3.11"
+            task: check
+          - python: "3.12"
+            task: check
+          - python: "3.13"
+            task: check
+          - python: "3.14"
+            task: check
+          - python: "3.14"
+            task: lint
+          - python: "3.14"
+            task: mypy
+    steps:
+      - name: Checkout 🛎️
+        uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup uv 🔧
+        uses: astral-sh/setup-uv@v7
+
+      - name: Build 🔧 & Test 🔍
+        run: uv run --python ${{ matrix.python }} poe ${{ matrix.task }}

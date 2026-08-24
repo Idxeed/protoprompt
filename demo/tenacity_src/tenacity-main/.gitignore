@@ -1,0 +1,13 @@
+.idea
+dist
+*.pyc
+*.egg-info
+build
+.venv/
+uv.lock
+AUTHORS
+ChangeLog
+doc/_build
+
+tenacity/_version.py
+/.pytest_cache
