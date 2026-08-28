@@ -1,275 +1,263 @@
-# Роадмапа: движок профиля + секреты
+# Roadmap protoprompt
 
-> Зафиксировано. Версия плана: v2. Статус решений — см. раздел 5.
+> Реализация кандидата `0.6.0` после публичного релиза `0.3.0`.
+> Кандидат ещё не опубликован. Обновлён: 2026-08-28.
+> Полная карта кандидатов и критерии интеграций находятся в
+> [INTEGRATIONS.md](INTEGRATIONS.md).
 
-## 0. Принцип (три сущности в конфликте)
+## Видение
 
-Три независимых «голоса», каждый со своим жизненным циклом, и **ни один не может
-молча протащить своё в другой**:
+`protoprompt` остаётся небольшим независимым движком контекста и памяти.
+Следующий цикл расширяет не число внутренних алгоритмов, а количество мест,
+где существующие RAG, session memory, profile, token budget и provenance можно
+использовать без переписывания приложения.
 
-| Сущность         | Что хранит                  | Жизненный цикл           | Как попадает в модель       |
-|------------------|-----------------------------|--------------------------|-----------------------------|
-| **ContextBuilder** | сборка на вызов           | stateless                | напрямую в промпт           |
-| **ProfileEngine**  | долговечные факты о юзере | stateful, merge + версии | рендер в `system_prompt`    |
-| **SecretVault**    | credentials               | stateful, TTL + rotation | **никогда** — только guarded-tool |
+Главный пользовательский тест roadmap:
 
-Правила неразмыкаемости:
+> Разработчик существующего бота или агента подключает protoprompt за один
+> вечер, видит, что именно было вспомнено и почему, и может заменить локальное
+> хранилище production-backend без изменения логики памяти.
 
-- секрет никогда не эмбеддится и не живёт в `StoreProtocol`;
-- профиль хранит только **факт наличия** секрета (`secret_ref`), значение — в вольте;
-- контекст не знает про вольт, вольт не знает про контекст.
+## Текущее состояние
 
-## 1. Целевая архитектура
+- `0.3.0` опубликован в PyPI, `0.6.0` собран как непубличный кандидат;
+- core не имеет обязательных сторонних зависимостей;
+- release gates `0.4.0`–`0.6.0` реализованы и локально проверены;
+- CI покрывает Python 3.11–3.13, wheel, интеграционный контур и RU/EN docs;
+- готовы RAG, session compression, profile engine, token budget, provenance,
+  runtime bridges, production backends, providers, readers и cloud secrets;
+- `pp-agent` остаётся экспериментальным потребителем core API.
 
-```
-сигналы (message / tool_result / feedback / ...)
-        │
-        v
-+-------------------+     +-------------------+
-|  ProfileEngine    |     |  SecretVault      |
-| Signal → extract  |     | SecretStore       |
-| → FactOp merge    |     |  ├ KeyProvider    |
-| → ProfileStore    |     |  └ Cipher (Fernet)|
-+--------+----------+     +---------+---------+
-         |                          |
-         v                          v
-   ProfileRenderer           GuardedTool (агент просит
-         │                   ключ под 1 действие)
-         v
-+-------------------+
-|  ContextBuilder   |  ←— system_prompt
-+-------------------+
+Завершённый roadmap профиля, secrets и RAG сохранён в истории Git:
+<https://github.com/Idxeed/protoprompt/blob/v0.3.0/ROADMAP.md>.
 
-общие примитивы: MemoryLifecycle (scorer/eviction/summary) —
-  переиспользуются ProfileEngine и agent.WorkingMemory
-```
+## Принципы очереди
 
-## 2. Подсистема A — профиль (кросс-сессионный движок)
+1. Сначала стабильный контракт, потом adapters.
+2. Один стандартный bridge ценнее пяти provider-specific wrappers.
+3. Core остаётся dependency-free; всё внешнее — extras + lazy imports.
+4. Каждый milestone заканчивается runnable use case, а не только API.
+5. Интеграция без contract tests и владельца не считается поддерживаемой.
+6. Alpha breaking change допустим только с явной выгодой и migration path.
 
-### 2.1 Модель данных — `profile/types.py`
+## 0.3.x — стабилизация
 
-```python
-@dataclass
-class Traits:
-    style: str = ""          # concise | balanced | detailed
-    expertise: str = ""      # beginner | intermediate | expert
-    verbosity: str = ""      # concise | balanced | detailed
-    formality: str = ""      # casual | neutral | formal
+Цель: собрать реальные сигналы после первого крупного публичного релиза.
 
-@dataclass
-class Preferences:
-    format: str = ""         # bullets | narrative | code_heavy | mixed
-    language: str = ""       # ru | en | ...
-    topics: list[str] = field(default_factory=list)
+- [ ] завести issue templates для bug/integration request;
+- [ ] добавить compatibility smoke test минимальных версий extras;
+- [ ] исправлять только release blockers и документацию;
+- [ ] не добавлять новые абстракции в `0.3.x`;
+- [ ] собрать минимум три внешних сценария использования или интервью.
 
-@dataclass
-class UserProfile:
-    user_id: str
-    traits: Traits = field(default_factory=Traits)
-    preferences: Preferences = field(default_factory=Preferences)
-    facts: dict[str, str] = field(default_factory=dict)  # открытый набор: name, role, tech_stack
-    summary: str = ""
-    updated_at: str = ""     # ISO-8601
-    version: int = 0         # монотонный, +1 на каждый merge
-    source: str = ""
-```
+Выход: известные дефекты `0.3` закрыты, API-разрез `0.4` подтверждён примерами.
 
-```python
-@dataclass
-class Signal:
-    user_id: str
-    kind: str                # message | tool_result | feedback | ...
-    text: str
-    role: str = ""
-    ts: str = ""
-    meta: dict = field(default_factory=dict)
+## 0.4.0 — Integration Foundation
 
-@dataclass
-class FactOp:
-    op: str                  # add | update | forget
-    key: str
-    value: str = ""
+Цель: подготовить честные узкие контракты для внешних экосистем.
 
-@dataclass
-class ProfileDelta:
-    fact_ops: list[FactOp] = field(default_factory=list)
-    traits: dict[str, str] = field(default_factory=dict)
-    preferences: dict[str, str] = field(default_factory=dict)
-    summary: str = ""
-    source: str = ""
-```
+### F1. Разделение model capabilities
 
-Ключевое отличие от старого `ProfileBuilder`: вместо «модель переписала summary» —
-**явные операции памяти** `add/update/forget` над именованными фактами. Это даёт
-детерминированный merge, UI provenance и задел под decay.
+- [x] `ChatClientProtocol`;
+- [x] `EmbeddingClientProtocol`;
+- [x] совместимый composite `LLMClientProtocol`;
+- [x] builders принимают минимально необходимую capability;
+- [x] embedding-only clients больше не содержат fake `chat()`;
+- [x] migration guide для пользовательских clients.
 
-### 2.2 Контракты
+### F2. Scope и namespace
 
-```python
-# profile/source.py
-class ProfileProtocol(Protocol):
-    async def extract(self, user_id: str, signals: list[Signal]) -> ProfileDelta: ...
-# LLMProfileSource(llm, language="ru", max_signals=20)  — retry при битом JSON
-# RuleProfileSource()                                   — детерминированный, без LLM
-# CompositeProfileSource(sources, conflict="first_nonempty")
+- [x] `MemoryScope(tenant, user, thread, kind)`;
+- [x] единое отображение scope в metadata;
+- [x] тесты изоляции и удаления;
+- [x] host-controlled scope для model-facing adapters.
 
-# profile/codec.py
-def parse_profile_json(text: str) -> dict[str, Any]      # fenced JSON, первый {...}, типы
-def coerce_profile(raw: dict) -> ProfileDelta            # enum RU→EN, отброс мусора
+### F3. Adapter contract kit
 
-# profile/merge.py
-def merge(profile: UserProfile, delta: ProfileDelta, *, now: str) -> UserProfile
-#   fact_ops применяются к facts (forget → удалить); traits/preferences non-empty wins;
-#   summary non-empty перезаписывает; version += 1; updated_at = now; source = delta.source
+- [x] reusable tests для chat, embeddings, vector/profile/secret stores;
+- [x] проверки sync/async semantics;
+- [x] проверки lazy import и missing-extra errors;
+- [x] contributor guide «как добавить интеграцию».
 
-# profile/store.py + profile/async_store.py
-class ProfileStore(Protocol):
-    def get(self, user_id) -> UserProfile | None: ...
-    def put(self, profile) -> None: ...
-    def delete(self, user_id) -> None: ...
-# InMemoryProfileStore / SqliteProfileStore(user_id PK, json, updated_at, version)
-# AsyncProfileStore + as_async_profile()
+### F4. Typed observability events
 
-# profile/manager.py
-class ProfileManager:
-    async def update(self, user_id, signals) -> UserProfile  # get→extract→coerce→merge→put
-    async def get(self, user_id) -> UserProfile | None
-    async def reset(self, user_id) -> UserProfile            # fresh с нуля
-    async def delete(self, user_id) -> None
+- [x] события context/retrieve/compress/profile/recall/evict/cache;
+- [x] существующие hooks работают поверх нового слоя;
+- [x] redaction policy по умолчанию;
+- [x] trace/scope correlation без хранения содержимого.
 
-# profile/render.py
-def render(profile, *, language="ru") -> str                 # единый заголовок секции
-```
+**Release gate:** полный текущий test suite зелёный; публичные символы `0.3`
+работают с deprecation path; docs RU/EN и wheel smoke обновлены.
 
-## 3. Подсистема B — секреты (credentials только)
+## 0.4.1 — Connectivity
 
-### 3.1 Контракты
+Цель: подключить protoprompt к трём главным входным экосистемам и показать
+понятный продуктовый сценарий.
 
-```python
-# secrets/key.py
-class KeyProvider(Protocol):
-    def get(self) -> bytes: ...
-    def rotate(self, new: bytes) -> None: ...
+### C1. MCP
 
-class KeyringKeyProvider: ...   # default: OS-keystore (Windows DPAPI / macOS Keychain / Linux Secret Service)
-class EnvKeyProvider: ...       # CI / docker
-class FileKeyProvider: ...      # self-managed, chmod 600 / ACL
-# будущее: TPMProvider, SecureEnclaveProvider, VaultProvider
+- [x] `protoprompt[mcp]`;
+- [x] tools `remember/search/forget/profile/explain/budget_report`;
+- [x] read-only resources profile/manifest/last-report;
+- [x] stdio + Streamable HTTP;
+- [x] scope injection со стороны host;
+- [x] in-process tests официального MCP client/server.
 
-# secrets/store.py
-class SecretStore(Protocol):
-    def get(self, key: str, *, scope: str) -> str | None: ...
-    def put(self, key: str, value: str, *, scope: str, ttl: int | None = None) -> None: ...
-    def delete(self, key: str, *, scope: str) -> None: ...
-    def list_keys(self, *, scope: str) -> list[str]: ...
+### C2. OpenAI Agents SDK
 
-class EncryptedSqliteSecretStore(SecretStore):
-    # Fernet, каждый секрет — отдельный токен (своя TTL, своя ротация)
-```
+- [x] `ProtoPromptSession`;
+- [x] session input callback для budgeted context;
+- [x] сохранение `pop_item`/clear semantics;
+- [x] пример plain session vs protoprompt recall.
 
-### 3.2 Ключевые решения
+### C3. LangGraph
 
-- **Cipher:** `cryptography.Fernet` — authenticated, встроенный timestamp → **нативная TTL**,
-  без возни с IV.
-- **KEK:** `keyring` по умолчанию — при первом запуске генерим случайный 32-байтный ключ
-  в OS-keystore, **юзер не знает пароль**, безопасность даёт ОС.
-- **Scope:** строка `f"{user_id}:{project}"`, точное совпадение, без wildcard в v1.
-  `DEFAULT_SCOPE = "default"`. Агент сессии `X` не видит секреты сессии `Y` — заложено с
-  первого дня.
+- [x] store adapter;
+- [x] готовый `build_context` node;
+- [x] sync/async graph tests;
+- [x] пример thread memory + cross-thread profile.
 
-### 3.3 Guarded-tool (как агент получает секрет)
+### C4. Telegram memory bot
 
-```python
-# secrets/guard.py — НЕ часть SecretStore, а шов к агенту
-class SecretAccess:
-    def __init__(self, store, *, scope, operations): ...
-    async def execute(self, key: str, operation: str, **kwargs): ...
-    # credential получает только заранее зарегистрированный trusted callback;
-    # агенту возвращается результат операции, значение не попадает в tool result
-```
+- [x] runnable aiogram 3 application;
+- [x] SQLite default, OpenAI/Ollama switch;
+- [x] `/memory`, `/why`, `/forget`;
+- [x] synthetic long-dialog scenario;
+- [x] воспроизводимое сравнение FIFO/LRU;
+- [x] короткое видео/GIF для README и релизного поста.
 
-Доступ только через явный вызов, никогда через RAG/embedding/промпт.
+**Release gate:** новый пользователь поднимает Telegram demo по инструкции в
+чистом окружении; MCP Inspector видит tools/resources; оба framework adapters
+проходят upstream-compatible contract tests.
 
-## 4. Фазы работ
+## 0.4.2 — Production Backends
 
-### A. Профиль-движок
+Цель: убрать локальную SQLite как обязательный предел production-сценариев.
 
-| Фаза | Что делаем | Edge cases | Приёмка |
-|------|-----------|-----------|---------|
-| **A0** | `types.py` (Traits/Preferences/UserProfile/Signal/FactOp/ProfileDelta); `schema.py` → `schema.json` + loader; `codec.py` | fenced JSON, JSON в тексте, `null`/неверные типы, RU/EN enum, пустой ответ | `test_codec.py`: таблица вход→дельта |
-| **A1** | `source.py`: `ProfileProtocol`, `LLMProfileSource` (+retry→fallback), `RuleProfileSource`, `CompositeProfileSource` | битый JSON → 1 retry → RuleSource; пустая дельта | `test_source.py` |
-| **A2** | `merge.py`: FactOp-применение, non-empty wins, `version+=1`, `updated_at` | forget несуществующего факта; topics без дублей; пустая дельта не меняет `version` | `test_merge.py` |
-| **A3** | `store.py` + `async_store.py`: `InMemoryProfileStore`, `SqliteProfileStore`, `as_async_profile` | апсёрт, удаление, async не блокирует loop | `test_profile_store.py` |
-| **A4** | `manager.py`: `update/get/reset/delete` | первый update создаёт; второй сливает; сбой LLM → профиль не теряется; reset обнуляет version | `test_manager.py` |
-| **A5** | `render.py` + `ContextInput.profile: UserProfile \| None`; вынести хардкод `"Профиль пользователя:\n"` из `injector.py:78` и `injector_budgeted.py:104`; i18n секций (профиль + `"История диалога"`) | приоритет `profile` > `profile_text`; EN-локаль | `test_integration.py` |
-| **A6** | депрекация: `ProfileBuilder` → алиас с `DeprecationWarning`; обновить `__init__.py`, README, docs, demo | старые вызовы не падают | smoke-тест |
+### P1. PostgreSQL/pgvector
 
-### B. Вольт секретов
+- [x] `PgVectorStore`;
+- [x] async-first implementation;
+- [x] metadata filters и score threshold;
+- [x] explicit migrations/setup;
+- [x] `PostgresProfileStore` с optimistic locking;
+- [x] Docker integration tests.
 
-| Фаза | Что делаем | Edge cases | Приёмка |
-|------|-----------|-----------|---------|
-| **B7** | `secrets/key.py`: `KeyProvider`, `KeyringKeyProvider`, `EnvKeyProvider`, `FileKeyProvider` | нет keyring (headless) → fallback env/file; ключ создаётся один раз | `test_key_provider.py` |
-| **B8** | `secrets/store.py`: `EncryptedSqliteSecretStore` (Fernet, поштучно, scope, TTL) | TTL-протухание; scope-изоляция (`X` не читает `Y`); ротация ключа через `MultiFernet` | `test_secret_store.py` |
-| **B9** | `secrets/guard.py`: `SecretAccess.execute()` с host-registered operations; **никогда не логировать/возвращать credential агенту** | injection-сценарий: модель просит чужой scope или незарегистрированную операцию → отказ | `test_secret_guard.py` |
+### P2. OpenTelemetry
 
-### C. Общее
+- [x] OTEL spans для typed events;
+- [x] безопасные default attributes;
+- [x] пример Langfuse/Jaeger collector;
+- [x] latency/token/eviction dashboard recipe.
 
-| Фаза | Что делаем |
-|------|-----------|
-| **C10** | (опц.) рефакторинг `MemoryLifecycle`: вынести scorer/eviction/summary в общий слой, переиспользовать в `agent.WorkingMemory` и будущем decay профиля. Не блокирует A/B. |
-| **C11** | docs RU/EN, CHANGELOG, `examples/profile.py` + `examples/secrets.py`, полный прогон pytest/coverage |
+### P3. Redis
 
-## 5. Решения
+- [x] vector store либо решение оставить vector retrieval Postgres;
+- [x] embedding cache с TTL;
+- [x] ephemeral session/profile adapter;
+- [x] concurrency и reconnect tests.
 
-| # | Решение | Статус |
-|---|---------|--------|
-| D1 | Типизированные `Traits`/`Preferences` + открытый `facts` | утверждено |
-| D2 | `summary` перезаписывается non-empty, регенерация — опция позже | утверждено |
-| D3 | Конфликт traits: newest-wins, без confidence в v1 | утверждено |
-| D4 | Decay/aging — out of scope v1 (версионирование готово) | утверждено |
-| D5 | `schema.json` + тонкий loader `schema.py` | утверждено |
-| D6 | Имя оркестратора `ProfileManager`; `ProfileBuilder` → алиас | утверждено |
-| D7 | Scope = `f"{user_id}:{project}"`, точное совпадение, `DEFAULT_SCOPE` | утверждено |
-| D8 | Мастер-ключ: `keyring` (default) + `Fernet`; TPM/KMS — будущие адаптеры | утверждено |
-| D9 | Факты как явные `FactOp add/update/forget` вместо freeform summary | утверждено |
+**Release gate:** Postgres survives restart/concurrent updates; migrations
+отделены от startup; telemetry не экспортирует content/secrets по умолчанию.
 
-## 6. Риски
+## 0.5.0 — Providers and Frameworks
 
-- **Breaking change** на `UserProfile` (dict → typed + facts) — гасится фазой A6.
-- **Retry удваивает LLM-затраты** — только при битом JSON.
-- **Scope слишком грубый** — если позже нужен wildcard/наследование, меняем `SecretStore` за
-  `SecretAccess`, не за вольт.
-- **Слияние ProfileEngine и WorkingMemory** — отложить до C10, иначе размазываем скоуп.
+Цель: покрыть native APIs, которые generic OpenAI-compatible client не
+представляет честно.
 
-## 7. Definition of done
+- [x] Anthropic chat client;
+- [x] Google GenAI chat + embeddings;
+- [x] Amazon Bedrock Converse client;
+- [x] provider-aware token counters;
+- [x] PydanticAI adapter;
+- [x] LlamaIndex bridge;
+- [x] Google ADK spike и решение о поддержке;
+- [x] provider conformance matrix в документации.
 
-- [x] `ProfileEngine`: signals → FactOp → merge → `ProfileStore` → render → `ContextInput.profile`
-- [x] `SecretVault`: `KeyProvider` + Fernet + scope + TTL + guarded-tool, ноль автоматических утечек в логи/промпт/эмбеддинги
-- [x] депрекация `ProfileBuilder` без поломки существующих вызовов
-- [x] i18n секций, схема согласована с промптом
-- [x] тесты всех фаз, docs RU/EN, CHANGELOG, примеры
+Native adapter не принимается, если он лишь переименовывает параметры
+существующего compatible client и не добавляет auth/capability/semantics.
 
----
+## 0.6.0 — Data and Enterprise
 
-# Роадмапа v3: RAG-движок
+Цель: подключить существующие данные и инфраструктурные сервисы.
 
-## Решения (подтверждены)
+- [x] text/Markdown/source readers;
+- [x] optional PDF/DOCX/HTML readers;
+- [x] LlamaIndex/Unstructured document converters;
+- [x] Elasticsearch/OpenSearch adapter;
+- [x] минимум два cloud secret stores: AWS Secrets Manager и GCP Secret Manager;
+- [x] FastAPI service recipe;
+- [x] Slack/Discord gate рассмотрен: example не добавлен без подтверждённого спроса.
 
-- **R1.** Полный скоуп: загрузка (чанкер + индекс) + поиск.
-- **R2.** Структурные чанки: \RetrievedChunk\ (doc_id, index, text, score).
-- **R3.** Режимы поиска: \doc_ids\ (фильтр) И \None\ (весь стор).
-- **R4.** Rerank в скоупе: \RerankerProtocol\ + \NoOpReranker\ (default) + \LLMReranker\.
-- **R5.** Namespace: \kind\-метка в metadata (\document\ / \session\), поиск по всему стору фильтрует \kind=document\.
-- **R6.** Чанкеры: \FixedSizeChunker\, \ParagraphChunker\, \TokenChunker\.
+URL/cloud readers проходят отдельный security review: SSRF, размер, MIME,
+архивные бомбы и provenance источника.
 
-## Фазы
+## Research backlog — без обещания версии
 
-| Фаза | Что |
-|------|-----|
-| R0 | types (Document, RetrievedChunk) + тесты |
-| R1 | chunker.py (ChunkerProtocol + 3 реализации) + тесты |
-| R2 | indexer.py (DocumentIndexer: chunk → embed → index, kind=document) + тесты |
-| R3 | reranker.py (NoOp + LLMReranker) + тесты |
-| R4 | retriever.py (query + score_threshold + doc_ids/search-all + rerank + provenance) + тесты |
-| R5 | интеграция: ContextInput(doc_ids=None, score_threshold), ContextOutput.rag_chunks, builders на Retriever, Pipeline → kind=session + тесты |
-| R6 | docs RU/EN, CHANGELOG, examples/rag.py, полный pytest/coverage |
+- hybrid sparse+dense retrieval;
+- reranker adapters Cohere/Voyage;
+- Milvus, Weaviate, Pinecone, MongoDB Atlas;
+- Haystack, CrewAI, Semantic Kernel, AutoGen;
+- Dapr state store;
+- OpenInference/Phoenix, Ragas, Promptfoo;
+- multimodal context blocks;
+- streaming model responses;
+- background memory consolidation;
+- memory checkpoints/rollback и quarantine для untrusted signals;
+- portable benchmark suite для long-dialog и coding-agent memory.
+
+Элемент переходит из backlog в milestone только по критериям из
+[карты интеграций](INTEGRATIONS.md#15-пересмотр-приоритетов).
+
+## Сквозные критерии готовности
+
+Для каждого релиза:
+
+- [x] core остаётся без обязательных third-party dependencies;
+- [x] Python 3.11–3.13 проходит CI;
+- [x] deterministic tests не требуют сети или cloud credentials;
+- [x] live tests opt-in и имеют таймауты;
+- [x] wheel/sdist, extras metadata и lazy imports проверены;
+- [x] RU/EN docs собираются в strict mode;
+- [x] migration и rollback описаны;
+- [x] privacy/redaction defaults проверены тестами;
+- [x] changelog и runnable example обновлены;
+- [x] интеграция имеет maintainer/deprecation path.
+
+Проверка release candidate `0.6.0` от 2026-08-28:
+
+- exact CI extras (`chroma,qdrant,dev`) и deterministic suite: `394 passed` на
+  Python 3.11, 3.12 и 3.13; внешние sockets запрещены через `pytest-socket`;
+- coverage на Python 3.12: `87.8%`; agent CLI: `188 passed`;
+- live PostgreSQL/pgvector, Redis, Elasticsearch 9, OpenSearch 3 и локальный
+  Chroma: `10 passed`; AWS/GCP live contracts остаются opt-in и требуют
+  тестовых cloud credentials;
+- wheel/sdist прошли `twine check`, isolated zero-dependency import и проверку
+  28 extras/66 optional requirements; sdist содержит deployment/docs assets;
+- RU/EN MkDocs прошли strict build; восемь offline examples и FastAPI HTTP
+  lifecycle выполнены; Kubernetes manifest принят API server minikube в
+  `--dry-run=server`.
+
+## Риски roadmap
+
+| Риск | Контроль |
+|---|---|
+| framework APIs быстро меняются | узкие adapters, version matrix, contract tests |
+| optional dependencies конфликтуют | изолированные extras, нет `all` extra |
+| core превращается в orchestrator | жёсткие non-goals в `INTEGRATIONS.md` |
+| слишком широкий `0.4` | foundation/connectivity/production релизы |
+| provider wrappers не дают ценности | adapter только при уникальной семантике |
+| telemetry раскрывает данные | deny-by-default export и redaction tests |
+| scope ломает multi-tenancy | host-controlled namespace + isolation tests |
+| roadmap снова устаревает | пересмотр после каждого minor release |
+
+## Ближайший implementation slice
+
+Первый PR после утверждения roadmap:
+
+1. split `ChatClientProtocol` / `EmbeddingClientProtocol`;
+2. migration существующих clients без удаления `LLMClientProtocol`;
+3. adapter contract test kit;
+4. минимальный MCP vertical slice: `memory_search` + `last-report` resource.
+
+Это проверит новый архитектурный шов до массового добавления integrations.

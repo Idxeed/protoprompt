@@ -1,77 +1,62 @@
-# protoprompt 0.3.0
+# protoprompt 0.6.0
 
-The context-platform release: production-ready RAG primitives, durable user
-profiles, scoped encrypted secrets, and an experimental coding-agent CLI.
-
-This is the first PyPI release since `0.1.0`, so it also includes the async
-stores, integrations, token-budget improvements, SQLite backend, embedding
-cache, and observability hooks developed for `0.2.0`.
+The integration-platform release. It keeps the dependency-free 0.3 core and
+adds host-controlled memory scopes, production backends, agent/framework bridges,
+native model providers, safe document ingestion, and deployable service recipes.
 
 ## Highlights
 
-- **RAG engine** — document chunking and indexing, scoped top-k retrieval,
-  similarity thresholds, structured provenance, and optional LLM reranking.
-- **Cross-session user profiles** — rule-based, LLM-based, or composite
-  extraction; typed profile deltas; deterministic merge; SQLite persistence;
-  and optimistic version checks for concurrent updates.
-- **Encrypted secret vault** — per-entry Fernet encryption, scope isolation,
-  TTL, recoverable key rotation, and host-controlled operations that keep raw
-  credentials outside model-visible results.
-- **Hard token budgets** — the final assembled context, including headers and
-  separators, is guaranteed not to exceed the configured limit.
-- **Persistent and async storage** — zero-dependency `SqliteStore`, async store
-  protocols, and thread-offloaded wrappers for blocking backends.
-- **LLM and vector integrations** — OpenAI, Ollama, OpenAI-compatible HTTP,
-  Qdrant, sentence-transformers, and FastEmbed adapters.
-- **Memory and observability** — session compression, significance scoring,
-  embedding cache, and non-fatal context/pipeline hooks.
-- **Experimental `pp-agent` CLI** — resumable sessions, hot/cold working
-  memory, plan mode, project manifests, and permission-gated tools.
+- **One memory layer across runtimes** — MCP 2.x, OpenAI Agents, LangGraph,
+  PydanticAI, LlamaIndex, aiogram, and FastAPI use the same scope-pinned
+  `MemoryService` semantics.
+- **Production persistence** — PostgreSQL/pgvector, Redis cache/session/profile,
+  Elasticsearch 9, and OpenSearch 3 adapters with explicit setup, contracts,
+  concurrency/reconnect coverage, and opt-in live tests.
+- **Native providers** — Anthropic Messages, Google GenAI/Vertex, and Amazon
+  Bedrock Converse with capability-specific clients and provider token counting.
+- **Safe data ingestion** — bounded text/source/HTML/PDF/DOCX readers, trusted
+  provenance, and dependency-free LlamaIndex/Unstructured converters.
+- **Enterprise credentials** — AWS and GCP managed secret stores preserve scope,
+  TTL, and deletion semantics while keeping plaintext identifiers out of cloud
+  resource names.
+- **Observable by default, private by default** — typed OpenTelemetry-ready events
+  carry trace/scope metrics while recursively redacting content.
+- **Runnable delivery path** — Telegram demo, FastAPI service, Dockerfile,
+  Kubernetes/minikube manifest, and RU/EN operational guides.
 
-## Install
+## Upgrade
 
 ```bash
 pip install --upgrade protoprompt
 
-# Pick only the integrations you need
-pip install "protoprompt[openai,tiktoken]"
-pip install "protoprompt[ollama]"
-pip install "protoprompt[chroma]"
-pip install "protoprompt[qdrant]"
-pip install "protoprompt[local]"
-pip install "protoprompt[fastembed]"
-pip install "protoprompt[secrets]"
+# Install only the integrations you use, for example:
+pip install "protoprompt[mcp,postgres,otel]"
+pip install "protoprompt[anthropic,pydanticai]"
+pip install "protoprompt[documents,elasticsearch,fastapi]"
+pip install "protoprompt[aws-secrets]"  # or gcp-secrets
 ```
 
-Python 3.11–3.13 is covered by the CI matrix. The core package still has no
-mandatory third-party dependencies.
+Existing `LLMClientProtocol` implementations and unscoped 0.3 stores keep working.
+New code can provide separate chat/embedding clients and migrate one tenant at a
+time with `MemoryScope`. Constructors never create remote schemas implicitly;
+run the documented `setup()`/migration step before switching traffic.
 
-## Upgrade notes
+The optional ChromaDB range is now `>=1.5,<2`; the `ChromaStore` API and its
+persistent-directory constructor remain unchanged. Back up an existing Chroma
+directory before opening it with the newer engine.
 
-- `ContextInput.doc_ids=None` searches all indexed documents; `doc_ids=[]`
-  intentionally searches none.
-- `ContextOutput.rag_chunks` now exposes document id, chunk index, score, and
-  metadata alongside the backwards-compatible `rag_blocks` list.
-- `ProfileBuilder` is deprecated in favor of `ProfileManager` with
-  `LLMProfileSource`, `RuleProfileSource`, or `CompositeProfileSource`.
-- Agent-facing code should use registered `SecretAccess.execute()` operations.
-  Direct `SecretAccess.grant()` access remains available for trusted hosts but
-  is deprecated for model-facing tools.
-- No public symbols were removed in this release.
+## Verification status
 
-## Verification
+- The socket-blocked deterministic suite passes 394 tests on each of Python
+  3.11, 3.12, and 3.13; Python 3.12 coverage is 87.8%.
+- Live PostgreSQL/pgvector, Redis, Elasticsearch 9, OpenSearch 3, and local
+  Chroma contracts pass 10 tests, including reconnect, TTL, filtering and
+  concurrency. AWS/GCP live contracts remain opt-in because they create billable
+  cloud resources and require dedicated test credentials.
+- The agent CLI passes 188 tests; eight offline examples and the authenticated
+  FastAPI lifecycle were executed successfully.
+- Wheel and sdist contents, 28 extras, zero-dependency isolated import, strict
+  RU/EN docs, and the minikube server-side deployment validation pass.
 
-- Core suite: 272 passed; one optional Chroma test skipped when the extra is
-  unavailable.
-- Agent CLI suite: 188 passed; 10 live-backend integration tests deselected.
-- Strict Russian and English documentation builds pass.
-- Wheel smoke test verifies the installed package outside the source checkout,
-  including the packaged profile JSON schema.
-- GitHub Actions covers Python 3.11, 3.12, and 3.13 and deploys the docs site.
-
-## Links
-
-- Documentation: https://idxeed.github.io/protoprompt/
-- Source: https://github.com/Idxeed/protoprompt
-- Changelog: https://github.com/Idxeed/protoprompt/blob/master/CHANGELOG.md
-- Issues: https://github.com/Idxeed/protoprompt/issues
+This file prepares the release only. No tag, PyPI upload, GitHub Release, cloud
+resource, or documentation deployment is created by the preparation itself.

@@ -61,5 +61,18 @@ nav:
       - User profile: profile.md
       - Secrets: secrets.md
   - Integrations: integrations.md
+  - MCP server: mcp.md
+  - OpenAI Agents SDK: openai-agents.md
+  - LangGraph: langgraph.md
+  - Telegram memory bot: telegram.md
+  - PostgreSQL and pgvector: postgres.md
+  - OpenTelemetry: opentelemetry.md
+  - Redis: redis.md
+  - Elasticsearch and OpenSearch: search.md
+  - FastAPI service: fastapi.md
+  - Local document readers: readers.md
+  - Providers and frameworks: providers-frameworks.md
+  - Migrating 0.3 → 0.4: migration-0.4.md
+  - Migrating 0.3 → 0.6: migration-0.6.md
   - Changelog: changelog.md
   - License: license.md

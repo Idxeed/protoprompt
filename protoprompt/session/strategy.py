@@ -3,14 +3,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Protocol
 
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import ChatClientProtocol
 from protoprompt.session.types import CompressedBlock, Session
 
 logger = logging.getLogger(__name__)
 
 
 class StrategyProtocol(Protocol):
-    async def compress(self, session: Session, llm: LLMClientProtocol) -> list[CompressedBlock]:
+    async def compress(self, session: Session, llm: ChatClientProtocol) -> list[CompressedBlock]:
         ...
 
 
@@ -44,7 +44,7 @@ class HeuristicStrategy:
             "решение", "итог", "вывод", "хочу", "хотел",
         )
 
-    async def compress(self, session: Session, llm: LLMClientProtocol) -> list[CompressedBlock]:
+    async def compress(self, session: Session, llm: ChatClientProtocol) -> list[CompressedBlock]:
         msgs = session.messages
         if len(msgs) < self._min_messages:
             return []
@@ -142,7 +142,7 @@ class LLMSummaryStrategy:
         self._max_tokens = max_tokens
         self._min_messages = min_messages
 
-    async def compress(self, session: Session, llm: LLMClientProtocol) -> list[CompressedBlock]:
+    async def compress(self, session: Session, llm: ChatClientProtocol) -> list[CompressedBlock]:
         msgs = session.messages
         if len(msgs) < self._min_messages:
             return await self._safe_fallback(session, llm)
@@ -171,7 +171,7 @@ class LLMSummaryStrategy:
         return blocks
 
     async def _safe_fallback(
-        self, session: Session, llm: LLMClientProtocol
+        self, session: Session, llm: ChatClientProtocol
     ) -> list[CompressedBlock]:
         try:
             return await self._fallback.compress(session, llm)
@@ -180,7 +180,7 @@ class LLMSummaryStrategy:
             return []
 
     async def _summarise_window(
-        self, llm: LLMClientProtocol, window: list[dict]
+        self, llm: ChatClientProtocol, window: list[dict]
     ) -> str:
         transcript = "\n".join(
             f"[{m['role']}]: {m['content']}" for m in window if "content" in m

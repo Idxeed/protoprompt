@@ -28,6 +28,9 @@ from protoprompt.secrets.store import (
     EncryptedSqliteSecretStore,
     SecretStore,
 )
+from protoprompt.integrations._cloud_secret import CloudSecretDataError
+from protoprompt.integrations.aws_secrets import AWSSecretsManagerStore
+from protoprompt.integrations.gcp_secrets import GCPSecretManagerStore
 
 __all__ = [
     "KeyProvider",
@@ -40,4 +43,7 @@ __all__ = [
     "DEFAULT_SCOPE",
     "SecretAccess",
     "SecretKeyError",
+    "CloudSecretDataError",
+    "AWSSecretsManagerStore",
+    "GCPSecretManagerStore",
 ]

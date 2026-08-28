@@ -8,12 +8,28 @@ their own public API as well, so both styles work:
 """
 
 from protoprompt.cache import (
+    AsyncEmbeddingCache,
     CachedLLMClient,
     EmbeddingCache,
     InMemoryEmbeddingCache,
 )
 from protoprompt.context import ContextInput, ContextOutput
+from protoprompt.connectivity import MemoryService
 from protoprompt.exceptions import TokenBudgetExceededError
+from protoprompt.events import (
+    DEFAULT_REDACTION_POLICY,
+    CacheEvent,
+    CompressEvent,
+    ContextEvent,
+    EventDispatcher,
+    EventSink,
+    EvictEvent,
+    ProfileEvent,
+    ProtoPromptEvent,
+    RecallEvent,
+    RedactionPolicy,
+    RetrieveEvent,
+)
 from protoprompt.hooks import ContextHooks, PipelineHooks
 from protoprompt.injector import ContextBuilder
 from protoprompt.injector_budgeted import (
@@ -21,7 +37,12 @@ from protoprompt.injector_budgeted import (
     BudgetReport,
     TokenBudgetedContextBuilder,
 )
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import (
+    ChatClientProtocol,
+    CompositeLLMClient,
+    EmbeddingClientProtocol,
+    LLMClientProtocol,
+)
 from protoprompt.pipeline import Pipeline
 from protoprompt.profile.builder import ProfileBuilder
 from protoprompt.profile.codec import (
@@ -51,6 +72,7 @@ from protoprompt.session.strategy import (
     StrategyProtocol,
 )
 from protoprompt.session.types import CompressedBlock, Session
+from protoprompt.scope import MemoryScope, scoped_doc_id, scoped_metadata
 from protoprompt.store.async_store import (
     AsyncInMemStore,
     AsyncStoreWrapper,
@@ -65,13 +87,14 @@ from protoprompt.store.sqlite import SqliteStore
 from protoprompt.tokens.protocol import TokenCounter
 from protoprompt.tokens.regex_counter import RegexTokenCounter
 
-__version__ = "0.3.0"
+__version__ = "0.6.0"
 
 __all__ = [
     "ContextBuilder",
     "TokenBudgetedContextBuilder",
     "ContextInput",
     "ContextOutput",
+    "MemoryService",
     "BudgetReport",
     "DEFAULT_PRIORITIES",
     "TokenBudgetExceededError",
@@ -106,10 +129,29 @@ __all__ = [
     "as_async",
     "TokenCounter",
     "RegexTokenCounter",
+    "ChatClientProtocol",
+    "EmbeddingClientProtocol",
     "LLMClientProtocol",
+    "CompositeLLMClient",
     "EmbeddingCache",
+    "AsyncEmbeddingCache",
     "InMemoryEmbeddingCache",
     "CachedLLMClient",
     "ContextHooks",
     "PipelineHooks",
+    "ProtoPromptEvent",
+    "ContextEvent",
+    "RetrieveEvent",
+    "CompressEvent",
+    "ProfileEvent",
+    "RecallEvent",
+    "EvictEvent",
+    "CacheEvent",
+    "EventSink",
+    "EventDispatcher",
+    "RedactionPolicy",
+    "DEFAULT_REDACTION_POLICY",
+    "MemoryScope",
+    "scoped_doc_id",
+    "scoped_metadata",
 ]

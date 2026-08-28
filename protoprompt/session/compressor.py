@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import ChatClientProtocol
 from protoprompt.session.strategy import HeuristicStrategy, StrategyProtocol
 from protoprompt.session.types import CompressedBlock, Session
 
@@ -13,5 +13,5 @@ class Compressor:
     def __init__(self, strategy: StrategyProtocol | None = None) -> None:
         self._strategy = strategy or HeuristicStrategy()
 
-    async def compress(self, session: Session, llm: LLMClientProtocol) -> list[CompressedBlock]:
+    async def compress(self, session: Session, llm: ChatClientProtocol) -> list[CompressedBlock]:
         return await self._strategy.compress(session, llm)

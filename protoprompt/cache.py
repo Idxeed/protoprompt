@@ -8,12 +8,16 @@ Repeated context builds re-embed the same query text over and over.
 from __future__ import annotations
 
 import hashlib
+import inspect
 from collections import OrderedDict
-from typing import Protocol
+from typing import Any, Protocol, runtime_checkable
 
+from protoprompt.events import CacheEvent, EventDispatcher, EventSink, dispatch, new_trace_id, scope_id
 from protoprompt.llm import LLMClientProtocol
+from protoprompt.scope import MemoryScope
 
 
+@runtime_checkable
 class EmbeddingCache(Protocol):
     """Minimal key/value contract; keys are opaque strings."""
 
@@ -21,6 +25,17 @@ class EmbeddingCache(Protocol):
         ...
 
     def put(self, key: str, vectors: list[list[float]]) -> None:
+        ...
+
+
+@runtime_checkable
+class AsyncEmbeddingCache(Protocol):
+    """Non-blocking embedding cache accepted by ``CachedLLMClient``."""
+
+    async def get(self, key: str) -> list[list[float]] | None:
+        ...
+
+    async def put(self, key: str, vectors: list[list[float]]) -> None:
         ...
 
 
@@ -63,13 +78,20 @@ class CachedLLMClient:
     def __init__(
         self,
         inner: LLMClientProtocol,
-        cache: EmbeddingCache | None = None,
+        cache: EmbeddingCache | AsyncEmbeddingCache | None = None,
+        *,
+        scope: MemoryScope | None = None,
+        event_sink: EventSink | EventDispatcher | None = None,
     ) -> None:
         self._inner = inner
-        self._cache: EmbeddingCache = cache or InMemoryEmbeddingCache()
+        self._cache: EmbeddingCache | AsyncEmbeddingCache = (
+            cache or InMemoryEmbeddingCache()
+        )
+        self._scope = scope
+        self._event_sink = event_sink
 
     @property
-    def cache(self) -> EmbeddingCache:
+    def cache(self) -> EmbeddingCache | AsyncEmbeddingCache:
         return self._cache
 
     @property
@@ -105,7 +127,7 @@ class CachedLLMClient:
         result: list[list[float] | None] = [None] * len(texts)
         missing: list[int] = []
         for i, text in enumerate(texts):
-            hit = self._cache.get(cache_key(model, text))
+            hit = await _await_cache(self._cache.get(cache_key(model, text)))
             if hit is not None:
                 result[i] = hit[0]
             else:
@@ -117,6 +139,24 @@ class CachedLLMClient:
             )
             for i, vector in zip(missing, vectors):
                 result[i] = vector
-                self._cache.put(cache_key(model, texts[i]), [vector])
+                await _await_cache(
+                    self._cache.put(cache_key(model, texts[i]), [vector])
+                )
+
+        dispatch(self._event_sink, CacheEvent(
+            action="lookup",
+            trace_id=new_trace_id(),
+            scope_id=scope_id(self._scope),
+            attributes={
+                "request_count": len(texts),
+                "hit_count": len(texts) - len(missing),
+                "miss_count": len(missing),
+                "model_selected": bool(model),
+            },
+        ))
 
         return [v for v in result if v is not None]
+
+
+async def _await_cache(value: Any) -> Any:
+    return await value if inspect.isawaitable(value) else value

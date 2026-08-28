@@ -9,6 +9,21 @@
 | `ollama_rag.py` | RAG через нативный OllamaClient | запущенный Ollama + `pip install "protoprompt[ollama]"` |
 | `openai_budgeted.py` | Токеновый бюджет, обрезка истории, `build_messages()` | `OPENAI_API_KEY` + `protoprompt[openai,tiktoken]` |
 | `local_embeddings.py` | Локальные эмбеддинги + персистентный SqliteStore | `protoprompt[local]` или `[fastembed]` |
+| `contract_kit.py` | Проверка собственного embedding/vector adapter | ничего — работает офлайн |
+| `mcp_memory_server.py` | Scoped MCP tools/resources через stdio или Streamable HTTP | `protoprompt[mcp]` |
+| `openai_agents_session.py` | Plain Agents history vs budgeted scoped recall | `protoprompt[agents]` |
+| `langgraph_memory.py` | Thread checkpointer + scoped cross-thread profile | `protoprompt[langgraph]` |
+| `telegram_memory_bot.py` | Persistent aiogram 3 bot, OpenAI/Ollama | `protoprompt[telegram,openai]` or `[telegram,ollama]` |
+| `telegram_long_dialog.py` | Deterministic FIFO/LRU vs semantic recall | nothing — works offline |
+| `otel_tracing.py` | Content-safe spans to an OTLP/Jaeger collector | `protoprompt[otel]` |
+| `secret_store.py` | Шифрованный scoped vault без утечки credentials | `protoprompt[secrets]` |
+| `provider_clients.py` | Native Anthropic / Google GenAI / Bedrock + exact token count | соответствующий provider extra и credentials |
+| `pydantic_ai_memory.py` | Настоящий PydanticAI Agent + scoped recall, офлайн | `protoprompt[pydanticai]` |
+| `llamaindex_memory.py` | Настоящий LlamaIndex Memory block + scoped recall, офлайн | `protoprompt[llamaindex]` |
+| `search_vector_store.py` | Один vector-store flow на Elasticsearch или OpenSearch | `protoprompt[elasticsearch]` или `[opensearch]` + сервер |
+| `cloud_secret_store.py` | Scoped AWS/GCP secret lifecycle без печати значения | `[aws-secrets]` или `[gcp-secrets]` + тестовый cloud account |
+| `fastapi_memory_service.py` | Authenticated HTTP memory API + lifespan | `protoprompt[fastapi]` |
+| `read_documents.py` | Bounded local text/PDF/DOCX/HTML ingestion + provenance | `protoprompt[documents]` для office/web formats |
 
 Быстрый старт без сети и ключей:
 

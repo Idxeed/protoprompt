@@ -7,6 +7,82 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-08-28
+
+### Added
+- Integration foundation:
+  - independent `ChatClientProtocol` and `EmbeddingClientProtocol` plus
+    backwards-compatible `LLMClientProtocol` and `CompositeLLMClient`;
+  - host-controlled `MemoryScope` with tenant/user/thread isolation across
+    builders, pipelines, retrieval, persistence, and adapters;
+  - dependency-free adapter contract kit in `protoprompt.testing`;
+  - typed, trace-correlated observability events with recursive default
+    redaction.
+- Connectivity adapters and examples for MCP 2.x (stdio and Streamable HTTP),
+  OpenAI Agents sessions, LangGraph stores/nodes, and an aiogram Telegram bot
+  with deterministic long-dialog comparison and a reproducible demo GIF.
+- Production backends:
+  - async `PgVectorStore` and optimistic-locking `PostgresProfileStore` with
+    explicit schema setup and Docker integration tests;
+  - Redis embedding cache, ephemeral session, and profile store with TTL,
+    reconnect, and concurrency coverage;
+  - OpenTelemetry event sink/runtime plus OTLP/Jaeger recipes.
+- Native provider clients for Anthropic Messages, Google GenAI/Vertex chat and
+  embeddings, and Amazon Bedrock Converse, including exact opt-in provider token
+  counting.
+- Native PydanticAI history processing and LlamaIndex memory block; documented
+  Google ADK spike and support decision.
+- Data and enterprise integrations:
+  - bounded local text/Markdown/source/HTML/PDF/DOCX readers with trusted
+    provenance and LlamaIndex/Unstructured converters;
+  - async Elasticsearch 9 and OpenSearch 3 vector stores with explicit mappings,
+    exact metadata filters, stable cosine thresholds, and live-test compose;
+  - scoped AWS Secrets Manager and GCP Secret Manager stores with opaque resource
+    names, TTL envelopes, provider-native encryption, and opt-in live contracts;
+  - authenticated FastAPI memory service recipe, Docker image, and single-replica
+    Kubernetes/minikube manifest.
+- RU/EN integration guides, migration/rollback notes, maintainer policy, runnable
+  examples, and optional dependency extras for every new adapter.
+
+### Changed
+- Updated the supported ChromaDB range to `>=1.5,<2`. The public
+  `ChromaStore` contract is unchanged, while the extra now installs supported
+  binary dependencies on Python 3.13 instead of building legacy
+  `chroma-hnswlib` from source.
+- Qdrant collection inspection now uses `get_collection()` with current client
+  releases. A dimension mismatch fails with an explicit migration error instead
+  of silently recreating and destroying the collection.
+- Builders and pipelines accept only the model capability they use while old
+  full clients remain valid without modification.
+- Scope metadata is deterministic and conflict-checked; an omitted/empty scope
+  preserves the 0.3 physical storage layout for staged migration.
+- Embedding-only clients no longer expose fake `chat()` methods.
+- `SecretAccess.execute()` remains the model-facing credential boundary; cloud
+  store names no longer expose plaintext tenant or key identifiers.
+
+### Fixed
+- PostgreSQL batch inserts now call psycopg 3 `executemany()` through an async
+  cursor instead of the connection object; Windows live tests use the selector
+  event loop required by psycopg.
+- Elasticsearch/OpenSearch adapters now await decorator-wrapped async SDK
+  methods, instead of mistaking their coroutine objects for successful results.
+- Source distributions now include deployment recipes, integration governance,
+  migration guides, and Telegram release media.
+
+### Security
+- Typed telemetry denies prompt, document, profile, token, and secret content by
+  default.
+- Local readers reject URL/URI input, root escapes, unsupported/binary files,
+  DOCX external relationships, oversized archives/streams/pages/text, and
+  encrypted PDFs without an explicit password.
+- FastAPI requires host-provided authorization and scope resolution, rejects
+  model-controlled tenant fields, and verifies the service's pinned scope.
+
+### Compatibility
+- No public 0.3 symbols were removed. See the RU/EN 0.4 migration guide for the
+  capability and scope transition. Every server/cloud adapter documents a
+  versioned-index/store rollback path.
+
 ## [0.3.0] - 2026-08-28
 
 ### Added

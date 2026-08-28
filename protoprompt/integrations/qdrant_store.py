@@ -8,11 +8,8 @@ document upserts instead of duplicating.
 
 from __future__ import annotations
 
-import logging
 import uuid
 from typing import Any
-
-logger = logging.getLogger(__name__)
 
 _NAMESPACE = uuid.uuid5(uuid.NAMESPACE_URL, "protoprompt/qdrant")
 
@@ -63,20 +60,15 @@ class QdrantStore:
     def _ensure_collection(self, dim: int) -> None:
         from qdrant_client import models
 
-        existing = {c.name: c for c in self._client.get_collections().collections}
-        if self._collection in existing:
-            current = existing[self._collection].config.params.vectors
+        if self._client.collection_exists(self._collection):
+            info = self._client.get_collection(self._collection)
+            current = info.config.params.vectors
             current_dim = current.size if hasattr(current, "size") else None
             if current_dim != dim:
-                logger.warning(
-                    "Qdrant collection %r has dim %s, expected %s; recreating",
-                    self._collection, current_dim, dim,
-                )
-                self._client.recreate_collection(
-                    collection_name=self._collection,
-                    vectors_config=models.VectorParams(
-                        size=dim, distance=models.Distance.COSINE
-                    ),
+                raise ValueError(
+                    f"Qdrant collection {self._collection!r} has dimension "
+                    f"{current_dim}, expected {dim}; use a new collection name "
+                    "and migrate data explicitly"
                 )
             return
         self._client.create_collection(

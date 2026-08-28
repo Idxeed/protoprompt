@@ -4,7 +4,7 @@ import json
 import logging
 import warnings
 
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import ChatClientProtocol
 from protoprompt.profile.codec import coerce_topics
 from protoprompt.profile.types import Preferences, Traits, UserProfile
 
@@ -24,7 +24,7 @@ class ProfileBuilder:
         compatibility alias for now.
     """
 
-    def __init__(self, llm: LLMClientProtocol) -> None:
+    def __init__(self, llm: ChatClientProtocol) -> None:
         warnings.warn(
             "ProfileBuilder is deprecated; use ProfileManager with "
             "LLMProfileSource (or RuleProfileSource) for the cross-session "

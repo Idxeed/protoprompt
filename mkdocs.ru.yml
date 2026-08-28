@@ -71,5 +71,18 @@ nav:
       - Урок 4. Память код-агента: tutorials/04-coder-agent.md
       - Урок 5. Профиль пользователя: tutorials/05-user-profile.md
   - Интеграции: integrations.md
+  - MCP server: mcp.md
+  - OpenAI Agents SDK: openai-agents.md
+  - LangGraph: langgraph.md
+  - Telegram-бот с памятью: telegram.md
+  - PostgreSQL и pgvector: postgres.md
+  - OpenTelemetry: opentelemetry.md
+  - Redis: redis.md
+  - Elasticsearch и OpenSearch: search.md
+  - FastAPI service: fastapi.md
+  - Локальные document readers: readers.md
+  - Провайдеры и фреймворки: providers-frameworks.md
+  - Миграция 0.3 → 0.4: migration-0.4.md
+  - Миграция 0.3 → 0.6: migration-0.6.md
   - Changelog: changelog.md
   - License: license.md

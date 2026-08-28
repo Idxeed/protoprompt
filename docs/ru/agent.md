@@ -25,7 +25,7 @@
 ## Как использовать
 
 ```python
-from protoprompt import SqliteStore, RegexTokenCounter
+from protoprompt import MemoryScope, SqliteStore, RegexTokenCounter
 from protoprompt.agent import WorkingMemory
 from protoprompt.integrations import OllamaClient
 
@@ -36,6 +36,7 @@ mem = WorkingMemory(
     llm=llm,                             # нужен для эмбеддингов и цели
     counter=RegexTokenCounter(),
     max_tokens=2048,                     # бюджет горячей зоны
+    scope=MemoryScope(tenant="acme", user="u-42", kind="agent"),
 )
 
 await mem.set_goal("исправить падающий тест в retry.py")

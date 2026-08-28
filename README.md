@@ -10,10 +10,18 @@
 [Документация](https://idxeed.github.io/protoprompt/ru/) ·
 [English](README.en.md) ·
 [Примеры](examples/) ·
+[Каталог интеграций](INTEGRATIONS.md) ·
+[Roadmap](ROADMAP.md) ·
+[Как добавить интеграцию](CONTRIBUTING.md) ·
 [Changelog](CHANGELOG.md)
 
 > Проект находится в alpha-стадии. Публичный API уже покрыт тестами, но до
 > версии 1.0 возможны изменения контрактов.
+
+![Telegram-бот вспоминает старый факт и показывает provenance](docs/assets/telegram-memory.gif)
+
+Эталонный [Telegram-бот](docs/ru/telegram.md) сохраняет длинную память в
+SQLite, работает с OpenAI или Ollama и объясняет каждый recall через `/why`.
 
 ## Что решает protoprompt
 
@@ -32,9 +40,11 @@ LLM обычно нужна не просто история чата, а нес
 | Память сессии | эвристическое или LLM-сжатие длинных диалогов |
 | Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
 | Токен-бюджет | жёсткий лимит, приоритеты слоёв и отчёт об обрезке |
-| Хранилища | in-memory, SQLite, ChromaDB и Qdrant |
-| LLM и embeddings | OpenAI, Ollama, OpenAI-compatible HTTP и локальные модели |
-| Секреты | scoped vault с Fernet-шифрованием, TTL и ротацией ключа |
+| Хранилища | in-memory, SQLite, ChromaDB, Qdrant, pgvector, Elasticsearch/OpenSearch и Redis services |
+| LLM и embeddings | OpenAI, Anthropic, Google GenAI, Bedrock, Ollama и локальные модели |
+| Секреты | encrypted SQLite, AWS Secrets Manager и GCP Secret Manager |
+| Connectivity | MCP, OpenAI Agents SDK, LangGraph, PydanticAI, LlamaIndex, aiogram 3 и FastAPI |
+| Данные | bounded readers для text/source/HTML/PDF/DOCX и framework converters |
 
 Ядро не имеет обязательных сторонних зависимостей. Интеграции подключаются
 через extras и не импортируются, пока не понадобятся.
@@ -52,6 +62,19 @@ pip install "protoprompt[qdrant]"
 pip install "protoprompt[local]"       # sentence-transformers
 pip install "protoprompt[fastembed]"
 pip install "protoprompt[secrets]"
+pip install "protoprompt[mcp]"
+pip install "protoprompt[agents]"
+pip install "protoprompt[langgraph]"
+pip install "protoprompt[telegram,ollama]"
+pip install "protoprompt[anthropic]"
+pip install "protoprompt[google]"
+pip install "protoprompt[bedrock]"
+pip install "protoprompt[pydanticai]"
+pip install "protoprompt[llamaindex]"
+pip install "protoprompt[postgres,redis,otel]"
+pip install "protoprompt[elasticsearch]"  # или opensearch
+pip install "protoprompt[documents,fastapi]"
+pip install "protoprompt[aws-secrets]"    # или gcp-secrets
 ```
 
 Для работы из текущей ветки:
@@ -184,7 +207,7 @@ python -m venv .venv
 # Linux / macOS
 source .venv/bin/activate
 
-pip install -e ".[chroma,dev]"
+pip install -e ".[chroma,qdrant,dev]"
 pytest
 python scripts/build_docs.py --clean
 ```

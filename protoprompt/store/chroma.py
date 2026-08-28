@@ -7,7 +7,13 @@ logger = logging.getLogger(__name__)
 
 class ChromaStore:
     def __init__(self, collection_name: str = "protoprompt", persist_dir: str | None = None) -> None:
-        import chromadb
+        try:
+            import chromadb
+        except ImportError as exc:
+            raise ImportError(
+                "ChromaStore requires the 'chromadb' package. "
+                "Install with: pip install 'protoprompt[chroma]'"
+            ) from exc
         if persist_dir is None:
             self._client = chromadb.Client()
         else:

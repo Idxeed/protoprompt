@@ -1,8 +1,7 @@
 """Local embedding backends: sentence-transformers and fastembed.
 
-Both expose only ``embed()`` — there is no chat model behind them, so
-``chat()`` raises ``NotImplementedError``. Use them for RAG-only
-pipelines, or pair with any chat client via a small composite.
+Both implement only ``EmbeddingClientProtocol``. Pair one with an independent
+chat provider through ``CompositeLLMClient`` when both capabilities are needed.
 """
 
 from __future__ import annotations
@@ -15,17 +14,6 @@ class _EmbedOnlyClient:
 
     def __init__(self, batch_size: int = 32) -> None:
         self._batch_size = max(1, batch_size)
-
-    async def chat(
-        self,
-        messages: list[dict],
-        model: str = "",
-        **options: object,
-    ) -> str:
-        raise NotImplementedError(
-            f"{type(self).__name__} provides embeddings only; "
-            "pair it with a chat-capable client for LLM calls"
-        )
 
     async def embed(
         self, texts: list[str], model: str = ""

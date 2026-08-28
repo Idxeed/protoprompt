@@ -10,9 +10,10 @@ from __future__ import annotations
 
 from typing import Any
 
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import EmbeddingClientProtocol
 from protoprompt.rag.chunker import ChunkerProtocol, FixedSizeChunker
 from protoprompt.rag.types import Document
+from protoprompt.scope import MemoryScope, scoped_doc_id, scoped_metadata
 from protoprompt.store.protocol import StoreProtocol, await_if_needed
 
 DEFAULT_DOCUMENT_KIND = "document"
@@ -25,24 +26,27 @@ class DocumentIndexer:
         store: any ``StoreProtocol`` (sync or async).
         llm: embedding-capable client.
         chunker: splitting strategy (default :class:`FixedSizeChunker`).
-        embedding_model: model name passed to :meth:`LLMClientProtocol.embed`.
+        embedding_model: model name passed to :meth:`EmbeddingClientProtocol.embed`.
         kind: the metadata marker applied to every indexed chunk.
+        scope: optional host-controlled tenant/user/thread namespace.
     """
 
     def __init__(
         self,
         store: StoreProtocol,
-        llm: LLMClientProtocol,
+        llm: EmbeddingClientProtocol,
         *,
         chunker: ChunkerProtocol | None = None,
         embedding_model: str = "nomic-embed-text",
         kind: str = DEFAULT_DOCUMENT_KIND,
+        scope: MemoryScope | None = None,
     ) -> None:
         self._store = store
         self._llm = llm
         self._chunker = chunker or FixedSizeChunker()
         self._embedding_model = embedding_model
         self._kind = kind
+        self._scope = scope
 
     async def index(
         self,
@@ -60,9 +64,14 @@ class DocumentIndexer:
                 "embedding client returned "
                 f"{len(embeddings)} vectors for {len(chunks)} chunks"
             )
-        meta = dict(metadata or {})
+        meta = scoped_metadata(
+            self._scope,
+            metadata,
+            logical_doc_id=doc_id,
+        )
         meta["kind"] = self._kind
-        await await_if_needed(self._store.add(doc_id, chunks, embeddings, meta))
+        storage_id = scoped_doc_id(doc_id, self._scope)
+        await await_if_needed(self._store.add(storage_id, chunks, embeddings, meta))
         return len(chunks)
 
     async def index_documents(self, documents: list[Document]) -> dict[str, int]:

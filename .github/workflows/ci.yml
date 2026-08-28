@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, "codex/**"]
   pull_request:
     branches: [master]
 
@@ -10,6 +10,7 @@ jobs:
   test:
     name: pytest (${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -27,11 +28,15 @@ jobs:
       - name: Install package with extras
         run: |
           python -m pip install --upgrade pip
-          python -m pip install ".[chroma,dev]"
+          python -m pip install ".[chroma,qdrant,dev]"
 
       - name: Run tests with coverage
         run: |
-          pytest -m "not integration" --cov=protoprompt --cov-report=xml --cov-report=term
+          pytest -m "not integration" \
+            --disable-socket \
+            --allow-unix-socket \
+            --allow-hosts=127.0.0.1,::1,localhost \
+            --cov=protoprompt --cov-report=xml --cov-report=term
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12'
@@ -46,6 +51,33 @@ jobs:
   integration:
     name: integration tests (3.12)
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: protoprompt_test
+          POSTGRES_USER: protoprompt
+          POSTGRES_PASSWORD: protoprompt
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U protoprompt -d protoprompt_test"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+      redis:
+        image: redis:8.2-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 2s
+          --health-timeout 3s
+          --health-retries 30
+    env:
+      PROTOPROMPT_POSTGRES_DSN: postgresql://protoprompt:protoprompt@localhost:5432/protoprompt_test
+      PROTOPROMPT_REDIS_URL: redis://localhost:6379/15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -53,13 +85,14 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: python -m pip install --upgrade pip
-      - run: python -m pip install ".[chroma,dev]"
+      - run: python -m pip install ".[chroma,qdrant,dev]"
       - name: Run integration tests
         run: pytest -m integration -v
 
   lint:
     name: lint
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -73,25 +106,64 @@ jobs:
         run: python -c "import protoprompt; assert hasattr(protoprompt, '__version__')"
 
   package:
-    name: wheel smoke test
+    name: wheel + sdist smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
-      - run: python -m pip install --upgrade pip build
-      - name: Build wheel
-        run: python -m build --wheel --outdir dist-check
-      - name: Verify wheel contents
+      - run: python -m pip install --upgrade pip build twine
+      - name: Build and validate distributions
+        run: |
+          python -m build --sdist --wheel --outdir dist-check
+          python -m twine check dist-check/*
+      - name: Verify artifacts and extras metadata
         run: |
           python - <<'PY'
+          import email
           import glob
+          import tarfile
           import zipfile
 
           wheel = glob.glob("dist-check/*.whl")[0]
           with zipfile.ZipFile(wheel) as archive:
               assert "protoprompt/profile/schema.json" in archive.namelist()
+              metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
+              metadata = email.message_from_bytes(archive.read(metadata_name))
+              requirements = metadata.get_all("Requires-Dist") or []
+              assert all("extra ==" in requirement for requirement in requirements), requirements
+              extras = set(metadata.get_all("Provides-Extra") or [])
+              expected = {
+                  "mcp", "agents", "langgraph", "telegram", "postgres", "redis",
+                  "otel", "anthropic", "google", "bedrock", "pydanticai",
+                  "llamaindex", "documents", "elasticsearch", "opensearch",
+                  "aws-secrets", "gcp-secrets", "fastapi",
+              }
+              assert expected <= extras, expected - extras
+
+          sdist = glob.glob("dist-check/*.tar.gz")[0]
+          with tarfile.open(sdist) as archive:
+              names = set(archive.getnames())
+              root = next(name.split("/", 1)[0] for name in names if "/" in name)
+              expected = {
+                  "protoprompt/profile/schema.json",
+                  "pyproject.toml",
+                  "CONTRIBUTING.md",
+                  "INTEGRATIONS.md",
+                  "ROADMAP.md",
+                  "docker-compose.postgres.yml",
+                  "docker-compose.redis.yml",
+                  "docker-compose.search.yml",
+                  "docker-compose.observability.yml",
+                  "examples/fastapi/Dockerfile",
+                  "examples/fastapi/k8s.yaml",
+                  "docs/en/migration-0.6.md",
+                  "docs/ru/migration-0.6.md",
+              }
+              missing = {path for path in expected if f"{root}/{path}" not in names}
+              assert not missing, missing
           PY
       - name: Import installed artifact outside checkout
         run: |
@@ -99,11 +171,12 @@ jobs:
           /tmp/protoprompt-smoke/bin/python -m pip install --no-deps dist-check/*.whl
           cd /tmp
           /tmp/protoprompt-smoke/bin/python -I -c \
-            "import protoprompt; from protoprompt.profile.schema import PROFILE_SCHEMA; assert PROFILE_SCHEMA['title'] == 'UserProfile'"
+            "import sys, protoprompt, protoprompt.integrations, protoprompt.readers; from protoprompt.profile.schema import PROFILE_SCHEMA; assert PROFILE_SCHEMA['title'] == 'UserProfile'; assert not {'fastapi', 'elasticsearch', 'opensearchpy', 'boto3'} & set(sys.modules)"
 
   agent-cli:
     name: agent CLI tests
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -116,6 +189,7 @@ jobs:
   docs:
     name: build docs
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
       - uses: actions/setup-python@v6
@@ -133,6 +207,7 @@ jobs:
     if: github.ref == 'refs/heads/master'
     needs: docs
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write

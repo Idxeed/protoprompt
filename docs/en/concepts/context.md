@@ -14,6 +14,10 @@ the UI can show provenance and the model can be told which is which.
 4. **RAG documents** — top-k chunks from the documents the user has
    attached to the chat.
 
+In a multi-tenant application, the host pins one `MemoryScope` to the builder.
+It applies to both RAG and session memory; switching tenants through
+`ContextInput` is deliberately unsupported.
+
 ## When to enable what
 
 | Scenario                                     | RAG | Session | Profile |
