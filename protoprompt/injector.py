@@ -4,7 +4,11 @@ import logging
 
 from protoprompt.context import ContextInput, ContextOutput
 from protoprompt.hooks import ContextHooks, fire
+from protoprompt.i18n import section_header
 from protoprompt.llm import LLMClientProtocol
+from protoprompt.profile.render import render
+from protoprompt.rag.retriever import Retriever
+from protoprompt.rag.types import RetrievedChunk
 from protoprompt.store.protocol import StoreProtocol, await_if_needed
 
 logger = logging.getLogger(__name__)
@@ -17,6 +21,10 @@ class ContextBuilder:
     ``chat_id`` is supplied, and the system prompt is the anchor. The
     query is embedded once and reused for both retrievals.
 
+    RAG retrieval goes through a :class:`~protoprompt.rag.retriever.Retriever`;
+    pass ``retriever=`` to customize chunking/reranking/scope, otherwise a
+    default is built from ``store`` + ``llm``.
+
     The store may be sync (``StoreProtocol``) or async
     (``AsyncStoreProtocol``); blocking backends wrapped via
     :func:`protoprompt.store.as_async` will not stall the event loop.
@@ -27,10 +35,12 @@ class ContextBuilder:
         store: StoreProtocol,
         llm: LLMClientProtocol,
         hooks: ContextHooks | None = None,
+        retriever: Retriever | None = None,
     ) -> None:
         self._store = store
         self._llm = llm
         self._hooks = hooks or ContextHooks()
+        self._retriever = retriever or Retriever(store, llm)
         self._last_report: "object | None" = None
 
     @property
@@ -42,24 +52,26 @@ class ContextBuilder:
 
     async def build(self, inp: ContextInput) -> ContextOutput:
         parts: list[str] = [inp.system_prompt] if inp.system_prompt else []
+        rag_chunks: list[RetrievedChunk] = []
         rag_blocks: list[str] = []
         session_blocks: list[str] = []
         profile_used = False
 
         query_emb: list[float] | None = None
-        if (inp.include_rag and inp.doc_ids) or (inp.include_session and inp.chat_id):
+        if inp.include_rag or (inp.include_session and inp.chat_id):
             query_emb = (await self._llm.embed([inp.query], model=inp.embedding_model))[0]
 
-        if inp.include_rag and inp.doc_ids and query_emb is not None:
-            str_doc_ids = [str(d) for d in inp.doc_ids]
-            where = {"doc_id": {"$in": str_doc_ids}} if len(str_doc_ids) > 1 else {"doc_id": str_doc_ids[0]}
-            results = await await_if_needed(
-                self._store.query(query_emb, top_k=inp.top_k_rag, where=where)
+        if inp.include_rag and query_emb is not None:
+            rag_chunks = await self._retriever.retrieve_embedded(
+                query_emb,
+                query_text=inp.query,
+                top_k=inp.top_k_rag,
+                doc_ids=inp.doc_ids,
+                score_threshold=inp.score_threshold,
             )
-            if results:
-                rag_texts = [r["document"] for r in results]
-                rag_blocks = rag_texts
-                parts.append("\n\n---\n\n".join(rag_texts))
+            if rag_chunks:
+                rag_blocks = [c.text for c in rag_chunks]
+                parts.append("\n\n---\n\n".join(rag_blocks))
 
         if inp.include_session and inp.chat_id and query_emb is not None:
             session_results = await await_if_needed(self._store.query(
@@ -71,17 +83,27 @@ class ContextBuilder:
                 session_texts = [r["document"] for r in session_results]
                 session_blocks = session_texts
                 parts.append(
-                    "История диалога (сжатая):\n" + "\n---\n".join(session_texts)
+                    f"{section_header('session', inp.language)}\n"
+                    + "\n---\n".join(session_texts)
                 )
 
-        if inp.include_profile and inp.profile_text:
-            parts.append(f"Профиль пользователя:\n{inp.profile_text}")
-            profile_used = True
+        if inp.include_profile:
+            profile_block = ""
+            if inp.profile is not None:
+                profile_block = render(inp.profile, language=inp.language)
+            elif inp.profile_text:
+                profile_block = (
+                    f"{section_header('profile', inp.language)}\n{inp.profile_text}"
+                )
+            if profile_block:
+                parts.append(profile_block)
+                profile_used = True
 
         fire(self._hooks.on_build_done, None)
 
         return ContextOutput(
             system_prompt="\n\n".join(parts),
+            rag_chunks=rag_chunks,
             rag_blocks=rag_blocks,
             session_blocks=session_blocks,
             profile_used=profile_used,

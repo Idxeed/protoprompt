@@ -150,3 +150,17 @@ class SqliteStore:
     def close(self) -> None:
         with self._lock:
             self._conn.close()
+
+    def __enter__(self) -> "SqliteStore":
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        self.close()
+
+    def __del__(self) -> None:
+        conn = getattr(self, "_conn", None)
+        if conn is not None:
+            try:
+                conn.close()
+            except sqlite3.Error:
+                pass

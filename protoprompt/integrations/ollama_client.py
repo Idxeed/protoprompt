@@ -7,6 +7,8 @@ options like ``num_predict`` map cleanly. Requires ``httpx`` only — no
 
 from __future__ import annotations
 
+import json
+import inspect
 from typing import Any
 
 from protoprompt.integrations.httpx_client import _raise_for_response
@@ -77,6 +79,54 @@ class OllamaClient:
         _raise_for_response(response)
         payload = response.json()
         return payload.get("message", {}).get("content", "") or ""
+
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        model: str = "",
+        *,
+        on_token=None,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        **options: object,
+    ) -> str:
+        """Потоковый чат: каждый токен отдаётся в ``on_token`` (если задан)."""
+        ollama_options: dict[str, Any] = {}
+        if temperature is not None:
+            ollama_options["temperature"] = temperature
+        if max_tokens is not None:
+            ollama_options["num_predict"] = max_tokens
+        for key, value in options.items():
+            ollama_options[key] = value
+
+        body: dict[str, Any] = {
+            "model": model or self._chat_model,
+            "messages": messages,
+            "stream": True,
+        }
+        if ollama_options:
+            body["options"] = ollama_options
+
+        parts: list[str] = []
+        async with self._client.stream("POST", "/api/chat", json=body) as response:
+            _raise_for_response(response)
+            async for line in response.aiter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                content = chunk.get("message", {}).get("content", "")
+                if content:
+                    if on_token is not None:
+                        callback_result = on_token(content)
+                        if inspect.isawaitable(callback_result):
+                            await callback_result
+                    parts.append(content)
+                if chunk.get("done"):
+                    break
+        return "".join(parts)
 
     async def embed(
         self, texts: list[str], model: str = ""

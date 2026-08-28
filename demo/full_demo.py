@@ -3,7 +3,7 @@
     python demo/full_demo.py            # сценарий
     python demo/full_demo.py --chat     # интерактивный чат
 
-Показывает весь стек v0.2.0: OllamaClient, SqliteStore (персистентный),
+Показывает базовый стек protoprompt: OllamaClient, SqliteStore (персистентный),
 CachedLLMClient, TokenBudgetedContextBuilder + BudgetReport,
 build_messages(), Pipeline со сжатием истории через LLM.
 """
@@ -43,6 +43,7 @@ from protoprompt import (  # noqa: E402
     Session,
     SqliteStore,
     TokenBudgetedContextBuilder,
+    __version__,
 )
 from protoprompt.session.strategy import LLMSummaryStrategy  # noqa: E402
 from protoprompt.integrations import OllamaClient  # noqa: E402
@@ -346,7 +347,7 @@ async def main() -> None:
     print()
     print(rule("═"))
     print(f"  {c('⚡ protoprompt', BOLD, CYAN)} "
-          f"{c('v0.2.0', DIM)} {c('— живое демо', BOLD)}")
+          f"{c('v' + __version__, DIM)} {c('— живое демо', BOLD)}")
     print(rule("═"))
 
     check_ollama()

@@ -17,7 +17,8 @@ async def test_profile_builder_logs_and_returns_minimal(caplog):
             return "not-json-at-all"
 
     llm = BadLLM()
-    builder = ProfileBuilder(llm)
+    with pytest.deprecated_call(match="ProfileBuilder is deprecated"):
+        builder = ProfileBuilder(llm)
     profile = await builder.build("u1", [
         {"role": "user", "content": "hello"},
         {"role": "user", "content": "world"},

@@ -67,4 +67,4 @@ class MyCounter:
 - Для коротких одноразовых промптов, где переполнение невозможно — обычный `ContextBuilder` дешевле.
 - Когда реальная токенизация модели радикально отличается от любой разумной эвристики (например, модели speech-to-text) — передайте свой счётчик.
 
-[English version](../../en/concepts/budget.md)
+[English version](/en/concepts/budget/)

@@ -1,0 +1,38 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "UserProfile",
+  "type": "object",
+  "properties": {
+    "facts": {
+      "type": "array",
+      "description": "Explicit memory operations over durable named facts.",
+      "items": {
+        "type": "object",
+        "properties": {
+          "op": { "type": "string", "enum": ["add", "update", "forget"] },
+          "key": { "type": "string" },
+          "value": { "type": "string" }
+        },
+        "required": ["op", "key"]
+      }
+    },
+    "traits": {
+      "type": "object",
+      "properties": {
+        "style": { "type": "string", "enum": ["concise", "balanced", "detailed"] },
+        "expertise": { "type": "string", "enum": ["beginner", "intermediate", "expert"] },
+        "verbosity": { "type": "string", "enum": ["concise", "balanced", "detailed"] },
+        "formality": { "type": "string", "enum": ["casual", "neutral", "formal"] }
+      }
+    },
+    "preferences": {
+      "type": "object",
+      "properties": {
+        "format": { "type": "string", "enum": ["bullets", "narrative", "code_heavy", "mixed"] },
+        "language": { "type": "string" },
+        "topics": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "summary": { "type": "string" }
+  }
+}

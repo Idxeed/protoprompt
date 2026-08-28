@@ -259,6 +259,42 @@ async def test_export_is_json_serializable(factory):
     assert len(revived.items) == len(mem.items)
 
 
+async def test_add_after_import_does_not_clobber_restored_items(factory, monkeypatch):
+    import itertools
+
+    import protoprompt.agent.types as agent_types
+
+    mem = factory()
+    old = await mem.add("file", "def alpha_fn(): pass")
+    state = mem.export_state()
+
+    fresh = WorkingMemory(store=None, llm=None, max_tokens=400)
+    fresh.import_state(state)
+
+    monkeypatch.setattr(agent_types, "_item_seq", itertools.count(1))
+    new = await fresh.add("log", "свежая запись после рестарта")
+
+    assert old in fresh.items
+    assert new in fresh.items
+    assert old != new, "новый элемент не должен перезаписать восстановленный"
+    assert len(fresh.items) == 2
+
+
+async def test_export_import_preserves_manifest_and_rebuilds_index(factory):
+    mem = WorkingMemory(max_tokens=30, llm=MockLLM(embed_dim=16))
+    anchor = await mem.add("file", "def target_fn(): pass")
+    cold = await mem.add("log", "target_fn was called " + _w(20))
+    await mem.forget(cold)
+    state = mem.export_state()
+
+    fresh = WorkingMemory(store=None, llm=None, max_tokens=30)
+    fresh.import_state(state)
+
+    assert [entry.item_id for entry in fresh.manifest.entries] == [cold]
+    assert fresh.items[anchor].refcount == mem.items[anchor].refcount
+    assert fresh._index._owners.get("target_fn") == {anchor}
+
+
 # ── cooldown vs important / semantic bypass ─────────────────────
 
 

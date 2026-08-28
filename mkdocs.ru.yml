@@ -56,6 +56,20 @@ nav:
       - Слои контекста: concepts/context.md
       - Сжатие сессии: concepts/compression.md
       - Токен-бюджет: concepts/budget.md
+  - Память:
+      - Память чат-бота: memory.md
+      - RAG по документам: rag.md
+      - Профиль пользователя: profile.md
+      - LRU-кэш эмбеддингов: memory_cache.md
+      - Рабочая память код-агента: agent.md
+      - Секреты: secrets.md
+  - Обучение:
+      - Обзор курса: tutorials/index.md
+      - Урок 1. Первая память: tutorials/01-first-bot.md
+      - Урок 2. Память сессии: tutorials/02-session-memory.md
+      - Урок 3. LRU-кэш эмбеддингов: tutorials/03-embedding-cache.md
+      - Урок 4. Память код-агента: tutorials/04-coder-agent.md
+      - Урок 5. Профиль пользователя: tutorials/05-user-profile.md
   - Интеграции: integrations.md
   - Changelog: changelog.md
   - License: license.md

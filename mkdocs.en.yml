@@ -56,6 +56,10 @@ nav:
       - Context layers: concepts/context.md
       - Compression: concepts/compression.md
       - Token budget: concepts/budget.md
+  - Memory:
+      - RAG retrieval: rag.md
+      - User profile: profile.md
+      - Secrets: secrets.md
   - Integrations: integrations.md
   - Changelog: changelog.md
   - License: license.md

@@ -41,4 +41,4 @@ UI мог показать, откуда что пришло, а модель �
 - `profile_used` — был ли включён профиль.
 - `budget_report` — заполняется только `TokenBudgetedContextBuilder`.
 
-[English version](../../en/concepts/context.md)
+[English version](/en/concepts/context/)

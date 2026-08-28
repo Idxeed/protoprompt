@@ -5,6 +5,73 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- RAG engine (`protoprompt.rag`):
+  - `DocumentIndexer` — chunk → embed → index in one call, tagged
+    `kind="document"`.
+  - Pluggable chunkers: `FixedSizeChunker`, `ParagraphChunker`,
+    `TokenChunker`.
+  - `Retriever` — vector search with `score_threshold`, optional
+    `doc_ids` scope, "search all" mode, and `RetrievedChunk` provenance.
+  - Re-ranking: `RerankerProtocol` with `NoOpReranker` (default) and
+    `LLMReranker` (model-driven ordering with safe fallback).
+  - `ContextInput` gains `score_threshold`; `doc_ids=None` now means
+    "search the whole store"; `ContextOutput.rag_chunks` carries
+    structured provenance alongside `rag_blocks`.
+  - `Pipeline` session memory is now tagged `kind="session"` so RAG
+    search-all does not mix it with documents.
+- Cross-session profile engine (`protoprompt.profile`):
+  - `ProfileProtocol` sources — `LLMProfileSource` (one retry + rule
+    fallback), `RuleProfileSource` (zero-LLM heuristics),
+    `CompositeProfileSource`.
+  - Incremental model: `Signal`, `FactOp`, `ProfileDelta`, typed
+    `Traits`/`Preferences`, and a versioned `UserProfile` with an open
+    `facts` map and `updated_at`/`version`/`source` bookkeeping.
+  - `ProfileManager` (load → extract → merge → persist) with
+    `update`/`get`/`reset`/`delete`.
+  - `InMemoryProfileStore` and `SqliteProfileStore`, plus async helpers
+    (`AsyncInMemoryProfileStore`, `as_async_profile`).
+  - Defensive JSON codec (`parse_profile_json`, `coerce_profile`,
+    `normalize_enum`) handling fenced/embedded JSON and RU→EN enum
+    labels; canonical schema in `profile/schema.json`.
+  - `render()` and localized section headers (`protoprompt.i18n`).
+- Scoped, encrypted secret storage (`protoprompt.secrets`, `[secrets]`):
+  - `KeyProvider` with `KeyringKeyProvider` (OS keychain + fallback),
+    `EnvKeyProvider`, `FileKeyProvider`.
+  - `EncryptedSqliteSecretStore` — per-entry Fernet encryption, scope
+    isolation (`user:project`), TTL, key rotation.
+  - `SecretAccess.execute()` — scope-pinned agent access through immutable,
+    host-registered operations, so credentials stay outside model-visible
+    tool results.
+- Shared significance scoring (`protoprompt.memory`): `MemoryScorer` and
+  `ScorerWeights` extracted from the agent package so the profile engine
+  can reuse them without importing `protoprompt.agent`.
+
+### Changed
+- `ContextInput` gains `profile` (structured `UserProfile`) and
+  `language`; both context builders now localize the profile/session
+  section headers via `protoprompt.i18n`.
+- Profile persistence uses optimistic version checks, preventing concurrent
+  managers from silently overwriting one another.
+- Secret-key rotation records a recoverable pending state and preserves the
+  original Fernet timestamp/TTL across re-encryption.
+
+### Deprecated
+- `ProfileBuilder` — superseded by `ProfileManager` with
+  `LLMProfileSource` (or `RuleProfileSource`). Still functional, emits a
+  `DeprecationWarning`.
+- `SecretAccess.grant()` for agent-facing use. Trusted hosts may migrate to
+  registered `execute()` operations without exposing plaintext to the model.
+
+### Fixed
+- Include the canonical profile JSON schema in wheels and source archives.
+- Count the fully assembled context, including section headers and separators,
+  so `TokenBudgetedContextBuilder` enforces its advertised hard ceiling.
+- Treat `doc_ids=[]` as an empty retrieval scope; `None` remains search-all.
+- Reject mismatched profile signal owners and embedding-count mismatches.
+
 ## [0.2.0] - 2026-08-24
 
 ### Added

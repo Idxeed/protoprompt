@@ -81,6 +81,24 @@ class CachedLLMClient:
     ) -> str:
         return await self._inner.chat(messages, model=model, **options)
 
+    async def chat_stream(
+        self,
+        messages: list[dict],
+        model: str = "",
+        *,
+        on_token=None,
+        **options: object,
+    ) -> str:
+        """Прокси для потокового чата; требует поддержки у inner-клиента."""
+        method = getattr(self._inner, "chat_stream", None)
+        if method is None:
+            raise AttributeError(
+                "underlying client does not support chat_stream"
+            )
+        return await method(
+            messages, model=model, on_token=on_token, **options
+        )
+
     async def embed(
         self, texts: list[str], model: str = ""
     ) -> list[list[float]]:

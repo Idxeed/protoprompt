@@ -29,6 +29,7 @@ from protoprompt.agent.types import (
     ContextBlock,
     Kind,
     MemoryItem,
+    new_item_id,
 )
 from protoprompt.llm import LLMClientProtocol
 from protoprompt.store.protocol import StoreProtocol, await_if_needed
@@ -122,6 +123,17 @@ class WorkingMemory:
 
     # ── writing ──────────────────────────────────────────────────
 
+    def _next_id(self) -> str:
+        """Collision-free item id even after :meth:`import_state`.
+
+        ``new_item_id`` runs on a module-level counter that a fresh process
+        starts from 1, so ids of imported items could be reused and clobbered.
+        """
+        candidate = new_item_id()
+        while candidate in self._items:
+            candidate = new_item_id()
+        return candidate
+
     async def add(
         self,
         kind: Kind,
@@ -133,6 +145,7 @@ class WorkingMemory:
         """Record a new memory item and rebalance the budget."""
         self._step += 1
         item = MemoryItem(
+            id=self._next_id(),
             kind=kind,
             text=text,
             step=self._step,
@@ -549,6 +562,19 @@ class WorkingMemory:
                 }
                 for i in self._items.values()
             ],
+            "manifest": [
+                {
+                    "item_id": entry.item_id,
+                    "kind": entry.kind,
+                    "summary": entry.summary,
+                    "tokens": entry.tokens,
+                    "evicted_at": entry.evicted_at,
+                    "symbols": sorted(entry.symbols),
+                    "lineage": entry.lineage,
+                    "important": entry.important,
+                }
+                for entry in self.manifest.entries
+            ],
         }
 
     def import_state(self, state: dict) -> None:
@@ -559,6 +585,8 @@ class WorkingMemory:
         gv = state.get("goal_vector")
         self.goal.vector = list(gv) if gv else None
         self._items.clear()
+        self._index = ReferenceIndex()
+        self.manifest = Manifest()
         for raw in state.get("items", []):
             item = MemoryItem(
                 kind=raw["kind"],
@@ -579,6 +607,17 @@ class WorkingMemory:
             self._items[item.id] = item
             for name in item.defs:
                 self._index.register_defs(item.id, [name])
+        for raw in state.get("manifest", []):
+            self.manifest.record(
+                item_id=str(raw["item_id"]),
+                kind=str(raw["kind"]),
+                summary=str(raw.get("summary", "")),
+                tokens=int(raw.get("tokens", 0)),
+                evicted_at=int(raw.get("evicted_at", 0)),
+                symbols=frozenset(raw.get("symbols", [])),
+                lineage=str(raw.get("lineage", "")),
+                important=bool(raw.get("important", False)),
+            )
 
     # ── internals ────────────────────────────────────────────────
 

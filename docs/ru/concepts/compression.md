@@ -83,4 +83,4 @@ if pipeline.should_compress(len(session.messages)):
 Меньшие числа — чаще сжатие (больше затрат на LLM), но плотнее рабочий
 контекст. Большие числа — дешевле, но выше риск переполнения.
 
-[English version](../../en/concepts/compression.md)
+[English version](/en/concepts/compression/)

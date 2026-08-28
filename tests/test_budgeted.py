@@ -101,6 +101,26 @@ async def test_budget_report_attached():
 
 
 @pytest.mark.asyncio
+async def test_budget_counts_rag_separators_exactly():
+    store = InMemStore()
+    store.add("d", ["a", "b"], [[1.0] * 16, [1.0] * 16])
+    counter = RegexTokenCounter()
+    builder = TokenBudgetedContextBuilder(
+        store, MockLLM(), counter=counter, max_tokens=3
+    )
+
+    out = await builder.build(ContextInput(
+        query="q", system_prompt="sys", doc_ids=["d"],
+        include_session=False, top_k_rag=2,
+    ))
+
+    actual = counter.count(out.system_prompt)
+    assert actual <= 3
+    assert out.budget_report.used_tokens == actual
+    assert out.budget_report.remaining_tokens == 3 - actual
+
+
+@pytest.mark.asyncio
 async def test_priorities_order_changes_allocation():
     store = InMemStore()
     store.add("1", ["rag " * 30], [[0.9] * 16])

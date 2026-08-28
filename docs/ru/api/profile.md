@@ -1,9 +1,29 @@
 # API: profile
 
-## UserProfile
+## Модель данных
 
 ::: protoprompt.profile.types
 
-## ProfileBuilder
+## Источники
 
-::: protoprompt.profile.builder.ProfileBuilder
+::: protoprompt.profile.source
+
+## Кодек (парсинг LLM-ответа)
+
+::: protoprompt.profile.codec
+
+## Merge
+
+::: protoprompt.profile.merge
+
+## Хранилище
+
+::: protoprompt.profile.store
+
+## Менеджер
+
+::: protoprompt.profile.manager
+
+## Рендер
+
+::: protoprompt.profile.render

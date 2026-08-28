@@ -44,7 +44,15 @@ def build(lang: str) -> None:
         raise SystemExit(f"missing config: {config}")
     print(f"[build:{lang}] {config.name}")
     subprocess.run(
-        [sys.executable, "-m", "mkdocs", "build", "--config-file", str(config)],
+        [
+            sys.executable,
+            "-m",
+            "mkdocs",
+            "build",
+            "--strict",
+            "--config-file",
+            str(config),
+        ],
         cwd=ROOT,
         check=True,
     )

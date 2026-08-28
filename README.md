@@ -52,6 +52,9 @@ pip install "protoprompt[qdrant]"
 pip install "protoprompt[local]"
 pip install "protoprompt[fastembed]"
 
+# Зашифрованный вольт секретов (Fernet + keyring)
+pip install "protoprompt[secrets]"
+
 # Для разработки и документации
 pip install "protoprompt[chroma,dev]"
 ```
@@ -140,7 +143,10 @@ asyncio.run(main())
 | `protoprompt`            | `Pipeline`, `ContextBuilder`, `ContextInput`, `ContextOutput`      |
 | `protoprompt.store`      | `StoreProtocol`, `AsyncStoreProtocol`, `InMemStore`, `SqliteStore`, `as_async` |
 | `protoprompt.session`    | `Session`, `CompressedBlock`, `HeuristicStrategy`, `LLMSummaryStrategy` |
-| `protoprompt.profile`    | `UserProfile`, `ProfileBuilder`                                     |
+| `protoprompt.profile`    | `ProfileManager`, `ProfileProtocol`, `LLMProfileSource`, `RuleProfileSource`, `CompositeProfileSource`, `UserProfile`, `Traits`, `Preferences`, `ProfileDelta`, `Signal`, `FactOp` |
+| `protoprompt.secrets`    | `SecretStore`, `EncryptedSqliteSecretStore`, `KeyProvider`, `KeyringKeyProvider`, `EnvKeyProvider`, `FileKeyProvider`, `SecretAccess` |
+| `protoprompt.rag`        | `Retriever`, `DocumentIndexer`, `Document`, `RetrievedChunk`, `FixedSizeChunker`, `ParagraphChunker`, `TokenChunker`, `LLMReranker`, `NoOpReranker` |
+| `protoprompt.memory`     | `MemoryScorer`, `ScorerWeights`                                     |
 | `protoprompt.tokens`     | `TokenCounter`, `RegexTokenCounter`, `TiktokenCounter`              |
 | `protoprompt.llm`        | `LLMClientProtocol`                                                 |
 | `protoprompt.cache`      | `CachedLLMClient`, `InMemoryEmbeddingCache`                         |

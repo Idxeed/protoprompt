@@ -64,6 +64,7 @@ class Pipeline:
             "chat_id": session.chat_id,
             "strategy": session.strategy,
             "message_count": len(session.messages),
+            "kind": "session",
         }
         await await_if_needed(self._store.add(new_doc_id, texts, embeddings, meta))
         await await_if_needed(self._store.delete(doc_id))

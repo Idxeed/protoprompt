@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from protoprompt.context import ContextOutput
 from protoprompt.injector import ContextBuilder, ContextInput
 from protoprompt.store.memory import InMemStore
 
@@ -12,6 +13,13 @@ class MockLLM:
 
     async def embed(self, texts, model=""):
         return [[float(ord(c) % 10) / 10.0 for c in t[:10].ljust(10, "a")] for t in texts]
+
+
+def test_context_output_positional_constructor_is_backward_compatible():
+    out = ContextOutput("sys", ["rag"], ["session"], True, None)
+    assert out.rag_blocks == ["rag"]
+    assert out.session_blocks == ["session"]
+    assert out.rag_chunks == []
 
 
 @pytest.mark.asyncio

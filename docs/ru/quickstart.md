@@ -96,4 +96,4 @@ pipeline = Pipeline(
 Стратегия автоматически откатывается на `HeuristicStrategy` при любой
 ошибке LLM — деградация модели не должна ломать чат.
 
-[English version](../en/quickstart.md)
+[English version](/en/quickstart/)

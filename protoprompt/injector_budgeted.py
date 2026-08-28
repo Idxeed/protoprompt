@@ -1,13 +1,17 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from protoprompt.context import ContextInput, ContextOutput
 from protoprompt.exceptions import TokenBudgetExceededError
 from protoprompt.hooks import ContextHooks, fire
+from protoprompt.i18n import section_header
 from protoprompt.injector import ContextBuilder
 from protoprompt.llm import LLMClientProtocol
+from protoprompt.profile.render import render
+from protoprompt.rag.retriever import Retriever
+from protoprompt.rag.types import RetrievedChunk
 from protoprompt.store.protocol import StoreProtocol, await_if_needed
 from protoprompt.tokens.protocol import TokenCounter
 from protoprompt.tokens.regex_counter import RegexTokenCounter
@@ -53,6 +57,7 @@ class _Candidate:
     section: Priority
     text: str
     label: str
+    chunk: RetrievedChunk | None = None
 
 
 class TokenBudgetedContextBuilder(ContextBuilder):
@@ -84,8 +89,9 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         max_tokens: int = 4096,
         priorities: tuple[Priority, ...] = DEFAULT_PRIORITIES,
         hooks: ContextHooks | None = None,
+        retriever: Retriever | None = None,
     ) -> None:
-        super().__init__(store, llm, hooks=hooks)
+        super().__init__(store, llm, hooks=hooks, retriever=retriever)
         self._counter: TokenCounter = counter or RegexTokenCounter()
         self._max_tokens = max_tokens
         self._priorities = priorities
@@ -97,47 +103,61 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         if system_cost > self._max_tokens:
             raise TokenBudgetExceededError(system_cost, self._max_tokens, SEGMENT_SYSTEM)
         report.section_tokens[SEGMENT_SYSTEM] = system_cost
-        remaining = self._max_tokens - system_cost
         fire(self._hooks.on_section_used, SEGMENT_SYSTEM, system_cost)
 
-        if inp.include_profile and inp.profile_text:
-            profile_block = f"Профиль пользователя:\n{inp.profile_text}"
-            profile_cost = self._counter.count(profile_block)
-            if profile_cost > remaining:
+        requested_profile = ""
+        if inp.include_profile:
+            if inp.profile is not None:
+                requested_profile = render(inp.profile, language=inp.language)
+            elif inp.profile_text:
+                requested_profile = (
+                    f"{section_header('profile', inp.language)}\n{inp.profile_text}"
+                )
+
+        profile_block = ""
+        used_tokens = system_cost
+        if requested_profile:
+            proposed = self._assemble_prompt(
+                inp.system_prompt, requested_profile, [], [], inp.language
+            )
+            proposed_cost = self._counter.count(proposed)
+            if proposed_cost > self._max_tokens:
                 logger.warning(
-                    "Profile block (%d tokens) exceeds remaining budget (%d); dropping",
-                    profile_cost, remaining,
+                    "Profile block would exceed context budget (%d > %d); dropping",
+                    proposed_cost,
+                    self._max_tokens,
                 )
                 report.dropped_blocks.append(SEGMENT_PROFILE)
-                profile_block = ""
                 fire(self._hooks.on_block_dropped, SEGMENT_PROFILE, "over_budget")
             else:
+                profile_block = requested_profile
+                profile_cost = proposed_cost - used_tokens
+                used_tokens = proposed_cost
                 report.section_tokens[SEGMENT_PROFILE] = profile_cost
-                remaining -= profile_cost
                 fire(self._hooks.on_section_used, SEGMENT_PROFILE, profile_cost)
-        else:
-            profile_block = ""
 
-        pool: dict[Priority, list[_Candidate]] = {p: [] for p in self._priorities}
+        pool: dict[Priority, list[_Candidate]] = {
+            SEGMENT_RAG: [],
+            SEGMENT_SESSION: [],
+        }
 
-        if (inp.include_rag and inp.doc_ids) or (inp.include_session and inp.chat_id):
+        if inp.include_rag or (inp.include_session and inp.chat_id):
             query_emb = (await self._llm.embed([inp.query], model=inp.embedding_model))[0]
 
-            if inp.include_rag and inp.doc_ids:
-                str_doc_ids = [str(d) for d in inp.doc_ids]
-                where = (
-                    {"doc_id": {"$in": str_doc_ids}}
-                    if len(str_doc_ids) > 1
-                    else {"doc_id": str_doc_ids[0]}
+            if inp.include_rag:
+                rag_chunks = await self._retriever.retrieve_embedded(
+                    query_emb,
+                    query_text=inp.query,
+                    top_k=max(1, inp.top_k_rag * 2),
+                    doc_ids=inp.doc_ids,
+                    score_threshold=inp.score_threshold,
                 )
-                rag_hits = await await_if_needed(self._store.query(
-                    query_emb, top_k=max(1, inp.top_k_rag * 2), where=where
-                ))
-                for i, hit in enumerate(rag_hits):
+                for i, chunk in enumerate(rag_chunks):
                     pool[SEGMENT_RAG].append(_Candidate(
                         section=SEGMENT_RAG,
-                        text=hit["document"],
+                        text=chunk.text,
                         label=f"rag[{i}]",
+                        chunk=chunk,
                     ))
 
             if inp.include_session and inp.chat_id:
@@ -154,70 +174,129 @@ class TokenBudgetedContextBuilder(ContextBuilder):
                     ))
 
         kept_rag: list[str] = []
+        kept_rag_chunks: list[RetrievedChunk] = []
         kept_session: list[str] = []
 
-        for section in self._priorities:
-            if section in (SEGMENT_SYSTEM, SEGMENT_PROFILE):
+        def proposed_total(cand: _Candidate, text: str) -> int:
+            rag = [*kept_rag, text] if cand.section == SEGMENT_RAG else kept_rag
+            session = (
+                [*kept_session, text]
+                if cand.section == SEGMENT_SESSION
+                else kept_session
+            )
+            assembled = self._assemble_prompt(
+                inp.system_prompt, profile_block, rag, session, inp.language
+            )
+            return self._counter.count(assembled)
+
+        def accept(cand: _Candidate, text: str, total: int) -> None:
+            nonlocal used_tokens
+            incremental_cost = total - used_tokens
+            if cand.section == SEGMENT_RAG:
+                kept_rag.append(text)
+                if cand.chunk is not None:
+                    kept_rag_chunks.append(
+                        cand.chunk if text == cand.text else replace(cand.chunk, text=text)
+                    )
+            else:
+                kept_session.append(text)
+            used_tokens = total
+            report.section_tokens[cand.label] = incremental_cost
+            fire(self._hooks.on_section_used, cand.label, incremental_cost)
+
+        def drop(cand: _Candidate, reason: str) -> None:
+            if cand.label not in report.dropped_blocks:
+                report.dropped_blocks.append(cand.label)
+                fire(self._hooks.on_block_dropped, cand.label, reason)
+
+        active_sections = [
+            section
+            for section in self._priorities
+            if section in (SEGMENT_RAG, SEGMENT_SESSION)
+        ]
+        stop_all = False
+        for section_index, section in enumerate(active_sections):
+            if not pool[section]:
                 continue
-            if section not in pool or not pool[section]:
-                continue
-            for cand in pool[section]:
-                cost = self._counter.count(cand.text)
-                if cost <= remaining:
-                    if cand.section == SEGMENT_RAG:
-                        kept_rag.append(cand.text)
-                    elif cand.section == SEGMENT_SESSION:
-                        kept_session.append(cand.text)
-                    remaining -= cost
-                    report.section_tokens[cand.label] = cost
-                    fire(self._hooks.on_section_used, cand.label, cost)
+            for candidate_index, cand in enumerate(pool[section]):
+                total = proposed_total(cand, cand.text)
+                if total <= self._max_tokens:
+                    accept(cand, cand.text, total)
+                    continue
+
+                trimmed = self._truncate_to_fit(
+                    cand.text,
+                    lambda value: proposed_total(cand, value) <= self._max_tokens,
+                )
+                if trimmed:
+                    accept(cand, trimmed, proposed_total(cand, trimmed))
+                    for skipped in pool[section][candidate_index + 1:]:
+                        drop(skipped, "budget_exhausted")
+                    for later in active_sections[section_index + 1:]:
+                        for skipped in pool[later]:
+                            drop(skipped, "budget_exhausted")
+                    stop_all = True
                 else:
-                    trimmed = self._truncate_to_budget(cand.text, remaining)
-                    if trimmed:
-                        if cand.section == SEGMENT_RAG:
-                            kept_rag.append(trimmed)
-                        elif cand.section == SEGMENT_SESSION:
-                            kept_session.append(trimmed)
-                        report.section_tokens[cand.label] = remaining
-                        fire(self._hooks.on_section_used, cand.label, remaining)
-                        remaining = 0
-                    else:
-                        report.dropped_blocks.append(cand.label)
-                        fire(self._hooks.on_block_dropped, cand.label,
-                             "truncated_empty" if remaining <= 0 else "over_budget")
-                    break
-            if remaining <= 0:
-                for later_section in self._priorities:
-                    if later_section <= section:
-                        continue
-                    for cand in pool.get(later_section, []):
-                        report.dropped_blocks.append(cand.label)
-                        fire(self._hooks.on_block_dropped, cand.label, "budget_exhausted")
+                    drop(cand, "over_budget")
+                    for skipped in pool[section][candidate_index + 1:]:
+                        drop(skipped, "over_budget")
+                break
+            if stop_all:
                 break
 
-        report.used_tokens = self._max_tokens - remaining
-        report.remaining_tokens = remaining
-
-        parts: list[str] = []
-        if inp.system_prompt:
-            parts.append(inp.system_prompt)
-        if profile_block:
-            parts.append(profile_block)
-        if kept_rag:
-            parts.append("\n\n---\n\n".join(kept_rag))
-        if kept_session:
-            parts.append("История диалога (сжатая):\n" + "\n---\n".join(kept_session))
+        system_prompt = self._assemble_prompt(
+            inp.system_prompt, profile_block, kept_rag, kept_session, inp.language
+        )
+        report.used_tokens = self._counter.count(system_prompt)
+        report.remaining_tokens = self._max_tokens - report.used_tokens
 
         fire(self._hooks.on_build_done, report)
         self._last_report = report
 
         return ContextOutput(
-            system_prompt="\n\n".join(parts),
+            system_prompt=system_prompt,
+            rag_chunks=kept_rag_chunks,
             rag_blocks=kept_rag,
             session_blocks=kept_session,
             profile_used=bool(profile_block),
             budget_report=report,
         )
+
+    @staticmethod
+    def _assemble_prompt(
+        system_prompt: str,
+        profile_block: str,
+        rag_blocks: list[str],
+        session_blocks: list[str],
+        language: str,
+    ) -> str:
+        parts: list[str] = []
+        if system_prompt:
+            parts.append(system_prompt)
+        if profile_block:
+            parts.append(profile_block)
+        if rag_blocks:
+            parts.append("\n\n---\n\n".join(rag_blocks))
+        if session_blocks:
+            parts.append(
+                f"{section_header('session', language)}\n"
+                + "\n---\n".join(session_blocks)
+            )
+        return "\n\n".join(parts)
+
+    @staticmethod
+    def _truncate_to_fit(text: str, fits) -> str:
+        """Return the longest word-boundary prefix accepted by ``fits``."""
+        words = text.split()
+        low, high = 0, len(words)
+        while low < high:
+            mid = (low + high + 1) // 2
+            candidate = " ".join(words[:mid]) + "…"
+            if fits(candidate):
+                low = mid
+            else:
+                high = mid - 1
+        return " ".join(words[:low]) + "…" if low else ""
 
     async def build_messages(
         self,

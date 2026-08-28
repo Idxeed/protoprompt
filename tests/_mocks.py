@@ -6,6 +6,8 @@ Lives next to ``conftest.py`` so test files can import it as
 
 from __future__ import annotations
 
+import zlib
+
 
 class MockLLM:
     """Minimal async LLM double.
@@ -30,5 +32,7 @@ class MockLLM:
 
 
 def _deterministic_embedding(text: str, dim: int) -> list[float]:
-    seed = abs(hash(text)) % (10**6)
+    # Stable across processes: Python's hash() is salted by PYTHONHASHSEED,
+    # which made cosine-based assertions flaky between runs.
+    seed = zlib.crc32(text.encode("utf-8"))
     return [((seed >> (i % 30)) & 0xFF) / 255.0 for i in range(dim)]

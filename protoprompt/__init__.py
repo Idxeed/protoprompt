@@ -24,7 +24,26 @@ from protoprompt.injector_budgeted import (
 from protoprompt.llm import LLMClientProtocol
 from protoprompt.pipeline import Pipeline
 from protoprompt.profile.builder import ProfileBuilder
-from protoprompt.profile.types import UserProfile
+from protoprompt.profile.codec import (
+    DEFAULT_PROFILE,
+    STRICT_PROFILE,
+    CodecProfile,
+)
+from protoprompt.profile.manager import ProfileManager
+from protoprompt.profile.source import (
+    CompositeProfileSource,
+    LLMProfileSource,
+    ProfileProtocol,
+    RuleProfileSource,
+)
+from protoprompt.profile.types import (
+    FactOp,
+    Preferences,
+    ProfileDelta,
+    Signal,
+    Traits,
+    UserProfile,
+)
 from protoprompt.session.compressor import Compressor
 from protoprompt.session.strategy import (
     HeuristicStrategy,
@@ -46,7 +65,7 @@ from protoprompt.store.sqlite import SqliteStore
 from protoprompt.tokens.protocol import TokenCounter
 from protoprompt.tokens.regex_counter import RegexTokenCounter
 
-__version__ = "0.2.0"
+__version__ = "0.3.0"
 
 __all__ = [
     "ContextBuilder",
@@ -65,6 +84,19 @@ __all__ = [
     "CompressedBlock",
     "UserProfile",
     "ProfileBuilder",
+    "ProfileManager",
+    "ProfileProtocol",
+    "LLMProfileSource",
+    "RuleProfileSource",
+    "CompositeProfileSource",
+    "Traits",
+    "Preferences",
+    "FactOp",
+    "ProfileDelta",
+    "Signal",
+    "CodecProfile",
+    "DEFAULT_PROFILE",
+    "STRICT_PROFILE",
     "StoreProtocol",
     "AsyncStoreProtocol",
     "InMemStore",

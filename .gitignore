@@ -19,6 +19,7 @@ site/
 venv/
 .env
 .env.local
+.protoprompt/
 .idea/
 .vscode/
 *.log
