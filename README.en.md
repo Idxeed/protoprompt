@@ -4,10 +4,10 @@
 [![Coverage](https://img.shields.io/codecov/c/github/Idxeed/protoprompt)](https://codecov.io/gh/Idxeed/protoprompt)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.ru.md)
+[![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.ru.md)
+[Русская версия](README.md)
 
 Layered context builder for LLM prompts. Three independent, composable
 layers feed the model: **RAG over documents**, **compressed session

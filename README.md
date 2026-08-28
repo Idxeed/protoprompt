@@ -1,185 +1,197 @@
 # protoprompt
 
-[![CI](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml/badge.svg)](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/codecov/c/github/Idxeed/protoprompt)](https://codecov.io/gh/Idxeed/protoprompt)
-[![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.ru.md)
-[![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
+[![CI](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml)
+[![Python 3.11–3.13](https://img.shields.io/badge/python-3.11%E2%80%933.13-blue)](https://www.python.org/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-Слоистый сборщик контекста для LLM-промптов. Три независимых, компонуемых
-слоя кормят модель: **RAG по документам**, **сжатая история сессии** и
-опциональный **профиль пользователя**. Подключаемое векторное хранилище,
-подключаемый токенайзер, подключаемая стратегия сжатия.
+**Контекстный движок для LLM-приложений:** RAG, память диалога, профиль
+пользователя и строгий токен-бюджет через единый Python API.
 
-[English version](README.en.md)
+[Документация](https://idxeed.github.io/protoprompt/ru/) ·
+[English](README.en.md) ·
+[Примеры](examples/) ·
+[Changelog](CHANGELOG.md)
 
-## Зачем
+> Проект находится в alpha-стадии. Публичный API уже покрыт тестами, но до
+> версии 1.0 возможны изменения контрактов.
 
-Прод-LLM-приложения упираются в одну и ту же стену: модели нужен контекст,
-но окно конечно. Собранная вручную сборка промпта превращается в кашу:
-документы ищутся отдельно от истории, system prompt дублируется, и каждая
-команда переписывает один и тот же клей.
+## Что решает protoprompt
 
-`protoprompt` разделяет три задачи и даёт каждой чистый протокол:
+LLM обычно нужна не просто история чата, а несколько разных видов контекста:
+найденные документы, важные факты из прошлых сессий, профиль пользователя и
+исходный system prompt. Если собирать всё вручную, логика поиска, приоритетов и
+обрезки быстро расползается по приложению.
 
-- `StoreProtocol` — векторное хранилище (in-memory для тестов, ChromaDB для прода).
-- `StrategyProtocol` — как сжимать старые ходы длинной сессии.
-- `TokenCounter` — как считать бюджет финального промпта.
+`protoprompt` собирает эти слои в одном месте и возвращает не только готовый
+промпт, но и provenance — какие RAG-чанки, блоки памяти и данные профиля были
+использованы.
 
-`ContextBuilder` оркестрирует все три. Результат — единый `system_prompt`
-плюс структурированный `ContextOutput` с описанием того, что вошло (head,
-tail, RAG, profile), чтобы UI мог показать provenance.
+| Возможность | Что входит |
+|---|---|
+| RAG | чанкинг, индексация, top-k поиск, фильтры, reranking и provenance |
+| Память сессии | эвристическое или LLM-сжатие длинных диалогов |
+| Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
+| Токен-бюджет | жёсткий лимит, приоритеты слоёв и отчёт об обрезке |
+| Хранилища | in-memory, SQLite, ChromaDB и Qdrant |
+| LLM и embeddings | OpenAI, Ollama, OpenAI-compatible HTTP и локальные модели |
+| Секреты | scoped vault с Fernet-шифрованием, TTL и ротацией ключа |
+
+Ядро не имеет обязательных сторонних зависимостей. Интеграции подключаются
+через extras и не импортируются, пока не понадобятся.
 
 ## Установка
 
 ```bash
 pip install protoprompt
 
-# С ChromaDB-бэкендом
-pip install "protoprompt[chroma]"
-
-# С tiktoken-токенайзером
-pip install "protoprompt[tiktoken]"
-
-# Интеграции: OpenAI SDK / Ollama / любой OpenAI-совместимый REST
-pip install "protoprompt[openai]"
+# Частые варианты
+pip install "protoprompt[openai,tiktoken]"
 pip install "protoprompt[ollama]"
-pip install "protoprompt[http]"
-
-# Векторные БД и локальные эмбеддинги
+pip install "protoprompt[chroma]"
 pip install "protoprompt[qdrant]"
-pip install "protoprompt[local]"
+pip install "protoprompt[local]"       # sentence-transformers
 pip install "protoprompt[fastembed]"
-
-# Зашифрованный вольт секретов (Fernet + keyring)
 pip install "protoprompt[secrets]"
-
-# Для разработки и документации
-pip install "protoprompt[chroma,dev]"
 ```
+
+Для работы из текущей ветки:
+
+```bash
+pip install "protoprompt @ git+https://github.com/Idxeed/protoprompt.git@master"
+```
+
+Требуется Python 3.11 или новее.
 
 ## Быстрый старт
 
+Пример полностью локальный: сеть, API-ключ и сторонняя векторная БД не нужны.
+
 ```python
 import asyncio
-from protoprompt import (
-    InMemStore,
-    ContextBuilder,
-    ContextInput,
-    Pipeline,
-    HeuristicStrategy,
-    Session,
-)
+
+from protoprompt import ContextBuilder, ContextInput, InMemStore
 
 
-class MyLLM:
-    async def chat(self, messages, model="", **options):
-        return "заглушка"
-
+class DemoLLM:
     async def embed(self, texts, model=""):
-        # замените на реальные эмбеддинги
-        return [[0.1] * 384 for _ in texts]
+        # В приложении замените на OpenAIClient, OllamaClient
+        # или локальный embedding-клиент.
+        return [[1.0, 0.0] for _ in texts]
+
+    async def chat(self, messages, model="", **options):
+        return "demo"
 
 
 async def main():
+    llm = DemoLLM()
     store = InMemStore()
-    store.add("doc-1", ["Париж — столица Франции."], [[0.5] * 384])
-    llm = MyLLM()
+    chunks = [
+        "protoprompt объединяет RAG, память сессии и профиль пользователя.",
+        "Токеновый бюджет не позволяет итоговому контексту превысить лимит.",
+    ]
+    store.add("guide", chunks, await llm.embed(chunks))
 
     builder = ContextBuilder(store, llm)
-    out = await builder.build(ContextInput(
-        query="Какая столица Франции?",
-        system_prompt="Ты учитель географии.",
-        doc_ids=[1],
-    ))
-    print(out.system_prompt)
-
-    pipeline = Pipeline(
-        store, llm,
-        strategy=HeuristicStrategy(),
-        compress_every_n=10,
+    messages = await builder.build_messages(
+        ContextInput(
+            query="Что умеет protoprompt?",
+            system_prompt="Отвечай кратко и только по контексту.",
+            doc_ids=["guide"],
+            include_session=False,
+        ),
+        user_message="Что умеет protoprompt?",
     )
-    session = Session(chat_id="c1", messages=[
-        {"role": "user", "content": "Привет"},
-        {"role": "assistant", "content": "Здравствуйте!"},
-    ])
-    if pipeline.should_compress(len(session.messages)):
-        await pipeline.compress_and_store(session)
+
+    print(messages)  # готовый OpenAI-style список system + user
 
 
 asyncio.run(main())
 ```
 
-## Архитектура
+Более реалистичные рецепты находятся в [`examples/`](examples/): Ollama RAG,
+OpenAI с токен-бюджетом, локальные embeddings, сжатие сессии, профиль и
+зашифрованный vault.
 
-```
-                 +--------------------+
-                 |   ContextBuilder   |
-                 |   (оркестратор)    |
-                 +---------+----------+
-                           |
-        +------------------+------------------+------------------+
-        |                  |                  |                  |
-        v                  v                  v                  v
-+---------------+  +----------------+  +---------------+  +---------+
-| RAG-поиск     |  | Память сессии  |  | Профиль польз.|  |  Store  |
-| (vector top-k)|  | (сжатая)       |  | (из LLM)      |  |  query  |
-+---------------+  +----------------+  +---------------+  +---------+
-        |                  |                  |
-        +--------+---------+--------+---------+
-                 |                  |
-                 v                  v
-        +----------------+  +----------------+
-        |  TokenCounter  |  |  StoreProtocol |
-        |  (pluggable)   |  |  (in-mem/chroma)|
-        +----------------+  +----------------+
+## Как устроена сборка контекста
+
+```text
+запрос ─┬─> RAG по документам ───────┐
+        ├─> память текущей сессии ───┤
+        ├─> профиль пользователя ────┼─> ContextBuilder ─> ContextOutput
+        └─> исходный system prompt ──┘          │
+                                                └─ provenance + budget report
 ```
 
-## Публичный API
+Основные контракты намеренно небольшие:
 
-| Модуль                   | Экспорты                                                            |
-|--------------------------|---------------------------------------------------------------------|
-| `protoprompt`            | `Pipeline`, `ContextBuilder`, `ContextInput`, `ContextOutput`      |
-| `protoprompt.store`      | `StoreProtocol`, `AsyncStoreProtocol`, `InMemStore`, `SqliteStore`, `as_async` |
-| `protoprompt.session`    | `Session`, `CompressedBlock`, `HeuristicStrategy`, `LLMSummaryStrategy` |
-| `protoprompt.profile`    | `ProfileManager`, `ProfileProtocol`, `LLMProfileSource`, `RuleProfileSource`, `CompositeProfileSource`, `UserProfile`, `Traits`, `Preferences`, `ProfileDelta`, `Signal`, `FactOp` |
-| `protoprompt.secrets`    | `SecretStore`, `EncryptedSqliteSecretStore`, `KeyProvider`, `KeyringKeyProvider`, `EnvKeyProvider`, `FileKeyProvider`, `SecretAccess` |
-| `protoprompt.rag`        | `Retriever`, `DocumentIndexer`, `Document`, `RetrievedChunk`, `FixedSizeChunker`, `ParagraphChunker`, `TokenChunker`, `LLMReranker`, `NoOpReranker` |
-| `protoprompt.memory`     | `MemoryScorer`, `ScorerWeights`                                     |
-| `protoprompt.tokens`     | `TokenCounter`, `RegexTokenCounter`, `TiktokenCounter`              |
-| `protoprompt.llm`        | `LLMClientProtocol`                                                 |
-| `protoprompt.cache`      | `CachedLLMClient`, `InMemoryEmbeddingCache`                         |
-| `protoprompt.hooks`      | `ContextHooks`, `PipelineHooks`                                     |
-| `protoprompt.integrations` | `OpenAIClient`, `OllamaClient`, `HttpxLLMClient`, `QdrantStore`, `SentenceTransformersClient`, `FastEmbedClient` |
+- `StoreProtocol` / `AsyncStoreProtocol` — синхронное или асинхронное
+  векторное хранилище;
+- `LLMClientProtocol` — `chat()` и `embed()`;
+- `StrategyProtocol` — стратегия сжатия диалога;
+- `TokenCounter` — подсчёт токенов для конкретной модели.
 
-Готовые рецепты — в [examples/](examples/): офлайн-демо сжатия сессии,
-RAG на Ollama, бюджетная сборка с OpenAI, локальные эмбеддинги.
+Благодаря этому встроенные адаптеры можно заменить своими без переписывания
+сборщика контекста.
 
-## Документация
+## Основные точки входа
 
-Полная документация собирается в двух языковых версиях:
+```python
+from protoprompt import (
+    ContextBuilder,
+    TokenBudgetedContextBuilder,
+    Pipeline,
+    ProfileManager,
+    InMemStore,
+    SqliteStore,
+)
 
-- 🇷🇺 Русская: <https://idxeed.github.io/protoprompt/ru/>
-- 🇬🇧 English: <https://idxeed.github.io/protoprompt/en/>
+from protoprompt.rag import DocumentIndexer, Retriever
+from protoprompt.secrets import EncryptedSqliteSecretStore, SecretAccess
+from protoprompt.integrations import OpenAIClient, OllamaClient, QdrantStore
+```
 
-Локальная сборка:
+Полный API и подробные руководства:
+
+- [быстрый старт](https://idxeed.github.io/protoprompt/ru/quickstart/);
+- [RAG](https://idxeed.github.io/protoprompt/ru/rag/);
+- [память и сжатие](https://idxeed.github.io/protoprompt/ru/concepts/compression/);
+- [профиль пользователя](https://idxeed.github.io/protoprompt/ru/profile/);
+- [секреты](https://idxeed.github.io/protoprompt/ru/secrets/);
+- [интеграции](https://idxeed.github.io/protoprompt/ru/integrations/).
+
+## Экспериментальный coding-agent
+
+В монорепозитории есть CLI поверх `protoprompt.agent.WorkingMemory`:
 
 ```bash
-pip install "protoprompt[dev]"
-python scripts/build_docs.py --serve  # обе версии на разных портах
+pip install -e "apps/agent-cli[ollama]"
+pp-agent /path/to/project
 ```
+
+Он поддерживает сессии, hot/cold memory, план-режим и подтверждение опасных
+инструментов. Подробнее — в [`apps/agent-cli/README.md`](apps/agent-cli/README.md).
 
 ## Разработка
 
 ```bash
-git clone https://github.com/Idxeed/protoprompt
+git clone https://github.com/Idxeed/protoprompt.git
 cd protoprompt
-python -m venv .venv && source .venv/bin/activate
+python -m venv .venv
+
+# Windows
+.venv\Scripts\activate
+
+# Linux / macOS
+source .venv/bin/activate
+
 pip install -e ".[chroma,dev]"
 pytest
+python scripts/build_docs.py --clean
 ```
+
+CI проверяет Python 3.11–3.13, интеграционные тесты, CLI, содержимое wheel и
+обе строгие сборки документации.
 
 ## Лицензия
 
-MIT — см. [LICENSE](LICENSE).
+[MIT](LICENSE)

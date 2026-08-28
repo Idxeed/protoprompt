@@ -49,7 +49,7 @@ Homepage = "https://github.com/Idxeed/protoprompt"
 Documentation = "https://idxeed.github.io/protoprompt/"
 Source = "https://github.com/Idxeed/protoprompt"
 Issues = "https://github.com/Idxeed/protoprompt/issues"
-Changelog = "https://github.com/Idxeed/protoprompt/blob/main/CHANGELOG.md"
+Changelog = "https://github.com/Idxeed/protoprompt/blob/master/CHANGELOG.md"
 
 [build-system]
 requires = ["setuptools>=68"]
