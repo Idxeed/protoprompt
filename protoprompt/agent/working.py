@@ -31,7 +31,16 @@ from protoprompt.agent.types import (
     MemoryItem,
     new_item_id,
 )
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.events import (
+    EventDispatcher,
+    EventSink,
+    EvictEvent,
+    RecallEvent,
+    dispatch,
+    scope_id,
+)
+from protoprompt.llm import EmbeddingClientProtocol
+from protoprompt.scope import MemoryScope, scoped_doc_id, scoped_metadata
 from protoprompt.store.protocol import StoreProtocol, await_if_needed
 from protoprompt.tokens.protocol import TokenCounter
 from protoprompt.tokens.regex_counter import RegexTokenCounter
@@ -59,7 +68,7 @@ class WorkingMemory:
     def __init__(
         self,
         store: StoreProtocol | None = None,
-        llm: LLMClientProtocol | None = None,
+        llm: EmbeddingClientProtocol | None = None,
         counter: TokenCounter | None = None,
         max_tokens: int = 2048,
         weights: ScorerWeights | None = None,
@@ -70,12 +79,16 @@ class WorkingMemory:
         max_pinned_tokens: int | None = None,
         recall_cooldown_steps: int = 0,
         recall_bypass_sim: float | None = None,
+        scope: MemoryScope | None = None,
+        event_sink: EventSink | EventDispatcher | None = None,
     ) -> None:
         self._store = store
         self._llm = llm
         self._counter: TokenCounter = counter or RegexTokenCounter()
         self._max_tokens = max_tokens
         self._namespace = namespace
+        self._scope = scope
+        self._event_sink = event_sink
         self._embed_model = embed_model
         self.scorer = MemoryScorer(weights)
         self.goal = GoalTracker(llm, embed_model)
@@ -96,6 +109,36 @@ class WorkingMemory:
         self.recall_bypass_sim = recall_bypass_sim
 
     def _emit(self, event: str, **data: Any) -> None:
+        if event == "evict":
+            dispatch(self._event_sink, EvictEvent(
+                action=str(data.get("reason", "evicted")),
+                scope_id=scope_id(self._scope),
+                attributes={
+                    "kind": data.get("kind"),
+                    "tokens": data.get("tokens"),
+                    "step": data.get("step"),
+                    "pinned": data.get("pinned", False),
+                },
+            ))
+        elif event in {"recall", "recall_skipped", "recall_cooldown"}:
+            dispatch(self._event_sink, RecallEvent(
+                action=event.removeprefix("recall_") if event != "recall" else "restored",
+                scope_id=scope_id(self._scope),
+                attributes={
+                    key: data[key]
+                    for key in (
+                        "kind",
+                        "similarity",
+                        "channel",
+                        "recall_count",
+                        "reason",
+                        "would_cost",
+                        "step",
+                        "cooldown",
+                    )
+                    if key in data
+                },
+            ))
         if self._trace is not None:
             try:
                 self._trace(event, data)
@@ -353,11 +396,9 @@ class WorkingMemory:
                 continue
             doc = None
             if self._store is not None and callable(getter):
-                doc = getter(f"{self._namespace}:{_COLD_DOC_PREFIX}:{lineage}")
+                doc = getter(self._cold_doc_id(lineage))
                 if doc is None and entry.item_id != lineage:
-                    doc = getter(
-                        f"{self._namespace}:{_COLD_DOC_PREFIX}:{entry.item_id}"
-                    )
+                    doc = getter(self._cold_doc_id(entry.item_id))
             if doc is None:
                 # текст недоступен — возвращаем хотя бы саммари заметкой
                 summary_text = f"(холодный запасник) {entry.summary}"
@@ -406,7 +447,7 @@ class WorkingMemory:
                                           model=self._embed_model))[0]
             hits = await await_if_needed(self._store.query(
                 qvec, top_k=max(top_k * 3, top_k + 4),
-                where={_COLD_NS_KEY: self._namespace},
+                where=self._cold_where(),
             ))
             for hit in hits:
                 if len(selected) >= top_k:
@@ -633,6 +674,16 @@ class WorkingMemory:
         for item, vec in zip(pending, vectors):
             item.vector = vec
 
+    def _cold_logical_doc_id(self, lineage: str) -> str:
+        return f"{self._namespace}:{_COLD_DOC_PREFIX}:{lineage}"
+
+    def _cold_doc_id(self, lineage: str) -> str:
+        return scoped_doc_id(self._cold_logical_doc_id(lineage), self._scope)
+
+    def _cold_where(self) -> dict[str, Any]:
+        where: dict[str, Any] = {_COLD_NS_KEY: self._namespace}
+        return self._scope.merge_where(where) if self._scope is not None else where
+
     async def _enforce_budget(self) -> None:
         guard = 0
         while self.used_tokens > self._max_tokens and guard < 10_000:
@@ -670,8 +721,9 @@ class WorkingMemory:
         lineage = item.lineage or item.id
 
         if self._store is not None:
-            doc_id = f"{self._namespace}:{_COLD_DOC_PREFIX}:{lineage}"
-            meta = {
+            logical_doc_id = self._cold_logical_doc_id(lineage)
+            doc_id = scoped_doc_id(logical_doc_id, self._scope)
+            meta = scoped_metadata(self._scope, {
                 _COLD_NS_KEY: self._namespace,
                 "orig_id": item.id,
                 "kind": item.kind,
@@ -688,7 +740,7 @@ class WorkingMemory:
                     or item.pinned
                 ),
                 "symbols": sorted(item.defs | (item.refs & item.defs)),
-            }
+            }, logical_doc_id=logical_doc_id)
             vector = item.vector or [0.0]
             # перезаписываем прежнюю копию этой родословной, если была
             await await_if_needed(self._store.delete(doc_id))
@@ -717,7 +769,7 @@ class WorkingMemory:
             reason=reason,
             step=self._step,
             terms=terms or {},
-            cold_doc=f"{self._namespace}:{_COLD_DOC_PREFIX}:{item.lineage or item.id}",
+            cold_doc=self._cold_doc_id(item.lineage or item.id),
         )
         logger.info("evicted %s [%s] (%s)", item.id, item.kind, reason)
         return True

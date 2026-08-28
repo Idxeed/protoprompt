@@ -1,14 +1,26 @@
 from __future__ import annotations
 
 import logging
+from time import perf_counter
 
 from protoprompt.context import ContextInput, ContextOutput
+from protoprompt.events import (
+    ContextEvent,
+    EventDispatcher,
+    EventSink,
+    RetrieveEvent,
+    dispatch,
+    elapsed_ms,
+    new_trace_id,
+    scope_id,
+)
 from protoprompt.hooks import ContextHooks, fire
 from protoprompt.i18n import section_header
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import EmbeddingClientProtocol
 from protoprompt.profile.render import render
 from protoprompt.rag.retriever import Retriever
 from protoprompt.rag.types import RetrievedChunk
+from protoprompt.scope import MemoryScope, scoped_doc_id
 from protoprompt.store.protocol import StoreProtocol, await_if_needed
 
 logger = logging.getLogger(__name__)
@@ -33,14 +45,24 @@ class ContextBuilder:
     def __init__(
         self,
         store: StoreProtocol,
-        llm: LLMClientProtocol,
+        llm: EmbeddingClientProtocol,
         hooks: ContextHooks | None = None,
         retriever: Retriever | None = None,
+        *,
+        scope: MemoryScope | None = None,
+        event_sink: EventSink | EventDispatcher | None = None,
     ) -> None:
         self._store = store
         self._llm = llm
         self._hooks = hooks or ContextHooks()
-        self._retriever = retriever or Retriever(store, llm)
+        retriever_scope = retriever.scope if retriever is not None else None
+        if scope is not None and retriever_scope is not None and scope != retriever_scope:
+            raise ValueError("ContextBuilder scope conflicts with retriever scope")
+        self._scope = scope if scope is not None else retriever_scope
+        self._event_sink = event_sink
+        self._retriever = retriever or Retriever(
+            store, llm, scope=self._scope, event_sink=event_sink
+        )
         self._last_report: "object | None" = None
 
     @property
@@ -51,6 +73,8 @@ class ContextBuilder:
         return self._last_report
 
     async def build(self, inp: ContextInput) -> ContextOutput:
+        started_at = perf_counter()
+        trace_id = new_trace_id()
         parts: list[str] = [inp.system_prompt] if inp.system_prompt else []
         rag_chunks: list[RetrievedChunk] = []
         rag_blocks: list[str] = []
@@ -68,16 +92,31 @@ class ContextBuilder:
                 top_k=inp.top_k_rag,
                 doc_ids=inp.doc_ids,
                 score_threshold=inp.score_threshold,
+                trace_id=trace_id,
             )
             if rag_chunks:
                 rag_blocks = [c.text for c in rag_chunks]
                 parts.append("\n\n---\n\n".join(rag_blocks))
 
         if inp.include_session and inp.chat_id and query_emb is not None:
+            retrieve_started_at = perf_counter()
             session_results = await await_if_needed(self._store.query(
                 query_emb,
                 top_k=inp.top_k_session,
-                where={"doc_id": f"session_{inp.chat_id}"},
+                where=self._session_where(inp.chat_id),
+            ))
+            dispatch(self._event_sink, RetrieveEvent(
+                action="completed",
+                trace_id=trace_id,
+                scope_id=scope_id(self._scope),
+                duration_ms=elapsed_ms(retrieve_started_at),
+                attributes={
+                    "channel": "session",
+                    "top_k": inp.top_k_session,
+                    "hit_count": len(session_results),
+                    "doc_filter_count": 1,
+                    "threshold_applied": False,
+                },
             ))
             if session_results:
                 session_texts = [r["document"] for r in session_results]
@@ -99,15 +138,27 @@ class ContextBuilder:
                 parts.append(profile_block)
                 profile_used = True
 
-        fire(self._hooks.on_build_done, None)
-
-        return ContextOutput(
+        output = ContextOutput(
             system_prompt="\n\n".join(parts),
             rag_chunks=rag_chunks,
             rag_blocks=rag_blocks,
             session_blocks=session_blocks,
             profile_used=profile_used,
         )
+        dispatch(self._event_sink, ContextEvent(
+            action="completed",
+            trace_id=trace_id,
+            scope_id=scope_id(self._scope),
+            duration_ms=elapsed_ms(started_at),
+            attributes={
+                "budgeted": False,
+                "rag_block_count": len(rag_blocks),
+                "session_block_count": len(session_blocks),
+                "profile_used": profile_used,
+            },
+        ))
+        fire(self._hooks.on_build_done, None)
+        return output
 
     async def build_messages(
         self,
@@ -129,3 +180,7 @@ class ContextBuilder:
         if user_message:
             messages.append({"role": "user", "content": user_message})
         return messages
+
+    def _session_where(self, chat_id: str) -> dict:
+        where = {"doc_id": scoped_doc_id(f"session_{chat_id}", self._scope)}
+        return self._scope.merge_where(where) if self._scope is not None else where

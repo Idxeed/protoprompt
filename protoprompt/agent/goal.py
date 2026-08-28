@@ -6,13 +6,13 @@ so re-embedding costs are negligible.
 
 from __future__ import annotations
 
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import EmbeddingClientProtocol
 
 
 class GoalTracker:
     def __init__(
         self,
-        llm: LLMClientProtocol | None = None,
+        llm: EmbeddingClientProtocol | None = None,
         embed_model: str = "nomic-embed-text",
     ) -> None:
         self._llm = llm

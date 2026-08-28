@@ -5,12 +5,15 @@ __pycache__/
 .Python
 build/
 dist/
+/dist-check/
+/dist-final/
 *.egg-info/
 *.egg
 .eggs/
 .pytest_cache/
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 site/
 .mypy_cache/

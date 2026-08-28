@@ -17,7 +17,7 @@ import logging
 from statistics import mean
 from typing import Any, Protocol
 
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import ChatClientProtocol
 from protoprompt.profile.codec import (
     DEFAULT_PROFILE,
     CodecProfile,
@@ -145,7 +145,7 @@ class LLMProfileSource:
         llm: chat-capable client.
         language: prompt language (``"ru"`` or ``"en"``).
         max_signals: cap on the number of signals fed to the model.
-        model: model name passed to :meth:`LLMClientProtocol.chat`.
+        model: model name passed to :meth:`ChatClientProtocol.chat`.
         retries: extra attempts after the first (default 1).
         fallback: a :class:`ProfileProtocol` used when the LLM cannot
             produce valid JSON; defaults to :class:`RuleProfileSource`.
@@ -153,7 +153,7 @@ class LLMProfileSource:
 
     def __init__(
         self,
-        llm: LLMClientProtocol,
+        llm: ChatClientProtocol,
         *,
         language: str = "ru",
         max_signals: int = 20,

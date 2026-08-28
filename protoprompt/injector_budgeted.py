@@ -2,16 +2,19 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field, replace
+from time import perf_counter
 
 from protoprompt.context import ContextInput, ContextOutput
 from protoprompt.exceptions import TokenBudgetExceededError
+from protoprompt.events import ContextEvent, EventDispatcher, EventSink, RetrieveEvent, dispatch, elapsed_ms, new_trace_id, scope_id
 from protoprompt.hooks import ContextHooks, fire
 from protoprompt.i18n import section_header
 from protoprompt.injector import ContextBuilder
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import EmbeddingClientProtocol
 from protoprompt.profile.render import render
 from protoprompt.rag.retriever import Retriever
 from protoprompt.rag.types import RetrievedChunk
+from protoprompt.scope import MemoryScope
 from protoprompt.store.protocol import StoreProtocol, await_if_needed
 from protoprompt.tokens.protocol import TokenCounter
 from protoprompt.tokens.regex_counter import RegexTokenCounter
@@ -84,19 +87,31 @@ class TokenBudgetedContextBuilder(ContextBuilder):
     def __init__(
         self,
         store: StoreProtocol,
-        llm: LLMClientProtocol,
+        llm: EmbeddingClientProtocol,
         counter: TokenCounter | None = None,
         max_tokens: int = 4096,
         priorities: tuple[Priority, ...] = DEFAULT_PRIORITIES,
         hooks: ContextHooks | None = None,
         retriever: Retriever | None = None,
+        *,
+        scope: MemoryScope | None = None,
+        event_sink: EventSink | EventDispatcher | None = None,
     ) -> None:
-        super().__init__(store, llm, hooks=hooks, retriever=retriever)
+        super().__init__(
+            store,
+            llm,
+            hooks=hooks,
+            retriever=retriever,
+            scope=scope,
+            event_sink=event_sink,
+        )
         self._counter: TokenCounter = counter or RegexTokenCounter()
         self._max_tokens = max_tokens
         self._priorities = priorities
 
     async def build(self, inp: ContextInput) -> ContextOutput:
+        started_at = perf_counter()
+        trace_id = new_trace_id()
         report = BudgetReport(budget=self._max_tokens)
 
         system_cost = self._counter.count(inp.system_prompt) if inp.system_prompt else 0
@@ -151,6 +166,7 @@ class TokenBudgetedContextBuilder(ContextBuilder):
                     top_k=max(1, inp.top_k_rag * 2),
                     doc_ids=inp.doc_ids,
                     score_threshold=inp.score_threshold,
+                    trace_id=trace_id,
                 )
                 for i, chunk in enumerate(rag_chunks):
                     pool[SEGMENT_RAG].append(_Candidate(
@@ -161,10 +177,24 @@ class TokenBudgetedContextBuilder(ContextBuilder):
                     ))
 
             if inp.include_session and inp.chat_id:
+                retrieve_started_at = perf_counter()
                 session_hits = await await_if_needed(self._store.query(
                     query_emb,
                     top_k=max(1, inp.top_k_session * 2),
-                    where={"doc_id": f"session_{inp.chat_id}"},
+                    where=self._session_where(inp.chat_id),
+                ))
+                dispatch(self._event_sink, RetrieveEvent(
+                    action="completed",
+                    trace_id=trace_id,
+                    scope_id=scope_id(self._scope),
+                    duration_ms=elapsed_ms(retrieve_started_at),
+                    attributes={
+                        "channel": "session",
+                        "top_k": max(1, inp.top_k_session * 2),
+                        "hit_count": len(session_hits),
+                        "doc_filter_count": 1,
+                        "threshold_applied": False,
+                    },
                 ))
                 for i, hit in enumerate(session_hits):
                     pool[SEGMENT_SESSION].append(_Candidate(
@@ -250,10 +280,7 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         report.used_tokens = self._counter.count(system_prompt)
         report.remaining_tokens = self._max_tokens - report.used_tokens
 
-        fire(self._hooks.on_build_done, report)
-        self._last_report = report
-
-        return ContextOutput(
+        output = ContextOutput(
             system_prompt=system_prompt,
             rag_chunks=kept_rag_chunks,
             rag_blocks=kept_rag,
@@ -261,6 +288,25 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             profile_used=bool(profile_block),
             budget_report=report,
         )
+        dispatch(self._event_sink, ContextEvent(
+            action="completed",
+            trace_id=trace_id,
+            scope_id=scope_id(self._scope),
+            duration_ms=elapsed_ms(started_at),
+            attributes={
+                "budgeted": True,
+                "budget": report.budget,
+                "used_tokens": report.used_tokens,
+                "remaining_tokens": report.remaining_tokens,
+                "dropped_block_count": len(report.dropped_blocks),
+                "rag_block_count": len(kept_rag),
+                "session_block_count": len(kept_session),
+                "profile_used": bool(profile_block),
+            },
+        ))
+        fire(self._hooks.on_build_done, report)
+        self._last_report = report
+        return output
 
     @staticmethod
     def _assemble_prompt(

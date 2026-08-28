@@ -1,6 +1,6 @@
 [project]
 name = "protoprompt"
-version = "0.3.0"
+version = "0.6.0"
 description = "Layered context builder for LLM prompts: RAG + compressed session memory + user profile"
 requires-python = ">=3.11"
 license = "MIT"
@@ -22,7 +22,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-chroma = ["chromadb>=0.5,<0.6"]
+chroma = ["chromadb>=1.5,<2"]
 tiktoken = ["tiktoken>=0.5"]
 http = ["httpx>=0.27"]
 ollama = ["httpx>=0.27"]
@@ -31,10 +31,37 @@ qdrant = ["qdrant-client>=1.12"]
 fastembed = ["fastembed>=0.4"]
 local = ["sentence-transformers>=3.0"]
 secrets = ["cryptography>=42", "keyring>=24"]
+mcp = ["mcp>=2,<3"]
+agents = ["openai-agents>=0.22,<0.23"]
+langgraph = ["langgraph>=1.2,<1.3"]
+telegram = ["aiogram>=3.31,<4"]
+postgres = ["psycopg[binary,pool]>=3.3,<3.4"]
+otel = [
+    "opentelemetry-sdk>=1.44,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.44,<2",
+]
+redis = ["redis>=8.1,<9"]
+anthropic = ["anthropic>=1,<2"]
+google = ["google-genai>=2.20,<3"]
+bedrock = ["boto3>=1.43,<2"]
+aws-secrets = ["boto3>=1.43,<2"]
+gcp-secrets = ["google-cloud-secret-manager>=2.30,<3"]
+fastapi = ["fastapi>=0.141,<1", "uvicorn>=0.52,<1"]
+pydanticai = ["pydantic-ai-slim>=2.35,<3"]
+llamaindex = ["llama-index-core>=0.14,<0.15"]
+documents = [
+    "pypdf>=6.16,<7",
+    "python-docx>=1.2,<2",
+    "beautifulsoup4>=4.14,<5",
+]
+elasticsearch = ["elasticsearch[async]>=9.5,<10"]
+# 3.2.0 has an open Async AWS SigV4 signing regression; widen after upstream fix.
+opensearch = ["opensearch-py[async]>=3.1,<3.2"]
 dev = [
     "pytest>=8",
     "pytest-asyncio>=0.24",
     "pytest-cov>=5",
+    "pytest-socket>=0.7,<1",
     "mkdocs>=1.5",
     "mkdocs-material>=9",
     "mkdocstrings[python]>=0.24",
@@ -42,6 +69,29 @@ dev = [
     "openai>=1.40",
     "cryptography>=42",
     "keyring>=24",
+    "mcp>=2,<3",
+    "openai-agents>=0.22,<0.23",
+    "langgraph>=1.2,<1.3",
+    "aiogram>=3.31,<4",
+    "pillow>=12,<13",
+    "psycopg[binary,pool]>=3.3,<3.4",
+    "opentelemetry-sdk>=1.44,<2",
+    "opentelemetry-exporter-otlp-proto-grpc>=1.44,<2",
+    "redis>=8.1,<9",
+    "fakeredis>=2.31,<3",
+    "anthropic>=1,<2",
+    "google-genai>=2.20,<3",
+    "boto3>=1.43,<2",
+    "google-cloud-secret-manager>=2.30,<3",
+    "fastapi>=0.141,<1",
+    "uvicorn>=0.52,<1",
+    "pydantic-ai-slim>=2.35,<3",
+    "llama-index-core>=0.14,<0.15",
+    "pypdf>=6.16,<7",
+    "python-docx>=1.2,<2",
+    "beautifulsoup4>=4.14,<5",
+    "elasticsearch[async]>=9.5,<10",
+    "opensearch-py[async]>=3.1,<3.2",
 ]
 
 [project.urls]

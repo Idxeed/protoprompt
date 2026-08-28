@@ -11,7 +11,7 @@ from __future__ import annotations
 import re
 from typing import Protocol, runtime_checkable
 
-from protoprompt.llm import LLMClientProtocol
+from protoprompt.llm import ChatClientProtocol
 from protoprompt.rag.types import RetrievedChunk
 
 _RANK_PROMPT_RU = (
@@ -55,13 +55,13 @@ class LLMReranker:
 
     Args:
         llm: chat-capable client.
-        model: model name passed to :meth:`LLMClientProtocol.chat`.
+        model: model name passed to :meth:`ChatClientProtocol.chat`.
         temperature: sampling temperature for the ranking call.
     """
 
     def __init__(
         self,
-        llm: LLMClientProtocol,
+        llm: ChatClientProtocol,
         model: str = "",
         temperature: float = 0.0,
     ) -> None:
