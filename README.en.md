@@ -204,6 +204,17 @@ pip install -e ".[chroma,qdrant,dev]"
 pytest
 ```
 
+Run the offline, network-free memory regression gate with:
+
+```bash
+python scripts/run_memory_benchmark.py --suite v0.1 --verify
+```
+
+The versioned fixtures, fixed baselines, and interpretation boundaries are in
+[`benchmarks/README.md`](benchmarks/README.md). CI runs this gate alongside
+the test matrix, integration tests, package smoke test, agent CLI tests, and
+documentation builds.
+
 ## License
 
 MIT — see [LICENSE](LICENSE).

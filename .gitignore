@@ -7,6 +7,7 @@ build/
 dist/
 /dist-check/
 /dist-final/
+/dist-benchmark/
 *.egg-info/
 *.egg
 .eggs/
@@ -36,6 +37,8 @@ venv/
 node_modules/
 examples/knowledge.db
 /benchmark/
+/benchmarks/results/*
+!/benchmarks/results/.gitkeep
 
 # Local reference-app state must never become a source artifact.  PDFs,
 # vector indexes, runtime credentials and process files live here locally.

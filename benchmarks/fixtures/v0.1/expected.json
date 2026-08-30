@@ -1,0 +1,369 @@
+{
+  "fixture_sha256": "b0e5349787813c8b7cfe195d99a71c0d114da8c124b8e93113976ce4c4dccba4",
+  "report": {
+    "cases": [
+      {
+        "id": "delayed_cold_recall",
+        "results": {
+          "protoprompt_0_6_1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": true,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          },
+          "protoprompt_context_plan_v0_7": {
+            "budget_violation_count": 0,
+            "channel_evidence": {
+              "rag": true
+            },
+            "cold_reopen": true,
+            "decision_contract_coverage": 1.0,
+            "evidence_available": true,
+            "explain_content_leak": false,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": true,
+            "scope_leak_count": null,
+            "source_ref_present": true,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          },
+          "rolling_summary_v1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          },
+          "tail_window_v1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": false,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          },
+          "vector_recall_v1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": true,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          }
+        }
+      },
+      {
+        "id": "near_collision_recall",
+        "results": {
+          "protoprompt_0_6_1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": true,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          },
+          "protoprompt_context_plan_v0_7": {
+            "budget_violation_count": 0,
+            "channel_evidence": {
+              "rag": true
+            },
+            "cold_reopen": true,
+            "decision_contract_coverage": 1.0,
+            "evidence_available": true,
+            "explain_content_leak": false,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": true,
+            "scope_leak_count": null,
+            "source_ref_present": true,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          },
+          "rolling_summary_v1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          },
+          "tail_window_v1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": false,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          },
+          "vector_recall_v1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": true,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          }
+        }
+      },
+      {
+        "id": "scope_isolation",
+        "results": {
+          "protoprompt_0_6_1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": true,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": 0,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          },
+          "protoprompt_context_plan_v0_7": {
+            "budget_violation_count": 0,
+            "channel_evidence": {
+              "rag": true
+            },
+            "cold_reopen": true,
+            "decision_contract_coverage": 1.0,
+            "evidence_available": true,
+            "explain_content_leak": false,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": true,
+            "scope_leak_count": 0,
+            "source_ref_present": true,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          },
+          "rolling_summary_v1": {
+            "budget_violation_count": null,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": null,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "not_supported",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          },
+          "tail_window_v1": {
+            "budget_violation_count": null,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": null,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "not_supported",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          },
+          "vector_recall_v1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": true,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": 0,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": null
+          }
+        }
+      },
+      {
+        "id": "final_request_budget",
+        "results": {
+          "protoprompt_0_6_1": {
+            "budget_violation_count": 0,
+            "channel_evidence": null,
+            "cold_reopen": true,
+            "decision_contract_coverage": null,
+            "evidence_available": true,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": true,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": true
+          },
+          "protoprompt_context_plan_v0_7": {
+            "budget_violation_count": 0,
+            "channel_evidence": {
+              "rag": true,
+              "session": true
+            },
+            "cold_reopen": true,
+            "decision_contract_coverage": 1.0,
+            "evidence_available": true,
+            "explain_content_leak": false,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": true,
+            "scope_leak_count": null,
+            "source_ref_present": true,
+            "status": "ok",
+            "target_rank": 1,
+            "tool_dependency_preserved": true
+          },
+          "rolling_summary_v1": {
+            "budget_violation_count": null,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": null,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "not_supported",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          },
+          "tail_window_v1": {
+            "budget_violation_count": null,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": null,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "not_supported",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          },
+          "vector_recall_v1": {
+            "budget_violation_count": null,
+            "channel_evidence": null,
+            "cold_reopen": null,
+            "decision_contract_coverage": null,
+            "evidence_available": null,
+            "explain_content_leak": null,
+            "legacy_budget_report_reconciles": null,
+            "receipt_reconciles": null,
+            "scope_leak_count": null,
+            "source_ref_present": null,
+            "status": "not_supported",
+            "target_rank": null,
+            "tool_dependency_preserved": null
+          }
+        }
+      }
+    ],
+    "embedding_algorithm": "seeded-blake2b-feature-hash-v1",
+    "fixture_sha256": "b0e5349787813c8b7cfe195d99a71c0d114da8c124b8e93113976ce4c4dccba4",
+    "frozen_reference_sha256": "13d6c17f4193ce94f8b5d78be3b2c9275445a26749bb66e3d5877af6c5ef0600",
+    "implementations": [
+      {
+        "execution": "runtime",
+        "id": "tail_window_v1",
+        "role": "baseline"
+      },
+      {
+        "execution": "runtime",
+        "id": "rolling_summary_v1",
+        "role": "baseline"
+      },
+      {
+        "execution": "runtime",
+        "id": "vector_recall_v1",
+        "role": "baseline"
+      },
+      {
+        "execution": "frozen_reference",
+        "id": "protoprompt_0_6_1",
+        "role": "baseline"
+      },
+      {
+        "execution": "runtime",
+        "id": "protoprompt_context_plan_v0_7",
+        "role": "candidate"
+      }
+    ],
+    "report_schema_version": 1,
+    "suite_version": "v0.1"
+  },
+  "report_schema_version": 1
+}

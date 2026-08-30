@@ -215,8 +215,16 @@ pytest
 python scripts/build_docs.py --clean
 ```
 
-CI проверяет Python 3.11–3.13, интеграционные тесты, CLI, содержимое wheel и
-обе строгие сборки документации.
+Офлайн-гейт памяти запускается без Ollama и сети:
+
+```bash
+python scripts/run_memory_benchmark.py --suite v0.1 --verify
+```
+
+Его сценарии, фиксированные baseline и правила версионирования находятся в
+[`benchmarks/README.md`](benchmarks/README.md). CI проверяет Python 3.11–3.13,
+интеграционные тесты, CLI, содержимое wheel, этот benchmark и обе строгие
+сборки документации.
 
 ## Лицензия
 

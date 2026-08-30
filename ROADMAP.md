@@ -129,7 +129,7 @@ index, summaries и framework-specific state — его projections/caches, а �
 - [x] Добавить `plan.explain()` и developer recipe для просмотра решения.
 - [x] Ввести request-scoped receipt вместо reliance на mutable last report.
 - [ ] Перевести `pp-agent` на единый safe final-request path.
-- [ ] Выпустить ProtoPrompt Memory Benchmark v0.1: versioned offline fixtures,
+- [x] Выпустить ProtoPrompt Memory Benchmark v0.1: versioned offline fixtures,
   fixed baselines (sliding window, rolling summary, vector recall, `0.6`
   pipeline) и machine-readable report.
 - [ ] Подключить local Ollama/PDF app как hardened reference integration:

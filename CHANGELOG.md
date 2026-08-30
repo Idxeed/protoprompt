@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   immutable, deep-copied provider request plus exact request accounting.
 - Content-free, JSON-safe `ContextPlan.explain()` metadata for developer UIs,
   audit trails, and deterministic context-selection regression tests.
+- Versioned, network-free Memory Benchmark v0.1 with frozen fixtures,
+  deterministic baselines, a `v0.6.1` reference, SQLite cold-reopen and
+  scope probes, and a CI verification gate for semantic outcomes.
 
 ### Changed
 - `TokenBudgetedContextBuilder.build()` now attaches its context-only plan as

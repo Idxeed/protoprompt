@@ -1,0 +1,86 @@
+{
+  "schema_version": 1,
+  "baseline_id": "protoprompt_0_6_1",
+  "suite": {
+    "id": "offline-memory-context-regression",
+    "canonical_sha256": "b0e5349787813c8b7cfe195d99a71c0d114da8c124b8e93113976ce4c4dccba4"
+  },
+  "source": {
+    "package": "protoprompt",
+    "version": "0.6.1",
+    "git_tag": "v0.6.1",
+    "git_commit": "fee6272856ba52f2cb157acd5820749678ec95c0",
+    "execution": "frozen-reference-not-executed-through-current-runtime"
+  },
+  "capabilities": {
+    "sqlite_cold_reopen": true,
+    "scoped_memory_service": true,
+    "legacy_full_request_budget": true,
+    "context_plan": false,
+    "context_request_receipt": false,
+    "context_decisions": false,
+    "context_plan_content_free_explain": false
+  },
+  "case_results": {
+    "delayed_cold_recall": {
+      "status": "ok",
+      "evidence_available": true,
+      "target_rank": 1,
+      "scope_leak_count": null,
+      "budget_violation_count": 0,
+      "receipt_reconciles": null,
+      "legacy_budget_report_reconciles": null,
+      "decision_contract_coverage": null,
+      "explain_content_leak": null,
+      "source_ref_present": null,
+      "tool_dependency_preserved": null,
+      "channel_evidence": null,
+      "cold_reopen": true
+    },
+    "near_collision_recall": {
+      "status": "ok",
+      "evidence_available": true,
+      "target_rank": 1,
+      "scope_leak_count": null,
+      "budget_violation_count": 0,
+      "receipt_reconciles": null,
+      "legacy_budget_report_reconciles": null,
+      "decision_contract_coverage": null,
+      "explain_content_leak": null,
+      "source_ref_present": null,
+      "tool_dependency_preserved": null,
+      "channel_evidence": null,
+      "cold_reopen": true
+    },
+    "scope_isolation": {
+      "status": "ok",
+      "evidence_available": true,
+      "target_rank": 1,
+      "scope_leak_count": 0,
+      "budget_violation_count": 0,
+      "receipt_reconciles": null,
+      "legacy_budget_report_reconciles": null,
+      "decision_contract_coverage": null,
+      "explain_content_leak": null,
+      "source_ref_present": null,
+      "tool_dependency_preserved": null,
+      "channel_evidence": null,
+      "cold_reopen": true
+    },
+    "final_request_budget": {
+      "status": "ok",
+      "evidence_available": true,
+      "target_rank": 1,
+      "scope_leak_count": null,
+      "budget_violation_count": 0,
+      "receipt_reconciles": null,
+      "legacy_budget_report_reconciles": true,
+      "decision_contract_coverage": null,
+      "explain_content_leak": null,
+      "source_ref_present": null,
+      "tool_dependency_preserved": true,
+      "channel_evidence": null,
+      "cold_reopen": true
+    }
+  }
+}

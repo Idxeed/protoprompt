@@ -1,0 +1,330 @@
+{
+  "schema_version": 1,
+  "suite_version": "v0.1",
+  "suite_id": "offline-memory-context-regression",
+  "sqlite": {
+    "cold_reopen_after_ingest": true
+  },
+  "embedding": {
+    "algorithm": "seeded-blake2b-feature-hash-v1",
+    "seed": "protoprompt-memory-benchmark-v0.1-seed-04-6",
+    "dimensions": 4096
+  },
+  "baselines": {
+    "tail_window_v1": {
+      "kind": "last_primary_records",
+      "window_records": 2
+    },
+    "rolling_summary_v1": {
+      "kind": "deterministic_key_value_ledger",
+      "update_rule": "last_write_wins_per_key",
+      "max_keys": 8
+    },
+    "vector_recall_v1": {
+      "kind": "memory_service_search",
+      "top_k": 1,
+      "score_threshold": 0.5
+    },
+    "request_packer": {
+      "algorithm": "greedy-final-request-packer-v1",
+      "optional_priority": "context_then_newest_history"
+    }
+  },
+  "context_plan": {
+    "max_tokens": 256,
+    "output_reserve_tokens": 24,
+    "top_k_rag": 1,
+    "score_threshold": 0.5
+  },
+  "collision_guard": {
+    "min_target_cosine": 0.55,
+    "max_non_target_cosine": 0.3,
+    "min_target_margin": 0.25
+  },
+  "cases": [
+    {
+      "id": "delayed_cold_recall",
+      "category": "recall",
+      "scope": {
+        "tenant": "TENANT_AURORA_PRIVATE",
+        "user": "alice",
+        "thread": "delayed"
+      },
+      "records": [
+        {
+          "memory_id": "DOCID_AURORA_001",
+          "text": "anchor_aurora cobalt_aurora ANSWER_AURORA_71 RAW_RAG_AURORA",
+          "summary": {
+            "key": "aurora",
+            "value": "ANSWER_AURORA_71"
+          }
+        },
+        {
+          "memory_id": "filler_aurora_1",
+          "text": "anchor_ember filler_ember stable"
+        },
+        {
+          "memory_id": "filler_aurora_2",
+          "text": "anchor_fjord filler_fjord stable"
+        },
+        {
+          "memory_id": "filler_aurora_3",
+          "text": "anchor_glade filler_glade stable"
+        }
+      ],
+      "query": "anchor_aurora cobalt_aurora RAW_QUERY_AURORA",
+      "target_memory_id": "DOCID_AURORA_001",
+      "sentinel": "ANSWER_AURORA_71",
+      "explain_private_markers": [
+        "ANSWER_AURORA_71",
+        "RAW_RAG_AURORA",
+        "RAW_QUERY_AURORA",
+        "RAW_SYSTEM_AURORA",
+        "RAW_FINAL_AURORA"
+      ],
+      "plan_request": {
+        "system_prompt": "Answer from retrieved memory only. RAW_SYSTEM_AURORA",
+        "history": [],
+        "final_messages": [
+          {
+            "role": "user",
+            "content": "anchor_aurora cobalt_aurora RAW_FINAL_AURORA"
+          }
+        ]
+      }
+    },
+    {
+      "id": "near_collision_recall",
+      "category": "recall",
+      "scope": {
+        "tenant": "TENANT_STRATUS_PRIVATE",
+        "user": "alice",
+        "thread": "collision"
+      },
+      "records": [
+        {
+          "memory_id": "DOCID_STRATUS_TARGET",
+          "text": "anchor_stratus exact_stratus ANSWER_STRATUS_73 RAW_RAG_STRATUS",
+          "summary": {
+            "key": "stratus",
+            "value": "ANSWER_STRATUS_73"
+          }
+        },
+        {
+          "memory_id": "DOCID_STRATUS_DISTRACTOR",
+          "text": "anchor_stratus nearby_stratum ANSWER_STRATUM_12 RAW_RAG_STRATUM",
+          "summary": {
+            "key": "stratum",
+            "value": "ANSWER_STRATUM_12"
+          }
+        },
+        {
+          "memory_id": "filler_stratus_1",
+          "text": "anchor_harbor filler_harbor stable"
+        },
+        {
+          "memory_id": "filler_stratus_2",
+          "text": "anchor_island filler_island stable"
+        }
+      ],
+      "query": "anchor_stratus exact_stratus RAW_QUERY_STRATUS",
+      "target_memory_id": "DOCID_STRATUS_TARGET",
+      "sentinel": "ANSWER_STRATUS_73",
+      "explain_private_markers": [
+        "DOCID_STRATUS_DISTRACTOR",
+        "ANSWER_STRATUS_73",
+        "ANSWER_STRATUM_12",
+        "RAW_RAG_STRATUS",
+        "RAW_RAG_STRATUM",
+        "RAW_QUERY_STRATUS",
+        "RAW_SYSTEM_STRATUS",
+        "RAW_FINAL_STRATUS"
+      ],
+      "plan_request": {
+        "system_prompt": "Answer from retrieved memory only. RAW_SYSTEM_STRATUS",
+        "history": [],
+        "final_messages": [
+          {
+            "role": "user",
+            "content": "anchor_stratus exact_stratus RAW_FINAL_STRATUS"
+          }
+        ]
+      }
+    },
+    {
+      "id": "scope_isolation",
+      "category": "scope",
+      "scope": {
+        "tenant": "TENANT_SCOPE_PRIVATE",
+        "user": "alice",
+        "thread": "scope"
+      },
+      "records": [
+        {
+          "memory_id": "DOCID_SCOPE_SHARED",
+          "text": "anchor_scope local_scope ANSWER_SCOPE_LOCAL_44 RAW_RAG_SCOPE_LOCAL",
+          "summary": {
+            "key": "scope",
+            "value": "ANSWER_SCOPE_LOCAL_44"
+          }
+        },
+        {
+          "memory_id": "filler_scope_1",
+          "text": "anchor_juniper filler_juniper stable"
+        },
+        {
+          "memory_id": "filler_scope_2",
+          "text": "anchor_kestrel filler_kestrel stable"
+        }
+      ],
+      "foreign_records": [
+        {
+          "scope": {
+            "tenant": "TENANT_SCOPE_FOREIGN_PRIVATE",
+            "user": "alice",
+            "thread": "scope"
+          },
+          "memory_id": "DOCID_SCOPE_SHARED",
+          "text": "anchor_scope foreign_tenant ANSWER_SCOPE_FOREIGN_TENANT_99 RAW_RAG_SCOPE_FOREIGN_TENANT"
+        },
+        {
+          "scope": {
+            "tenant": "TENANT_SCOPE_PRIVATE",
+            "user": "bob",
+            "thread": "scope"
+          },
+          "memory_id": "DOCID_SCOPE_SHARED",
+          "text": "anchor_scope foreign_user ANSWER_SCOPE_FOREIGN_USER_98 RAW_RAG_SCOPE_FOREIGN_USER"
+        },
+        {
+          "scope": {
+            "tenant": "TENANT_SCOPE_PRIVATE",
+            "user": "alice",
+            "thread": "foreign-thread"
+          },
+          "memory_id": "DOCID_SCOPE_SHARED",
+          "text": "anchor_scope foreign_thread ANSWER_SCOPE_FOREIGN_THREAD_97 RAW_RAG_SCOPE_FOREIGN_THREAD"
+        }
+      ],
+      "query": "anchor_scope local_scope RAW_QUERY_SCOPE",
+      "target_memory_id": "DOCID_SCOPE_SHARED",
+      "sentinel": "ANSWER_SCOPE_LOCAL_44",
+      "foreign_sentinels": [
+        "ANSWER_SCOPE_FOREIGN_TENANT_99",
+        "ANSWER_SCOPE_FOREIGN_USER_98",
+        "ANSWER_SCOPE_FOREIGN_THREAD_97"
+      ],
+      "explain_private_markers": [
+        "ANSWER_SCOPE_LOCAL_44",
+        "ANSWER_SCOPE_FOREIGN_TENANT_99",
+        "ANSWER_SCOPE_FOREIGN_USER_98",
+        "ANSWER_SCOPE_FOREIGN_THREAD_97",
+        "RAW_RAG_SCOPE_LOCAL",
+        "RAW_RAG_SCOPE_FOREIGN_TENANT",
+        "RAW_RAG_SCOPE_FOREIGN_USER",
+        "RAW_RAG_SCOPE_FOREIGN_THREAD",
+        "RAW_QUERY_SCOPE",
+        "RAW_SYSTEM_SCOPE",
+        "RAW_FINAL_SCOPE"
+      ],
+      "plan_request": {
+        "system_prompt": "Answer from retrieved memory only. RAW_SYSTEM_SCOPE",
+        "history": [],
+        "final_messages": [
+          {
+            "role": "user",
+            "content": "anchor_scope local_scope RAW_FINAL_SCOPE"
+          }
+        ]
+      }
+    },
+    {
+      "id": "final_request_budget",
+      "category": "final_request",
+      "scope": {
+        "tenant": "TENANT_ORCHID_PRIVATE",
+        "user": "alice",
+        "thread": "tool"
+      },
+      "records": [
+        {
+          "memory_id": "DOCID_ORCHID_TARGET",
+          "text": "anchor_orchid exact_orchid ANSWER_ORCHID_88 RAW_RAG_ORCHID",
+          "summary": {
+            "key": "orchid",
+            "value": "ANSWER_ORCHID_88"
+          }
+        },
+        {
+          "memory_id": "DOCID_ORCHID_DISTRACTOR",
+          "text": "anchor_orchid nearby_lilac ANSWER_LILAC_11 RAW_RAG_LILAC",
+          "summary": {
+            "key": "lilac",
+            "value": "ANSWER_LILAC_11"
+          }
+        },
+        {
+          "memory_id": "filler_orchid_1",
+          "text": "anchor_willow filler_willow stable"
+        },
+        {
+          "memory_id": "filler_orchid_2",
+          "text": "anchor_zephyr filler_zephyr stable"
+        }
+      ],
+      "session": {
+        "chat_id": "CHAT_ORCHID_PRIVATE",
+        "text": "session_orchid SESSION_ORCHID_32 RAW_SESSION_ORCHID",
+        "sentinel": "SESSION_ORCHID_32"
+      },
+      "query": "anchor_orchid exact_orchid RAW_QUERY_ORCHID",
+      "target_memory_id": "DOCID_ORCHID_TARGET",
+      "sentinel": "ANSWER_ORCHID_88",
+      "explain_private_markers": [
+        "DOCID_ORCHID_DISTRACTOR",
+        "ANSWER_ORCHID_88",
+        "ANSWER_LILAC_11",
+        "RAW_RAG_ORCHID",
+        "RAW_RAG_LILAC",
+        "SESSION_ORCHID_32",
+        "RAW_SESSION_ORCHID",
+        "RAW_QUERY_ORCHID",
+        "RAW_SYSTEM_ORCHID",
+        "RAW_FINAL_ORCHID",
+        "RAW_TOOL_ARGS_ORCHID",
+        "RAW_TOOL_RESULT_ORCHID",
+        "CALL_ORCHID_PRIVATE"
+      ],
+      "plan_request": {
+        "system_prompt": "Answer from retrieved memory only. RAW_SYSTEM_ORCHID",
+        "history": [
+          {
+            "role": "assistant",
+            "content": null,
+            "tool_calls": [
+              {
+                "id": "CALL_ORCHID_PRIVATE",
+                "type": "function",
+                "function": {
+                  "name": "lookup",
+                  "arguments": "{\"hint\":\"RAW_TOOL_ARGS_ORCHID\"}"
+                }
+              }
+            ]
+          },
+          {
+            "role": "tool",
+            "tool_call_id": "CALL_ORCHID_PRIVATE",
+            "content": "RAW_TOOL_RESULT_ORCHID"
+          }
+        ],
+        "final_messages": [
+          {
+            "role": "user",
+            "content": "anchor_orchid exact_orchid RAW_FINAL_ORCHID"
+          }
+        ]
+      }
+    }
+  ]
+}
