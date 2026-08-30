@@ -6,6 +6,7 @@ include RELEASE_NOTES.md
 include CONTRIBUTING.md
 include INTEGRATIONS.md
 include ROADMAP.md
+include LAUNCH-*.md
 include docker-compose.*.yml
 recursive-include docs *.md *.png *.gif *.svg
 recursive-include scripts *.py

@@ -1,8 +1,9 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.13.0` добавляет optional PostgreSQL-conformant Ledger v6 с тем же
-> sync host contract, fresh dedicated schema и fail-closed storage validation;
-> следующий этап — стабилизация и RC к `1.0.0`.
+> Статус: `0.14.0` добавляет bounded backend-neutral property/state-machine
+> conformance для Ledger v6: scope, lifecycle, deletion/source revocation и
+> exact token/byte recall accounting проверяются на SQLite и PostgreSQL без
+> расширения public API; следующий этап — остальные RC-gates к `1.0.0`.
 > Обновлён: 2026-08-30.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
@@ -396,6 +397,34 @@ authorization layer, PostgreSQL migration toolkit, performance claim или
 не выдаётся plugin-коду; production роль и schema ownership остаются частью
 операционной модели хоста.
 
+## 0.14.0 — RC property conformance
+
+**Цель:** расширить доказательство существующего Ledger v6 contract на
+детерминированно сгенерированные последовательности, не меняя public API и не
+выдавая тест за performance benchmark.
+
+### Выполнено
+
+- [x] Добавлен bounded deterministic Hypothesis state machine через public
+  `MemoryWriter` APIs. SQLite gate выполняет 20 examples × 12 шагов и
+  проверяет propose/confirm/quarantine/expire/retract/supersede, exact retry,
+  stale/invalid atomicity, `forget`, hard erase, source revocation/re-ingest и
+  scope isolation при одинаковых logical IDs/source refs.
+- [x] Тот же backend-neutral contract запускается в PostgreSQL integration
+  lane на fresh disposable schemas с меньшим bounded profile; он не получает
+  SQLite SQL-инспекцию или backend-specific exemptions.
+- [x] Generated strict-recall property заводит документы только через
+  `MemoryReviewGate`, проверяет whole-record token/UTF-8 byte packing,
+  plan/resolve receipt reconciliation и отсутствие plaintext в `explain()`.
+  Он идёт для SQLite и PostgreSQL.
+
+### Неподвижная граница
+
+Это property/conformance proof, а не latency/throughput/quality benchmark,
+универсальный fuzzing service или claim о 10k-record runtime. Отдельный v1
+benchmark и reference hardware manifest остаются необходимы для target
+planning p95.
+
 ## 1.0.0 release candidates — Stabilize, don't expand
 
 После `0.9.0` начинается API freeze. Новая feature не входит в RC без
@@ -410,8 +439,8 @@ authorization layer, PostgreSQL migration toolkit, performance claim или
 - Провести stress, concurrency и crash-recovery tests SQLite/Postgres.
 - Сохранить PostgreSQL Ledger catalog/tamper conformance как обязательный
   release gate и подтвердить recovery на управляемом PostgreSQL deployment.
-- Добавить fuzz/property tests для scope, lifecycle transitions, deletion и
-  token packing.
+- [x] Добавить fuzz/property tests для scope, lifecycle transitions, deletion
+  и token packing.
 - Провести security review: provenance spoofing, prompt injection, stale
   records, PII/redaction, authorization и data erasure.
 - Проверить wheels/sdists, Python 3.11–3.13, lazy extras, RU/EN docs и

@@ -14,7 +14,7 @@ embeddable context runtime: RAG, память диалога, профиль п�
 [Примеры](examples/) ·
 [Каталог интеграций](INTEGRATIONS.md) ·
 [Roadmap](ROADMAP.md) ·
-[Launch v0.13](LAUNCH-v0.13.md) ·
+[Launch v0.14](LAUNCH-v0.14.md) ·
 [Как добавить интеграцию](CONTRIBUTING.md) ·
 [Changelog](CHANGELOG.md)
 
@@ -75,6 +75,11 @@ lock-ом с 5-секундной границей retry и fail-closed вали
 Он не переносит автоматически SQLite/старые PostgreSQL Ledger, не обещает
 throughput и не превращает Ledger в agent state, workflow engine или
 exactly-once механизм. См. [руководство PostgreSQL](docs/ru/postgres.md).
+
+v0.14 — RC-hardening без расширения public API: bounded property/state-machine
+gate проверяет scope, lifecycle, deletion/source revocation и exact Ledger
+token/byte accounting на SQLite и PostgreSQL. Он не является latency,
+throughput или model-quality benchmark.
 
 ## Установка
 

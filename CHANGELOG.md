@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-08-30
+
+### Added
+- Bounded deterministic property/state-machine conformance for the existing
+  Ledger v6 public host contract. The SQLite gate exercises generated scope,
+  lifecycle, idempotency, deletion/source-revocation, hard-erase, and stale
+  transition sequences; PostgreSQL runs the same backend-neutral properties on
+  fresh disposable schemas.
+- Generated strict-recall packing checks for SQLite and PostgreSQL. Documents
+  enter only through `MemoryReviewGate`; the gate verifies whole-record token
+  and UTF-8-byte budgets, plan/resolve receipt reconciliation, and
+  payload-free `explain()` output.
+
+### Changed
+- The `dev` extra now includes Hypothesis for the bounded deterministic RC
+  property gate. Core runtime dependencies and public API behavior are
+  unchanged.
+
 ## [0.13.0] - 2026-08-30
 
 ### Added

@@ -35,6 +35,8 @@ protects unrelated data from backend-specific behaviour.
 python -m pytest -m "not integration" --disable-socket \
   --allow-unix-socket --allow-hosts=127.0.0.1,::1,localhost
 python -m pytest -m integration
+python -m pytest -q tests/test_ledger_property_conformance_sqlite.py \
+  tests/test_ledger_recall_property_sqlite.py
 python -m mkdocs build --strict -f mkdocs.ru.yml
 python -m mkdocs build --strict -f mkdocs.en.yml
 python -m build --sdist --wheel

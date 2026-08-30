@@ -8,7 +8,7 @@
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.md) · [v0.13 launch kit](LAUNCH-v0.13.md)
+[Русская версия](README.md) · [v0.14 launch kit](LAUNCH-v0.14.md)
 
 **Reliable agent memory under a fixed context budget.** ProtoPrompt is an
 embeddable context runtime for LLM applications. The core combines **RAG over
@@ -70,6 +70,11 @@ layout drift. It does not automatically migrate SQLite or old PostgreSQL
 Ledgers, promise throughput, or turn Ledger into agent-state recovery, a
 workflow engine, or an exactly-once mechanism. See the
 [PostgreSQL guide](docs/en/postgres.md).
+
+v0.14 is RC hardening without a public API expansion: a bounded
+property/state-machine gate checks scope, lifecycle, deletion/source
+revocation, and exact Ledger token/byte accounting on SQLite and PostgreSQL.
+It is not a latency, throughput, or model-quality benchmark.
 
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of

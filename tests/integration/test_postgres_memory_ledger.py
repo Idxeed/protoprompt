@@ -14,6 +14,7 @@ import threading
 from typing import Any
 import uuid
 
+from hypothesis import HealthCheck, given, settings
 import pytest
 
 from protoprompt.ledger import (
@@ -43,6 +44,16 @@ from ledger_conformance.core import (
     assert_lifecycle_forget_source_and_hard_erase,
     assert_restart_and_setup_persistence,
 )
+from ledger_conformance.property import (
+    OPAQUE_TEXT,
+    RECALL_BYTE_SLACK,
+    RECALL_PAYLOADS,
+    RECALL_TOKEN_SLACK,
+    SCOPE_FIELD,
+    assert_recall_budget_packing_property,
+    assert_scoped_deletion_property,
+    run_lifecycle_state_machine,
+)
 
 
 try:
@@ -61,6 +72,26 @@ if PostgresMemoryLedger is None:
         strict=True,
         reason="PostgresMemoryLedger has not been implemented yet",
     ))
+
+
+# PostgreSQL uses a fresh disposable schema for every generated example.  Keep
+# this smaller than the SQLite gate: it proves the same public semantics in the
+# live backend without turning an integration release lane into an unbounded
+# load test.
+_POSTGRES_PROPERTY_SETTINGS = settings(
+    max_examples=3,
+    stateful_step_count=8,
+    deadline=None,
+    derandomize=True,
+    database=None,
+    # ``dsn`` is an immutable connection string; the test allocates and drops
+    # a distinct schema inside every generated example, so fixture reuse does
+    # not reuse database state.
+    suppress_health_check=(
+        HealthCheck.too_slow,
+        HealthCheck.function_scoped_fixture,
+    ),
+)
 
 
 @pytest.fixture
@@ -173,6 +204,74 @@ def test_postgres_memory_ledger_v6_conformance(dsn: str, schema: str) -> None:
     assert_lifecycle_forget_source_and_hard_erase(factory)
     assert_restart_and_setup_persistence(factory)
     assert_checkpoint_reopen_resume_and_selected_record_invalidation(factory)
+
+
+@given(scope_seed=OPAQUE_TEXT, differing_field=SCOPE_FIELD, content=OPAQUE_TEXT)
+@_POSTGRES_PROPERTY_SETTINGS
+def test_postgres_property_scoped_deletion_and_source_revocation(
+    dsn: str,
+    scope_seed: str,
+    differing_field: str,
+    content: str,
+) -> None:
+    """Generated forget/erase/source-revocation remains scope-local in PostgreSQL."""
+
+    property_schema = "pp_ledger_property_" + uuid.uuid4().hex
+    try:
+        assert_scoped_deletion_property(
+            lambda: _backend(dsn, property_schema),
+            scope_seed=scope_seed,
+            differing_field=differing_field,
+            content=content,
+        )
+    finally:
+        _drop_schema(dsn, property_schema)
+
+
+def test_postgres_property_lifecycle_state_machine(dsn: str) -> None:
+    """Run the backend-neutral bounded lifecycle model on fresh PG schemas."""
+
+    created_schemas: list[str] = []
+
+    def factory() -> Any:
+        property_schema = "pp_ledger_property_" + uuid.uuid4().hex
+        created_schemas.append(property_schema)
+        return _backend(dsn, property_schema)
+
+    try:
+        run_lifecycle_state_machine(
+            factory,
+            state_machine_settings=_POSTGRES_PROPERTY_SETTINGS,
+        )
+    finally:
+        for property_schema in created_schemas:
+            _drop_schema(dsn, property_schema)
+
+
+@given(
+    payloads=RECALL_PAYLOADS,
+    token_slack=RECALL_TOKEN_SLACK,
+    byte_slack=RECALL_BYTE_SLACK,
+)
+@_POSTGRES_PROPERTY_SETTINGS
+def test_postgres_property_strict_recall_budget_packing(
+    dsn: str,
+    payloads: list[str],
+    token_slack: int,
+    byte_slack: int,
+) -> None:
+    """Strict PostgreSQL recall retains exact token/byte accounting."""
+
+    property_schema = "pp_ledger_property_" + uuid.uuid4().hex
+    try:
+        assert_recall_budget_packing_property(
+            lambda: _backend(dsn, property_schema),
+            payloads=payloads,
+            token_slack=token_slack,
+            byte_slack=byte_slack,
+        )
+    finally:
+        _drop_schema(dsn, property_schema)
 
 
 def test_postgres_memory_ledger_two_connection_contention_and_restart(
