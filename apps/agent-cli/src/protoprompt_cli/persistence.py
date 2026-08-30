@@ -82,10 +82,7 @@ def save_state(mem, root: str | Path) -> None:
 def load_state(mem, root: str | Path) -> bool:
     """Восстановить горячий набор в ``mem``. True, если состояние было."""
     data = load_json(state_json_path(root))
-    if not data:
-        return False
-    mem.import_state(data)
-    return True
+    return _import_state_safely(mem, data)
 
 
 # ── сессии ───────────────────────────────────────────────────────
@@ -115,9 +112,25 @@ def save_session(mem, root: str | Path, name: str = DEFAULT_SESSION) -> None:
 
 def load_session(mem, root: str | Path, name: str = DEFAULT_SESSION) -> bool:
     data = load_json(session_file(root, name))
-    if not data:
+    return _import_state_safely(mem, data)
+
+
+def _import_state_safely(mem, data: Any) -> bool:
+    """Import a persisted snapshot without corrupting the active session.
+
+    Session files are ordinary local JSON and can be cut off during a crash
+    or hand-edited.  ``WorkingMemory.import_state`` clears its current state
+    before iterating entries, so keep a valid rollback snapshot if a
+    structurally malformed (but valid JSON) payload raises halfway through.
+    """
+    if not isinstance(data, dict) or not data:
         return False
-    mem.import_state(data)
+    before = mem.export_state()
+    try:
+        mem.import_state(data)
+    except (AttributeError, KeyError, OverflowError, TypeError, ValueError):
+        mem.import_state(before)
+        return False
     return True
 
 

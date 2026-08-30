@@ -133,6 +133,21 @@ def test_load_missing_session_returns_false(tmp_path):
     assert persistence.load_session(WorkingMemory(max_tokens=200), tmp_path, "nope") is False
 
 
+async def test_load_malformed_session_preserves_active_memory(tmp_path):
+    mem = WorkingMemory(max_tokens=200)
+    await mem.set_goal("keep active session")
+    item_id = await mem.note("active memory", pin=True)
+    before = mem.export_state()
+    persistence.save_json(
+        persistence.session_file(tmp_path, "broken"),
+        {"items": [{"not": "a memory item"}]},
+    )
+
+    assert persistence.load_session(mem, tmp_path, "broken") is False
+    assert mem.export_state() == before
+    assert item_id in mem.items
+
+
 def test_latest_session_returns_newest(tmp_path):
     import os
     import time

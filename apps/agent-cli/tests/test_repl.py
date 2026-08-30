@@ -294,6 +294,51 @@ async def test_auto_save_every_n_turns(tmp_path):
     assert persistence.session_file(tmp_path, "default").is_file()
 
 
+async def test_repl_reports_an_oversized_final_input_without_exiting(tmp_path):
+    mem = WorkingMemory(max_tokens=20, namespace="oversized")
+    core = AgentCore(
+        mem,
+        MockLLM(),
+        ToolRunner(tmp_path),
+        system_prompt="",
+        request_max_tokens=24,
+        output_reserve_tokens=12,
+    )
+    writer = FakeWriter()
+    repl = Repl(
+        core,
+        mem,
+        core.tools,
+        root=str(tmp_path),
+        write=writer,
+        readline=FakeReader(["word " * 50, "/exit"]),
+    )
+
+    await repl.run()
+
+    assert "контекст не помещается" in writer.text
+
+
+async def test_compact_reports_a_request_budget_error_without_destroying_memory(tmp_path):
+    mem = WorkingMemory(max_tokens=200, namespace="compact-overflow")
+    await mem.add("log", "word " * 50)
+    core = AgentCore(
+        mem,
+        MockLLM(),
+        ToolRunner(tmp_path),
+        system_prompt="",
+        request_max_tokens=24,
+        output_reserve_tokens=12,
+    )
+    writer = FakeWriter()
+    repl = Repl(core, mem, core.tools, root=str(tmp_path), write=writer)
+
+    await repl.dispatch("/compact")
+
+    assert "контекст не помещается" in writer.text
+    assert mem.items, "failed compaction must not remove the hot memory"
+
+
 # ── новые команды: context / status / cost ──────────────────────
 
 
@@ -389,10 +434,49 @@ async def test_resume_switches_session(tmp_path):
     assert item_id in mem.items
 
 
+async def test_resume_clears_previous_raw_tail_before_the_next_request(tmp_path):
+    saved = WorkingMemory(max_tokens=200, namespace="t")
+    await saved.note("alpha session memory", pin=True)
+    persistence.save_session(saved, tmp_path, "alpha")
+
+    repl, _, _ = _build([], root=str(tmp_path))
+    await repl.core.turn("OLD_RESUME_RAW_SENTINEL")
+    assert repl.core.last_context_plan is not None
+
+    await repl.dispatch("/resume alpha")
+    assert repl.core.tail == []
+    assert repl.core.last_context_plan is None
+    await repl.core.turn("fresh after resume")
+
+    sent_content = "\n".join(
+        str(message.get("content", ""))
+        for message in repl.core.llm.chat_calls[-1]["messages"]
+    )
+    assert "OLD_RESUME_RAW_SENTINEL" not in sent_content
+
+
 async def test_resume_unknown_session(tmp_path):
     repl, _, writer = _build([], root=str(tmp_path))
     await repl.dispatch("/resume ghost")
     assert "нет сессии" in writer.text
+
+
+async def test_resume_rejects_a_malformed_session_without_switching(tmp_path):
+    repl, mem, writer = _build([], root=str(tmp_path))
+    await mem.set_goal("keep current session")
+    item_id = await mem.note("active memory", pin=True)
+    before = mem.export_state()
+    persistence.save_json(
+        persistence.session_file(tmp_path, "broken"),
+        {"items": [{"not": "a memory item"}]},
+    )
+
+    await repl.dispatch("/resume broken")
+
+    assert repl.session == "default"
+    assert mem.export_state() == before
+    assert item_id in mem.items
+    assert "поврежд" in writer.text
 
 
 async def test_new_starts_fresh_session(tmp_path):
@@ -401,6 +485,27 @@ async def test_new_starts_fresh_session(tmp_path):
     await repl.dispatch("/new beta")
     assert repl.session == "beta"
     assert len(mem.items) == 0
+
+
+async def test_new_clears_raw_tail_and_previous_manifest(tmp_path):
+    repl, mem, _ = _build([], root=str(tmp_path))
+    stale_id = await mem.add("log", "stale manifest record")
+    await mem.forget(stale_id)
+    await repl.core.turn("OLD_NEW_RAW_SENTINEL")
+    assert mem.manifest.entries
+    assert repl.core.last_context_plan is not None
+
+    await repl.dispatch("/new beta")
+
+    assert repl.core.tail == []
+    assert repl.core.last_context_plan is None
+    assert not mem.manifest.entries
+    await repl.core.turn("fresh after new")
+    sent_content = "\n".join(
+        str(message.get("content", ""))
+        for message in repl.core.llm.chat_calls[-1]["messages"]
+    )
+    assert "OLD_NEW_RAW_SENTINEL" not in sent_content
 
 
 async def test_git_command_passthrough(tmp_path):
@@ -433,7 +538,9 @@ async def test_init_creates_project_config(tmp_path):
     await repl.dispatch("/init")
     config = tmp_path / ".protoprompt" / "config.toml"
     assert config.is_file()
-    assert "backend" in config.read_text(encoding="utf-8")
+    contents = config.read_text(encoding="utf-8")
+    assert "backend" in contents
+    assert "request_max_tokens" in contents
 
 
 async def test_init_does_not_overwrite_existing_config(tmp_path):

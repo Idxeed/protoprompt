@@ -195,7 +195,10 @@ pp-agent /path/to/project
 ```
 
 Он поддерживает сессии, hot/cold memory, план-режим и подтверждение опасных
-инструментов. Подробнее — в [`apps/agent-cli/README.md`](apps/agent-cli/README.md).
+инструментов. Каждый вызов модели собирается через immutable `ContextPlan`:
+system context, tail, обязательный input и reserve ответа учитываются под одним
+жёстким лимитом; action и его результат не разрываются при обрезке. Подробнее —
+в [`apps/agent-cli/README.md`](apps/agent-cli/README.md).
 
 ## Разработка
 

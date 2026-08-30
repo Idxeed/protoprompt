@@ -36,6 +36,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "agent": {
         "max_iterations": 8,
         "tail": 8,
+        # This is the whole provider request ceiling, independent from the
+        # WorkingMemory budget above.  The reserve is passed through as the
+        # model completion cap, so every request is bounded end-to-end.
+        "request_max_tokens": 8192,
+        "output_reserve_tokens": 1024,
         "system_prompt": (
             "Ты — кодер-агент. Работаешь в проекте пользователя. Отвечай "
             "кратко и по делу. Чтобы прочитать файл, изменить его или "
@@ -60,6 +65,8 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "PP_OPENAI_BASE_URL": ("llm", "openai", "base_url"),
     "PP_HTTPX_BASE_URL": ("llm", "httpx", "base_url"),
     "PP_MAX_TOKENS": ("memory", "max_tokens"),
+    "PP_REQUEST_MAX_TOKENS": ("agent", "request_max_tokens"),
+    "PP_OUTPUT_RESERVE_TOKENS": ("agent", "output_reserve_tokens"),
 }
 
 

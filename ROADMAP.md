@@ -128,7 +128,9 @@ index, summaries и framework-specific state — его projections/caches, а �
   `plan()` / `plan_messages()` без поломки `build()` / `build_messages()`.
 - [x] Добавить `plan.explain()` и developer recipe для просмотра решения.
 - [x] Ввести request-scoped receipt вместо reliance на mutable last report.
-- [ ] Перевести `pp-agent` на единый safe final-request path.
+- [x] Перевести `pp-agent` на единый safe final-request path: immutable
+  request plan/receipt, separate model-window budget, completion reserve и
+  атомарное action-result continuation.
 - [x] Выпустить ProtoPrompt Memory Benchmark v0.1: versioned offline fixtures,
   fixed baselines (sliding window, rolling summary, vector recall, `0.6`
   pipeline) и machine-readable report.

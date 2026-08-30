@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Claude-Code-style CLI agent built on protoprompt working memory"
 requires-python = ">=3.11"
 license = {text = "MIT"}
-dependencies = ["protoprompt>=0.2.0"]
+dependencies = ["protoprompt>=0.7.0,<0.8.0"]
 
 [project.optional-dependencies]
 ollama = ["httpx>=0.27"]

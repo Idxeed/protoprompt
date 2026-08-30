@@ -50,6 +50,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="путь к config.toml")
     parser.add_argument("--budget", type=int, default=None,
                         help="токен-бюджет памяти")
+    parser.add_argument("--request-max-tokens", type=int, default=None,
+                        help="жёсткий лимит всего запроса к модели")
+    parser.add_argument("--output-reserve", type=int, default=None,
+                        help="резерв и лимит выходных токенов модели")
     parser.add_argument("--trace", action="store_true",
                         help="включить трейс памяти сразу")
     parser.add_argument("--no-menu", action="store_true",
@@ -65,6 +69,10 @@ async def _run(args: argparse.Namespace) -> int:
         cfg["llm"]["backend"] = args.backend
     if args.budget:
         cfg["memory"]["max_tokens"] = args.budget
+    if args.request_max_tokens is not None:
+        cfg["agent"]["request_max_tokens"] = args.request_max_tokens
+    if args.output_reserve is not None:
+        cfg["agent"]["output_reserve_tokens"] = args.output_reserve
     session = args.resume_session or args.session or persistence.DEFAULT_SESSION
 
     llm = make_llm(cfg)
@@ -93,6 +101,8 @@ async def _run(args: argparse.Namespace) -> int:
         chat_model=cfg["llm"].get("chat_model") or "",
         max_iterations=int(cfg["agent"]["max_iterations"]),
         tail_size=int(cfg["agent"]["tail"]),
+        request_max_tokens=int(cfg["agent"]["request_max_tokens"]),
+        output_reserve_tokens=int(cfg["agent"]["output_reserve_tokens"]),
     )
     core.plan_mode = args.plan
 
@@ -100,8 +110,8 @@ async def _run(args: argparse.Namespace) -> int:
     if args.continue_session and not args.resume_session and not args.session:
         latest = persistence.latest_session(root)
         if latest:
-            session = latest
-            persistence.load_session(mem, root, session)
+            if persistence.load_session(mem, root, latest):
+                session = latest
 
     if args.prompt is not None:
         if args.output_format == "json" and args.stream:

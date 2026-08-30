@@ -93,12 +93,24 @@ CLI добавляет только **обвязку**: REPL, слэш-кома�
 
 ```python
 async def turn(self, user_text: str) -> None:
-    await self.mem.add("tool_output", user_text, summary=f"user: {user_text[:60]}")
+    final = [{"role": "user", "content": user_text}]
+    await self._preflight_final_input(final)  # без RAG/session/memory side effects
+    await self._establish_initial_goal(user_text)
+    user_committed = False
     for _ in range(self.max_iterations):                     # защита от цикла
         ctx = await self.mem.assemble()
         system = f"{self.system_prompt}\n\n{ctx.render()}"   # рабочий контекст из памяти
+        plan = await self.context_builder.plan_messages(
+            ContextInput(query=user_text, system_prompt=system,
+                         include_rag=False, include_session=False),
+            history=self._history_before_final(final), final_messages=final,
+        )
+        if not user_committed:
+            await self._record_user_turn(user_text, final[0])  # только после plan
+            user_committed = True
         reply = await self.llm.chat(
-            [{"role": "system", "content": system}, *self.tail])
+            plan.render_messages(), max_tokens=plan.receipt.output_reserve_tokens,
+        )
         actions = parse_actions(reply)                       # <action …>…</action>
         if not actions:
             await self.mem.add("tool_output", reply, summary=f"assistant: {reply[:60]}")
@@ -109,7 +121,11 @@ async def turn(self, user_text: str) -> None:
             kind = KIND_BY_TOOL[action.name]                 # edit/file/test_result/…
             await self.mem.add(kind, out, summary=action.summary(),
                                pin=action.name in ("write", "edit"))
-        self.tail.append({"role": "assistant", "content": reply})  # сырой хвост, cap N
+        final = [
+            {"role": "assistant", "content": reply},
+            {"role": "user", "content": tool_outputs},
+        ]
+        self._push_tail_group(final)  # сырой хвост, cap N, пара не дробится
 ```
 
 `tail` — скользящее окно последних N сырых ходов (дефолт 8): мгновенная
@@ -221,6 +237,8 @@ apps/agent-cli/
 | `--stream`               | стримить токены ответа в stdout                       |
 | `--backend <name>`       | ollama \| openai \| httpx                             |
 | `--budget <n>`           | токен-бюджет памяти                                   |
+| `--request-max-tokens <n>` | жёсткий потолок полного provider-запроса            |
+| `--output-reserve <n>`   | completion reserve и лимит ответа модели              |
 | `--trace`                | трейс событий памяти                                  |
 
 Сессии: состояние хранится в `.protoprompt/sessions/<name>.json`
@@ -252,7 +270,21 @@ api_key_env = "PP_OPENAI_API_KEY"
 [memory]
 max_tokens = 2048
 recall_cooldown_steps = 10
+
+[agent]
+request_max_tokens = 8192
+output_reserve_tokens = 1024
 ```
+
+`memory.max_tokens` ограничивает горячую память и не является окном модели.
+Перед каждым вызовом `AgentCore` передаёт rendered `WorkingMemory`, raw tail
+и обязательный final input в `TokenBudgetedContextBuilder.plan_messages()` с
+`include_rag=False` и `include_session=False`. Полученный immutable
+`ContextPlan` владеет payload и receipt; именно его `receipt.input_tokens`
+идёт в `/cost`, а `receipt.output_reserve_tokens` — в `max_tokens` клиента.
+После text-action assistant action XML и synthetic user tool output становятся
+одним multi-message `final_messages` continuation, поэтому trimming не может
+оторвать результат инструмента от вызвавшего его действия.
 
 `factory.make_llm(backend, cfg)` возвращает `LLMClientProtocol` (все три уже в
 библиотеке: `OllamaClient`, `OpenAIClient`, `HttpxLLMClient`), оборачивается в
@@ -310,8 +342,9 @@ CI: отдельный job в `.github/workflows/ci.yml` — `pip install -e app
 | D6 | Бэкенды ollama/openai/httpx равноправны через фабрику, дефолт ollama | принято |
 | D7 | Только stdlib в REPL (argparse + readline + asyncio + tomllib); rich — опциональный extra, не в ядро | принято |
 | D8 | Конфиг `.protoprompt/config.toml`; секреты только через env | принято |
-| D9 | Диалог: system-промпт = `assemble().render()`, messages = скользящий tail (N=8) сырых ходов | принято |
+| D9 | Диалог: system-промпт = `assemble().render()`, raw tail = optional history, а текущий user/tool continuation = mandatory final payload | принято |
 | D10 | Права на инструменты `ask/allow/deny`, дефолт — `ask` для пишущих; `perms.json` | принято |
+| D11 | Каждый provider request строится только через immutable `ContextPlan` с exact receipt и completion reserve | принято |
 
 ## 9. Риски
 
@@ -334,5 +367,7 @@ CI: отдельный job в `.github/workflows/ci.yml` — `pip install -e app
 - [x] персистентность `.protoprompt/`: холод + сессии + авто-resume по проекту
 - [x] три бэкенда равноправны через фабрику; `-p` print-режим, `--output-format json`
 - [x] сессии `/sessions` `/resume` `/new`, `--session`, план-режим, `/compact`, `/cost`, стриминг
+- [x] единый bounded final-request path для обычного хода, plan и compact;
+  exact receipt, completion reserve и неразрывный action-result continuation
 - [x] профиль НЕ используется (проверка: рендер секции профиля отключён)
 - [x] тесты всех фаз на моках (паттерн `_mocks.MockLLM`), CI-job, docs RU/EN, CHANGELOG

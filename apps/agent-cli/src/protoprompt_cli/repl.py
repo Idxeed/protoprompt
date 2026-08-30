@@ -12,6 +12,7 @@ import subprocess
 import sys
 from typing import Any, Callable
 
+from protoprompt import TokenBudgetExceededError
 from protoprompt.agent import WorkingMemory
 
 from protoprompt_cli import persistence, render
@@ -177,6 +178,14 @@ class Repl:
     def _stream_token(self, token: str) -> None:
         self.write(token)
 
+    def _write_budget_error(self, exc: TokenBudgetExceededError) -> None:
+        """Render one actionable error for every bounded request path."""
+        self.write(
+            "контекст не помещается в лимит "
+            f"({exc.section}: {exc.used}/{exc.budget} tok); "
+            "увеличьте request_max_tokens или сократите ввод"
+        )
+
     def _save(self) -> None:
         persistence.save_session(self.mem, self.root, self.session)
 
@@ -211,9 +220,13 @@ class Repl:
                                    summary=f"shell: {action.body[:60]}")
             else:
                 text = await self._read_multiline(line)
-                result = await self.core.turn(
-                    text, stream_cb=self._stream_token if self.stream else None
-                )
+                try:
+                    result = await self.core.turn(
+                        text, stream_cb=self._stream_token if self.stream else None
+                    )
+                except TokenBudgetExceededError as exc:
+                    self._write_budget_error(exc)
+                    continue
                 if result.streamed:
                     self.write("")
                 elif result.reply:
@@ -344,7 +357,11 @@ class Repl:
         return False
 
     async def _cmd_compact(self, arg: str) -> bool:
-        summary = await self.core.compact()
+        try:
+            summary = await self.core.compact()
+        except TokenBudgetExceededError as exc:
+            self._write_budget_error(exc)
+            return False
         if summary:
             self.write("[+] горячий набор сжат в обзор:")
             self.write(summary[:400])
@@ -387,6 +404,19 @@ class Repl:
         used = self.mem.used_tokens
         budget = getattr(self.mem, "_max_tokens", 0)
         usage = self.core.usage
+        receipt = (
+            self.core.last_context_plan.receipt
+            if self.core.last_context_plan is not None
+            else None
+        )
+        request_line = (
+            f"запрос : {receipt.input_tokens}/{receipt.max_tokens} tok вход · "
+            f"резерв {receipt.output_reserve_tokens} · "
+            f"свободно {receipt.remaining_tokens}"
+            if receipt is not None
+            else f"запрос : ≤ {self.core.request_max_tokens} tok · "
+            f"резерв ответа {self.core.output_reserve_tokens}"
+        )
         lines = [
             f"сессия : {self.session}",
             f"корень : {self.root}",
@@ -394,6 +424,7 @@ class Repl:
             f"цель   : {self.mem.goal.text[:60] or '-'}",
             f"память : {used}/{budget} tok · эвикций {self.mem.evictions} · "
             f"холод {len(self.mem.manifest.entries)}",
+            request_line,
             f"вызовы : {usage['chat_calls']} · токенов входа {usage['input_tokens']} · "
             f"выхода {usage['output_tokens']}",
         ]
@@ -453,23 +484,25 @@ class Repl:
         if not persistence.session_exists(self.root, arg):
             self.write(f"нет сессии {arg!r} (см. /sessions)")
             return False
+        target = persistence._sanitize_session(arg)
         self._save()
-        self.mem._items.clear()
-        self.mem._index._owners.clear()
-        self.mem._step = 0
-        self.session = persistence._sanitize_session(arg)
-        persistence.load_session(self.mem, self.root, self.session)
+        if not persistence.load_session(self.mem, self.root, target):
+            self.write(f"не удалось загрузить сессию {target!r}: файл повреждён")
+            return False
+        self.session = target
+        self.core.reset_conversation()
         self.core.reset_usage()
         self.write(f"сессия: {self.session}")
         return False
 
     async def _cmd_new(self, arg: str) -> bool:
         self._save()
-        self.mem._items.clear()
-        self.mem._index._owners.clear()
-        self.mem._step = 0
-        self.mem.goal.text = ""
-        self.mem.goal.vector = None
+        # Sessions persist both the hot items and their cold-manifest view.
+        # Reset via the public importer rather than clearing only a subset of
+        # private fields, otherwise a newly created session can inherit stale
+        # manifest lines from the preceding one.
+        self.mem.import_state({})
+        self.core.reset_conversation()
         self.core.reset_usage()
         self.session = persistence._sanitize_session(arg or "default")
         self.write(f"новая сессия: {self.session}")
@@ -524,7 +557,9 @@ class Repl:
             '[llm]\nbackend = "ollama"\nchat_model = ""\n'
             'embed_model = "nomic-embed-text"\n\n'
             '[llm.ollama]\nhost = "http://localhost:11434"\n\n'
-            '[memory]\nmax_tokens = 2048\n',
+            '[memory]\nmax_tokens = 2048\n\n'
+            '[agent]\nrequest_max_tokens = 8192\n'
+            'output_reserve_tokens = 1024\n',
             encoding="utf-8",
         )
         self.write(f"создан config: {target}")

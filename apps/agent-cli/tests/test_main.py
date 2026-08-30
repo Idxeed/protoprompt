@@ -46,6 +46,24 @@ async def test_print_mode_uses_named_session(tmp_path, monkeypatch):
     assert persistence.session_file(tmp_path, "fix-task").is_file()
 
 
+async def test_continue_ignores_a_corrupt_newer_session(tmp_path, monkeypatch):
+    default = WorkingMemory(max_tokens=200)
+    await default.note("default session memory", pin=True)
+    persistence.save_session(default, tmp_path, "default")
+    broken = persistence.session_file(tmp_path, "broken")
+    broken.write_text("{not valid json", encoding="utf-8")
+
+    monkeypatch.setattr(main_mod, "make_llm", lambda *a, **k: MockLLM())
+    args = main_mod.build_parser().parse_args(
+        ["--continue", "-p", "new default question", str(tmp_path)]
+    )
+    await main_mod._run(args)
+
+    state = persistence.load_json(persistence.session_file(tmp_path, "default"))
+    assert any("new default question" in item["text"] for item in state["items"])
+    assert broken.read_text(encoding="utf-8") == "{not valid json"
+
+
 async def test_print_mode_json_output(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(main_mod, "make_llm", lambda *a, **k: MockLLM())
     args = main_mod.build_parser().parse_args(
@@ -84,23 +102,43 @@ def test_parser_defaults():
     assert args.prompt is None
     assert args.backend is None
     assert args.budget is None
+    assert args.request_max_tokens is None
+    assert args.output_reserve is None
     assert args.stream is None
     assert args.no_menu is False
 
 
 def test_parser_flags():
     args = main_mod.build_parser().parse_args(
-        ["--backend", "httpx", "--budget", "700", "--trace", "-p", "go",
+        ["--backend", "httpx", "--budget", "700", "--request-max-tokens", "4096",
+         "--output-reserve", "512", "--trace", "-p", "go",
          "--output-format", "json", "--session", "s1", "--plan", "dir"]
     )
     assert args.backend == "httpx"
     assert args.budget == 700
+    assert args.request_max_tokens == 4096
+    assert args.output_reserve == 512
     assert args.trace is True
     assert args.prompt == "go"
     assert args.output_format == "json"
     assert args.session == "s1"
     assert args.plan is True
     assert args.path == "dir"
+
+
+async def test_print_mode_applies_request_limits_separately_from_memory(
+    tmp_path, monkeypatch
+):
+    llm = MockLLM()
+    monkeypatch.setattr(main_mod, "make_llm", lambda *a, **k: llm)
+    args = main_mod.build_parser().parse_args([
+        "-p", "вопрос", "--budget", "700", "--request-max-tokens", "4096",
+        "--output-reserve", "41", str(tmp_path),
+    ])
+
+    await main_mod._run(args)
+
+    assert llm.chat_calls[0]["max_tokens"] == 41
 
 
 def test_parser_resume_aliases_and_no_stream():

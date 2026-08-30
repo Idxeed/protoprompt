@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Versioned, network-free Memory Benchmark v0.1 with frozen fixtures,
   deterministic baselines, a `v0.6.1` reference, SQLite cold-reopen and
   scope probes, and a CI verification gate for semantic outcomes.
+- `pp-agent` now builds normal, planning, and compaction calls through
+  `TokenBudgetedContextBuilder.plan_messages()`. It has separate request and
+  memory budgets, forwards the completion reserve to the provider, and keeps
+  text-action/tool-result continuations together as mandatory final input.
 
 ### Changed
 - `TokenBudgetedContextBuilder.build()` now attaches its context-only plan as
@@ -24,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   type and renders the equivalent `plan_messages()` projection.
 - README and roadmap now state the focused product direction: reliable agent
   memory under a fixed, explainable context budget.
+- `pp-agent` falls back to non-streaming chat when a cached client wraps a
+  backend without a real streaming capability instead of failing at runtime.
 
 ### Security
 - Ignore local reference-app data, runtime key/token/pid files, SQLite WAL

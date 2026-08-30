@@ -194,6 +194,22 @@ pip install "protoprompt[dev]"
 python scripts/build_docs.py --serve  # both versions on different ports
 ```
 
+## Experimental coding agent
+
+The repository also contains a CLI built on `protoprompt.agent.WorkingMemory`:
+
+```bash
+pip install -e "apps/agent-cli[ollama]"
+pp-agent /path/to/project
+```
+
+It supports sessions, hot/cold memory, planning mode, and confirmation for
+dangerous tools. Every provider request goes through an immutable `ContextPlan`:
+system context, tail history, mandatory input, provider framing, and the output
+reserve share one hard ceiling. A textual action and its tool result are kept
+together for the next continuation. See the
+[`pp-agent` README](apps/agent-cli/README.md) for configuration.
+
 ## Development
 
 ```bash

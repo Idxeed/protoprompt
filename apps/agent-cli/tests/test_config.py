@@ -59,10 +59,14 @@ def test_env_overrides_file_and_default(monkeypatch, tmp_path):
 
 def test_env_coerces_int_and_keeps_string(monkeypatch):
     monkeypatch.setenv("PP_MAX_TOKENS", "900")
+    monkeypatch.setenv("PP_REQUEST_MAX_TOKENS", "4096")
+    monkeypatch.setenv("PP_OUTPUT_RESERVE_TOKENS", "512")
     monkeypatch.setenv("PP_CHAT_MODEL", "llama3.1:8b")
     cfg = load_config()
     assert cfg["memory"]["max_tokens"] == 900
     assert isinstance(cfg["memory"]["max_tokens"], int)
+    assert cfg["agent"]["request_max_tokens"] == 4096
+    assert cfg["agent"]["output_reserve_tokens"] == 512
     assert cfg["llm"]["chat_model"] == "llama3.1:8b"
 
 
@@ -81,3 +85,5 @@ def test_default_config_has_required_sections():
     assert set(DEFAULT_CONFIG["memory"]) >= {
         "max_tokens", "recall_cooldown_steps", "dedup_threshold", "max_pinned_ratio",
     }
+    assert DEFAULT_CONFIG["agent"]["request_max_tokens"] == 8192
+    assert DEFAULT_CONFIG["agent"]["output_reserve_tokens"] == 1024
