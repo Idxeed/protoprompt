@@ -42,7 +42,9 @@ metadata и score threshold. Ограничьте общий размер body �
 
 API включает remember/search/forget, manifest/explain/budget report и
 опциональные profile endpoints. Profile signal отвечает `409`, если host не
-настроил `ProfileManager`.
+настроил `ProfileManager`. Если он передан, его host-owned scope должен точно
+совпадать со scope у `MemoryService`; при несовпадении конструктор завершится
+до первого profile I/O.
 
 ## Lifespan и деплой
 

@@ -130,6 +130,31 @@ key-value). Три варианта:
 
 `as_async_profile(store)` — поднимет любой синхронный стор на event loop.
 
+### Scope и изоляция профиля
+
+Для profile-памяти непустой `MemoryScope` поддерживают `InMemoryProfileStore`,
+`SqliteProfileStore` и их async-варианты. Они хранят физический ключ отдельно,
+но возвращают исходный логический `user_id`:
+
+```python
+from protoprompt import MemoryScope
+from protoprompt.profile import ProfileManager, SqliteProfileStore
+
+manager = ProfileManager(
+    SqliteProfileStore("users.db"),
+    scope=MemoryScope(tenant="acme", user="u1"),
+)
+```
+
+`MemoryScope` создаёт только доверенный host-код. Нестандартный store без
+`supports_profile_scopes=True` нельзя использовать с непустым scope:
+`ProfileManager` завершится с `ValueError` до первого чтения. Это намеренно
+безопасный отказ — не виртуализируйте scope конкатенацией ключей и не
+подхватывайте старые unscoped-профили автоматически. При миграции копируйте в
+новую область только явно разрешённые записи. При collision старого физического
+ключа scoped read считает запись отсутствующей, а scoped write/reset/delete/CAS
+выбрасывают `ValueError`, а не уничтожают эту запись.
+
 ## Менеджер: весь цикл в одном классе
 
 `ProfileManager` — оркестратор: загрузить → извлечь → слить → сохранить.

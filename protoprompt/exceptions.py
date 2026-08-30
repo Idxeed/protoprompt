@@ -4,11 +4,11 @@ from __future__ import annotations
 
 
 class TokenBudgetExceededError(RuntimeError):
-    """Raised when a hard-required section (system prompt) does not fit
-    into the configured token budget.
+    """Raised when a required request section cannot fit its token budget.
 
-    Soft sections (RAG, session) are dropped silently by the budget
-    allocator; only mandatory sections ever trigger this.
+    System context, the caller's current turn, and an explicit output reserve
+    are hard requirements.  Soft sections (RAG, session) are dropped by the
+    allocator instead of overflowing the request.
     """
 
     def __init__(self, used: int, budget: int, section: str) -> None:

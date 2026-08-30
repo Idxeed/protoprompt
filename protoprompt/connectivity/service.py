@@ -46,6 +46,13 @@ class MemoryService:
     ) -> None:
         if scope.is_empty:
             raise ValueError("MemoryService requires a non-empty host MemoryScope")
+        if (
+            profile_manager is not None
+            and getattr(profile_manager, "scope", None) != scope
+        ):
+            raise ValueError(
+                "profile_manager scope must exactly match the MemoryService scope"
+            )
         self._store = store
         self._embeddings = embeddings
         self._scope = scope

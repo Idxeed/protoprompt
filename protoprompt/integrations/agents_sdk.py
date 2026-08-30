@@ -8,7 +8,6 @@ from typing import Any, Callable
 from protoprompt.context import ContextInput
 from protoprompt.injector_budgeted import TokenBudgetedContextBuilder
 from protoprompt.tokens.protocol import TokenCounter
-from protoprompt.tokens.regex_counter import RegexTokenCounter
 
 
 def _sqlite_session_class():
@@ -92,15 +91,18 @@ def create_session_input_callback(
     system_prompt: str = "",
     counter: TokenCounter | None = None,
     context_factory: Callable[[str], ContextInput] | None = None,
+    output_reserve: int | None = None,
 ) -> Callable[[list[dict], list[dict]], Any]:
-    """Build scoped context and fit newest history into the remaining budget.
+    """Build a fully budgeted model-facing request for an Agents session.
 
     The callback changes only the model-facing list returned to the Agents SDK.
     The SDK continues to persist the original ``new_input`` items exactly once.
-    Non-message tool items are preserved as dictionaries and estimated through
-    the configured token counter's generic message fallback.
+    ``new_input`` is treated as a mandatory final turn (including tool calls
+    and rich content); system context and history are allocated only from what
+    remains after it and ``output_reserve``.  Passing ``counter`` overrides the
+    builder counter for this one complete request, rather than applying a
+    second, inconsistent history-only estimate.
     """
-    token_counter = counter or RegexTokenCounter()
 
     async def session_input_callback(
         history: list[dict],
@@ -117,32 +119,13 @@ def create_session_input_callback(
                 include_profile=False,
             )
         )
-        output = await builder.build(inp)
-        report = output.budget_report
-        remaining = report.remaining_tokens if report is not None else 0
-        new_cost = token_counter.count_messages(list(new_input))
-        history_budget = max(0, remaining - new_cost)
-
-        kept_history: list[dict] = []
-        history_tokens = 0
-        for item in reversed(history):
-            cost = token_counter.count_messages([item])
-            if history_tokens + cost > history_budget:
-                continue
-            kept_history.insert(0, item)
-            history_tokens += cost
-
-        if report is not None:
-            report.history_kept = len(kept_history)
-            report.history_tokens = history_tokens
-            report.remaining_tokens = max(0, history_budget - history_tokens)
-
-        prepared: list[dict] = []
-        if output.system_prompt:
-            prepared.append({"role": "system", "content": output.system_prompt})
-        prepared.extend(kept_history)
-        prepared.extend(new_input)
-        return prepared
+        return await builder.build_messages(
+            inp,
+            history=history,
+            final_messages=list(new_input),
+            output_reserve=output_reserve,
+            counter=counter,
+        )
 
     return session_input_callback
 

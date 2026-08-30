@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from protoprompt.integrations._messages import text_content
+from protoprompt.tokens.message_payload import message_text
 from protoprompt.tokens.regex_counter import RegexTokenCounter
 
 _MESSAGE_OVERHEAD = {
@@ -38,10 +38,17 @@ class ProviderTokenCounter:
         self._delegate = fallback
         if self._delegate is None and self.provider == "openai":
             try:
-                from protoprompt.tokens.tiktoken_counter import TiktokenCounter
+                # ``tiktoken_adapter`` keeps the optional dependency lazy.  Do
+                # not import it at module load time: protoprompt's core must
+                # remain dependency-free.
+                from protoprompt.tokens.tiktoken_adapter import TiktokenCounter
 
                 self._delegate = TiktokenCounter(model=model or None)
             except (ImportError, KeyError):
+                # ``tiktoken`` is optional and may not know a newly released
+                # model name yet.  In either case retain the deterministic,
+                # dependency-free fallback rather than failing context
+                # assembly.
                 self._delegate = RegexTokenCounter()
         elif self._delegate is None:
             self._delegate = RegexTokenCounter()
@@ -52,6 +59,6 @@ class ProviderTokenCounter:
     def count_messages(self, messages: list[dict]) -> int:
         overhead = _MESSAGE_OVERHEAD.get(self.provider, 4)
         return sum(
-            self.count(text_content(message.get("content", ""))) + overhead
+            self.count(message_text(message)) + overhead
             for message in messages
         )

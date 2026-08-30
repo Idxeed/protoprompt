@@ -1,7 +1,10 @@
 """Key-value persistence for :class:`~protoprompt.profile.types.UserProfile`.
 
 Profiles are stored as whole documents (not vectors): reading is by exact
-``user_id``, which is the only access pattern the profile engine needs.
+logical ``user_id``, which is the only access pattern the profile engine
+needs.  Built-in stores can additionally derive an isolated physical key from
+a :class:`~protoprompt.scope.MemoryScope` while preserving that logical id in
+the returned and serialized :class:`~protoprompt.profile.types.UserProfile`.
 Serialization is JSON, so both built-in stores share the same codec.
 """
 
@@ -14,6 +17,63 @@ from dataclasses import asdict
 from typing import Protocol, runtime_checkable
 
 from protoprompt.profile.types import Preferences, Traits, UserProfile
+from protoprompt.scope import MemoryScope, scoped_doc_id
+
+
+def _storage_user_id(user_id: str, scope: MemoryScope | None) -> str:
+    """Return the physical profile key without changing its logical id.
+
+    Empty and omitted scopes deliberately keep the legacy storage layout.
+    """
+    if scope is None or not scope.has_identity:
+        return user_id
+    return scoped_doc_id(user_id, scope)
+
+
+def _scoped_read_profile(
+    profile: UserProfile | None,
+    user_id: str,
+    scope: MemoryScope | None,
+) -> UserProfile | None:
+    """Reject a legacy physical-key collision during a scoped read.
+
+    A pre-scope profile can legitimately have the same literal id as a new
+    scoped storage key.  Such a record is not proof that it belongs to the
+    requested logical user, so it must not be returned through a scoped read.
+    Unscoped reads intentionally retain their legacy behavior.
+    """
+    if (
+        profile is not None
+        and scope is not None
+        and scope.has_identity
+        and profile.user_id != user_id
+    ):
+        return None
+    return profile
+
+
+def _assert_scoped_owner(
+    current: UserProfile | None,
+    user_id: str,
+    scope: MemoryScope | None,
+) -> None:
+    """Fail closed before a scoped mutator overwrites a legacy collision.
+
+    A scoped read treats a mismatched logical id at its derived physical key as
+    absent.  Writes, deletes, and compare-and-swap must make the same decision:
+    otherwise a reset or erase operation could destroy an unrelated legacy
+    record that was correctly hidden from the scoped reader.
+    """
+    if (
+        current is not None
+        and scope is not None
+        and scope.has_identity
+        and current.user_id != user_id
+    ):
+        raise ValueError(
+            "scoped profile key is owned by a different logical user; "
+            "refusing to overwrite or delete it"
+        )
 
 
 def profile_to_dict(profile: UserProfile) -> dict:
@@ -71,35 +131,57 @@ class ProfileStore(Protocol):
 
 
 class InMemoryProfileStore:
-    """Throwaway profile store for tests and short-lived processes."""
+    """Throwaway profile store for tests and short-lived processes.
+
+    Pass ``scope`` to any operation to isolate physical storage keys.  The
+    :class:`UserProfile` itself always keeps its logical ``user_id``.
+    """
+
+    supports_profile_scopes = True
 
     def __init__(self) -> None:
         self._data: dict[str, UserProfile] = {}
         self._lock = threading.Lock()
 
-    def get(self, user_id: str) -> UserProfile | None:
+    def get(
+        self,
+        user_id: str,
+        *,
+        scope: MemoryScope | None = None,
+    ) -> UserProfile | None:
         with self._lock:
-            return self._data.get(user_id)
+            profile = self._data.get(_storage_user_id(user_id, scope))
+        return _scoped_read_profile(profile, user_id, scope)
 
-    def put(self, profile: UserProfile) -> None:
+    def put(self, profile: UserProfile, *, scope: MemoryScope | None = None) -> None:
         with self._lock:
-            self._data[profile.user_id] = profile
+            storage_id = _storage_user_id(profile.user_id, scope)
+            _assert_scoped_owner(self._data.get(storage_id), profile.user_id, scope)
+            self._data[storage_id] = profile
 
-    def delete(self, user_id: str) -> None:
+    def delete(self, user_id: str, *, scope: MemoryScope | None = None) -> None:
         with self._lock:
-            self._data.pop(user_id, None)
+            storage_id = _storage_user_id(user_id, scope)
+            _assert_scoped_owner(self._data.get(storage_id), user_id, scope)
+            self._data.pop(storage_id, None)
 
     def compare_and_put(
-        self, profile: UserProfile, *, expected_version: int | None
+        self,
+        profile: UserProfile,
+        *,
+        expected_version: int | None,
+        scope: MemoryScope | None = None,
     ) -> bool:
+        storage_id = _storage_user_id(profile.user_id, scope)
         with self._lock:
-            current = self._data.get(profile.user_id)
+            current = self._data.get(storage_id)
+            _assert_scoped_owner(current, profile.user_id, scope)
             if expected_version is None:
                 if current is not None:
                     return False
             elif current is None or current.version != expected_version:
                 return False
-            self._data[profile.user_id] = profile
+            self._data[storage_id] = profile
             return True
 
 
@@ -144,49 +226,85 @@ class SqliteProfileStore:
                     )
             self._conn.commit()
 
-    def get(self, user_id: str) -> UserProfile | None:
+    supports_profile_scopes = True
+
+    def get(
+        self,
+        user_id: str,
+        *,
+        scope: MemoryScope | None = None,
+    ) -> UserProfile | None:
+        storage_id = _storage_user_id(user_id, scope)
         with self._lock:
             row = self._conn.execute(
-                "SELECT json FROM profiles WHERE user_id = ?", (user_id,)
+                "SELECT json FROM profiles WHERE user_id = ?", (storage_id,)
             ).fetchone()
         if row is None:
             return None
-        return profile_from_dict(json.loads(row[0]))
+        return _scoped_read_profile(profile_from_dict(json.loads(row[0])), user_id, scope)
 
-    def put(self, profile: UserProfile) -> None:
+    def put(self, profile: UserProfile, *, scope: MemoryScope | None = None) -> None:
+        storage_id = _storage_user_id(profile.user_id, scope)
         payload = json.dumps(profile_to_dict(profile), ensure_ascii=False)
         with self._lock:
+            row = self._conn.execute(
+                "SELECT json FROM profiles WHERE user_id = ?", (storage_id,)
+            ).fetchone()
+            if row is not None:
+                _assert_scoped_owner(
+                    profile_from_dict(json.loads(row[0])), profile.user_id, scope
+                )
             self._conn.execute(
                 "INSERT INTO profiles (user_id, json, version) VALUES (?, ?, ?) "
                 "ON CONFLICT(user_id) DO UPDATE SET json = excluded.json, "
                 "version = excluded.version",
-                (profile.user_id, payload, profile.version),
+                (storage_id, payload, profile.version),
             )
             self._conn.commit()
 
     def compare_and_put(
-        self, profile: UserProfile, *, expected_version: int | None
+        self,
+        profile: UserProfile,
+        *,
+        expected_version: int | None,
+        scope: MemoryScope | None = None,
     ) -> bool:
+        storage_id = _storage_user_id(profile.user_id, scope)
         payload = json.dumps(profile_to_dict(profile), ensure_ascii=False)
         with self._lock:
+            row = self._conn.execute(
+                "SELECT json FROM profiles WHERE user_id = ?", (storage_id,)
+            ).fetchone()
+            if row is not None:
+                _assert_scoped_owner(
+                    profile_from_dict(json.loads(row[0])), profile.user_id, scope
+                )
             if expected_version is None:
                 cursor = self._conn.execute(
                     "INSERT OR IGNORE INTO profiles (user_id, json, version) "
                     "VALUES (?, ?, ?)",
-                    (profile.user_id, payload, profile.version),
+                    (storage_id, payload, profile.version),
                 )
             else:
                 cursor = self._conn.execute(
                     "UPDATE profiles SET json = ?, version = ? "
                     "WHERE user_id = ? AND version = ?",
-                    (payload, profile.version, profile.user_id, expected_version),
+                    (payload, profile.version, storage_id, expected_version),
                 )
             self._conn.commit()
             return cursor.rowcount == 1
 
-    def delete(self, user_id: str) -> None:
+    def delete(self, user_id: str, *, scope: MemoryScope | None = None) -> None:
+        storage_id = _storage_user_id(user_id, scope)
         with self._lock:
-            self._conn.execute("DELETE FROM profiles WHERE user_id = ?", (user_id,))
+            row = self._conn.execute(
+                "SELECT json FROM profiles WHERE user_id = ?", (storage_id,)
+            ).fetchone()
+            if row is not None:
+                _assert_scoped_owner(
+                    profile_from_dict(json.loads(row[0])), user_id, scope
+                )
+            self._conn.execute("DELETE FROM profiles WHERE user_id = ?", (storage_id,))
             self._conn.commit()
 
     def close(self) -> None:

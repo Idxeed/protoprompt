@@ -8,8 +8,7 @@ and gives a close-enough signal for most open models.
 
 from __future__ import annotations
 
-from typing import Any
-
+from protoprompt.tokens.message_payload import message_text
 from protoprompt.tokens.protocol import TokenCounter
 
 _PER_MESSAGE_OVERHEAD = 4
@@ -50,8 +49,5 @@ class TiktokenCounter:
     def count_messages(self, messages: list[dict]) -> int:
         total = 0
         for msg in messages:
-            content: Any = msg.get("content", "")
-            if not isinstance(content, str):
-                content = str(content)
-            total += self.count(content) + _PER_MESSAGE_OVERHEAD
+            total += self.count(message_text(msg)) + _PER_MESSAGE_OVERHEAD
         return total

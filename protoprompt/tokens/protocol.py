@@ -19,7 +19,8 @@ class TokenCounter(Protocol):
     def count_messages(self, messages: list[dict]) -> int:
         """Return approximate token count for an OpenAI-style message list.
 
-        Each message contributes its content tokens plus a per-message
-        overhead (role markers, separators) which implementations choose.
+        Each message contributes all provider-bound payload fields (including
+        rich content and tool calls) plus a per-message overhead (role markers,
+        separators) which implementations choose.
         """
         ...

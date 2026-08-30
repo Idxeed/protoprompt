@@ -42,7 +42,9 @@ only unauthenticated route. Explain responses omit recalled text.
 
 The API includes remember/search/forget, manifest/explain/budget report, and
 optional profile endpoints. A profile signal returns `409` when the host did not
-configure a `ProfileManager`.
+configure a `ProfileManager`. When supplied, its host-owned scope must exactly
+match the `MemoryService` scope; construction fails before profile I/O when it
+does not.
 
 ## Lifespan and deployment
 

@@ -5,69 +5,142 @@ on:
   workflow_dispatch:
   push:
     tags:
-      - "v*.*.*"
+      - "v*"
+
+# Every job starts without a token. Grant only the capability its work requires.
+permissions: {}
 
 concurrency:
   group: publish-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: build sdist + wheel
+  verify-release:
+    name: verify release candidate
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v6
+      - name: Check out the release candidate
+        uses: actions/checkout@1af3b93b6815bc44a9784bd300feb67ff0d1eeb3 # v6.0.0
+        with:
+          persist-credentials: false
 
       - name: Set up Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@e797f83bcb11b83ae66e0230d6156d7c80228e7c # v6.0.0
         with:
           python-version: "3.12"
+          cache: pip
 
-      - name: Install release tooling
-        run: python -m pip install --upgrade pip build twine
+      - name: Install release verification dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install ".[chroma,qdrant,dev]" "./apps/agent-cli"
+          python -m pip install build twine
 
       - name: Verify tag matches package version
         if: github.event_name == 'push'
         shell: bash
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           package_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
-          if [[ "v${package_version}" != "${GITHUB_REF_NAME}" ]]; then
-            echo "tag ${GITHUB_REF_NAME} does not match package version v${package_version}"
+          expected_tag="v${package_version}"
+          if [[ "${RELEASE_TAG}" != "${expected_tag}" ]]; then
+            echo "tag ${RELEASE_TAG} does not match package version ${expected_tag}" >&2
             exit 1
           fi
 
-      - name: Build distributions
-        run: python -m build
+      - name: Run deterministic library tests
+        run: |
+          python -m pytest -q -m "not integration" \
+            --disable-socket \
+            --allow-unix-socket \
+            --allow-hosts=127.0.0.1,::1,localhost
 
-      - name: Validate distribution metadata
-        run: python -m twine check dist/*
+      - name: Run deterministic agent CLI tests
+        run: python -m pytest -q apps/agent-cli/tests -m "not integration"
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v7
+      - name: Build strict Russian and English documentation
+        run: python scripts/build_docs.py --clean
+
+      - name: Build distributions and validate metadata
+        run: |
+          python -m build --sdist --wheel
+          python -m twine check dist/*
+
+      - name: Prepare release metadata
+        shell: bash
+        run: |
+          mkdir release-metadata
+          (cd dist && sha256sum *.whl *.tar.gz) > release-metadata/SHA256SUMS
+          cp RELEASE_NOTES.md release-metadata/RELEASE_NOTES.md
+          python - <<'PY'
+          import json
+          import subprocess
+          import tomllib
+
+          with open("pyproject.toml", "rb") as source:
+              project = tomllib.load(source)["project"]
+          manifest = {
+              "name": project["name"],
+              "version": project["version"],
+              "tag": __import__("os").environ["GITHUB_REF_NAME"],
+              "commit": subprocess.check_output(
+                  ["git", "rev-parse", "HEAD"], text=True
+              ).strip(),
+          }
+          with open("release-metadata/RELEASE_MANIFEST.json", "w", encoding="utf-8") as output:
+              json.dump(manifest, output, sort_keys=True)
+              output.write("\n")
+          PY
+
+      - name: Upload verified distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
-          name: dist
-          path: dist/
+          name: python-dist
+          path: |
+            dist/*.whl
+            dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload verified release metadata
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: release-metadata
+          path: release-metadata/
           if-no-files-found: error
           retention-days: 7
 
   publish-testpypi:
     name: publish to TestPyPI
     if: github.event_name == 'workflow_dispatch'
-    needs: build
+    needs: verify-release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       id-token: write
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8
+      - name: Download verified distributions
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          name: dist
+          name: python-dist
           path: dist/
 
+      - name: Download release checksums
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: release-metadata
+          path: release-metadata/
+
+      - name: Verify distribution checksums
+        shell: bash
+        run: (cd dist && sha256sum --check ../release-metadata/SHA256SUMS)
+
       - name: Publish to TestPyPI via OIDC
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           repository-url: https://test.pypi.org/legacy/
           skip-existing: true
@@ -75,18 +148,265 @@ jobs:
   publish-pypi:
     name: publish to PyPI
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: verify-release
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       id-token: write
     steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8
+      - name: Download verified distributions
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
-          name: dist
+          name: python-dist
           path: dist/
 
+      - name: Download release checksums
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: release-metadata
+          path: release-metadata/
+
+      - name: Verify distribution checksums
+        shell: bash
+        run: (cd dist && sha256sum --check ../release-metadata/SHA256SUMS)
+
       - name: Publish to PyPI via OIDC
-        uses: pypa/gh-action-pypi-publish@release/v1
+        uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
         with:
           skip-existing: true
+
+      - name: Verify PyPI records the verified artifacts
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          from pathlib import Path
+          import sys
+          import time
+          from urllib.error import HTTPError, URLError
+          from urllib.parse import quote
+          from urllib.request import Request, urlopen
+
+          manifest = json.loads(
+              Path("release-metadata/RELEASE_MANIFEST.json").read_text(encoding="utf-8")
+          )
+          checksums: dict[str, str] = {}
+          for line in Path("release-metadata/SHA256SUMS").read_text(encoding="utf-8").splitlines():
+              digest, filename = line.split(maxsplit=1)
+              filename = filename.removeprefix("*")
+              if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                  raise SystemExit(f"invalid SHA256SUMS entry for {filename!r}")
+              if filename in checksums:
+                  raise SystemExit(f"duplicate SHA256SUMS entry for {filename!r}")
+              checksums[filename] = digest
+
+          wheels = [name for name in checksums if name.endswith(".whl")]
+          sdists = [name for name in checksums if name.endswith(".tar.gz")]
+          if len(checksums) != 2 or len(wheels) != 1 or len(sdists) != 1:
+              raise SystemExit("expected exactly one wheel and one sdist in SHA256SUMS")
+          for filename, expected_digest in checksums.items():
+              actual_digest = hashlib.sha256(Path("dist", filename).read_bytes()).hexdigest()
+              if actual_digest != expected_digest:
+                  raise SystemExit(f"local artifact digest mismatch for {filename}")
+
+          package_name = str(manifest["name"])
+          package_version = str(manifest["version"])
+          url = "https://pypi.org/pypi/{}/{}/json".format(
+              quote(package_name, safe=""), quote(package_version, safe="")
+          )
+          last_error = "PyPI JSON was not queried"
+          for attempt in range(1, 6):
+              try:
+                  request = Request(url, headers={"Accept": "application/json"})
+                  with urlopen(request, timeout=20) as response:
+                      payload = json.load(response)
+                  if payload.get("info", {}).get("version") != package_version:
+                      raise ValueError("PyPI returned a different version")
+                  published: dict[str, str] = {}
+                  for file_info in payload.get("urls", []):
+                      filename = file_info.get("filename")
+                      if filename in checksums:
+                          if filename in published:
+                              raise ValueError(f"duplicate PyPI record for {filename}")
+                          digest = file_info.get("digests", {}).get("sha256")
+                          if not isinstance(digest, str):
+                              raise ValueError(f"PyPI did not return a SHA-256 for {filename}")
+                          published[filename] = digest
+                  missing = sorted(set(checksums) - set(published))
+                  mismatched = sorted(
+                      filename
+                      for filename, expected in checksums.items()
+                      if published.get(filename) != expected
+                  )
+                  if not missing and not mismatched:
+                      print(f"PyPI metadata verified for {package_name} {package_version}.")
+                      sys.exit(0)
+                  last_error = f"missing={missing}, mismatched={mismatched}"
+              except (HTTPError, URLError, OSError, ValueError, json.JSONDecodeError) as error:
+                  last_error = str(error)
+              if attempt < 5:
+                  time.sleep(attempt * 5)
+          raise SystemExit(
+              f"PyPI metadata did not match verified artifacts after 5 attempts: {last_error}"
+          )
+          PY
+
+  create-github-release:
+    name: create GitHub release
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: publish-pypi
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Download verified distributions
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: python-dist
+          path: release-assets/
+
+      - name: Download verified release metadata
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: release-metadata
+          path: release-assets/
+
+      - name: Verify artifact checksums and create release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          cd release-assets
+          sha256sum --check SHA256SUMS
+          verify_release() {
+            python3 - <<'PY'
+          from __future__ import annotations
+
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import subprocess
+          import sys
+          from urllib.parse import quote
+
+          repository = os.environ["GITHUB_REPOSITORY"]
+          release_tag = os.environ["RELEASE_TAG"]
+          manifest = json.loads(Path("RELEASE_MANIFEST.json").read_text(encoding="utf-8"))
+          if manifest.get("tag") != release_tag:
+              raise SystemExit("release manifest tag does not match the workflow tag")
+          expected_commit = manifest.get("commit")
+          if not isinstance(expected_commit, str) or len(expected_commit) != 40:
+              raise SystemExit("release manifest has no valid source commit")
+          if any(char not in "0123456789abcdef" for char in expected_commit):
+              raise SystemExit("release manifest has no valid source commit")
+
+          expected_digests: dict[str, str] = {}
+          for line in Path("SHA256SUMS").read_text(encoding="utf-8").splitlines():
+              digest, filename = line.split(maxsplit=1)
+              filename = filename.removeprefix("*")
+              if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
+                  raise SystemExit(f"invalid SHA256SUMS entry for {filename!r}")
+              if filename in expected_digests:
+                  raise SystemExit(f"duplicate SHA256SUMS entry for {filename!r}")
+              expected_digests[filename] = f"sha256:{digest}"
+          wheels = [name for name in expected_digests if name.endswith(".whl")]
+          sdists = [name for name in expected_digests if name.endswith(".tar.gz")]
+          if len(expected_digests) != 2 or len(wheels) != 1 or len(sdists) != 1:
+              raise SystemExit("expected exactly one wheel and one sdist in SHA256SUMS")
+          expected_digests["SHA256SUMS"] = "sha256:" + hashlib.sha256(
+              Path("SHA256SUMS").read_bytes()
+          ).hexdigest()
+
+          def github_api(path: str) -> dict:
+              response = subprocess.check_output(
+                  [
+                      "gh", "api",
+                      "-H", "Accept: application/vnd.github+json",
+                      "-H", "X-GitHub-Api-Version: 2022-11-28",
+                      path,
+                  ],
+                  text=True,
+              )
+              return json.loads(response)
+
+          encoded_tag = quote(release_tag, safe="")
+          release = github_api(f"repos/{repository}/releases/tags/{encoded_tag}")
+          if release.get("tag_name") != release_tag:
+              raise SystemExit("GitHub Release tag does not match the workflow tag")
+          if release.get("draft") or release.get("prerelease"):
+              raise SystemExit("GitHub Release must be a published stable release")
+
+          ref = github_api(f"repos/{repository}/git/ref/tags/{encoded_tag}")
+          if ref.get("ref") != f"refs/tags/{release_tag}":
+              raise SystemExit("GitHub tag reference does not match the workflow tag")
+          target = ref.get("object", {})
+          for _ in range(5):
+              target_type = target.get("type")
+              target_sha = target.get("sha")
+              if target_type == "commit":
+                  break
+              if target_type != "tag" or not isinstance(target_sha, str):
+                  raise SystemExit("GitHub tag does not resolve to a commit")
+              target = github_api(f"repos/{repository}/git/tags/{target_sha}").get("object", {})
+          else:
+              raise SystemExit("GitHub tag indirection is too deep")
+          if target_type != "commit" or target_sha != expected_commit:
+              raise SystemExit("GitHub tag does not target the commit that built the artifacts")
+
+          assets = release.get("assets")
+          if not isinstance(assets, list):
+              raise SystemExit("GitHub Release did not return its assets")
+          actual_digests: dict[str, str] = {}
+          for asset in assets:
+              name = asset.get("name")
+              digest = asset.get("digest")
+              if not isinstance(name, str) or not isinstance(digest, str):
+                  raise SystemExit("GitHub Release asset lacks a name or SHA-256 digest")
+              if asset.get("state") != "uploaded":
+                  raise SystemExit(f"GitHub Release asset {name!r} is not uploaded")
+              if name in actual_digests:
+                  raise SystemExit(f"duplicate GitHub Release asset {name!r}")
+              actual_digests[name] = digest
+          if set(actual_digests) != set(expected_digests):
+              raise SystemExit(
+                  "GitHub Release assets differ from the verified wheel, sdist, and SHA256SUMS"
+              )
+          mismatched = sorted(
+              name for name, expected in expected_digests.items()
+              if actual_digests[name] != expected
+          )
+          if mismatched:
+              raise SystemExit(f"GitHub Release asset digest mismatch: {mismatched}")
+          print(f"GitHub Release {release_tag} and all asset digests verified.")
+          PY
+          }
+
+          verify_release_with_retry() {
+            for attempt in 1 2 3; do
+              if verify_release; then
+                return 0
+              fi
+              if [[ "${attempt}" -lt 3 ]]; then
+                sleep $((attempt * 2))
+              fi
+            done
+            return 1
+          }
+
+          if gh release view "${RELEASE_TAG}" >/dev/null 2>&1; then
+            verify_release_with_retry
+            exit 0
+          fi
+          gh release create "${RELEASE_TAG}" *.whl *.tar.gz SHA256SUMS \
+            --title "${RELEASE_TAG}" \
+            --notes-file RELEASE_NOTES.md \
+            --verify-tag
+          verify_release_with_retry

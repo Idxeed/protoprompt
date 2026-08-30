@@ -195,6 +195,26 @@ def test_provider_counter_is_deterministic_and_understands_aliases():
     assert claude.count_messages(messages) == claude.count("hello world") + 3
 
 
+def test_openai_provider_counter_uses_tiktoken_when_available():
+    pytest.importorskip("tiktoken")
+    from protoprompt.tokens.tiktoken_adapter import TiktokenCounter
+
+    counter = ProviderTokenCounter("openai", model="gpt-3.5-turbo")
+
+    assert isinstance(counter._delegate, TiktokenCounter)
+    assert counter.count("tokenization differs from regex estimates") == TiktokenCounter(
+        model="gpt-3.5-turbo"
+    ).count("tokenization differs from regex estimates")
+
+
+def test_openai_provider_counter_falls_back_for_unknown_tiktoken_model():
+    from protoprompt.tokens import RegexTokenCounter
+
+    counter = ProviderTokenCounter("openai", model="unknown-model-for-test")
+
+    assert isinstance(counter._delegate, RegexTokenCounter)
+
+
 def test_unknown_portable_role_fails_before_provider_call():
     client = AnthropicClient(client=_AnthropicSDK())
     with pytest.raises(ValueError, match="Unsupported portable chat role"):

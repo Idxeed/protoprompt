@@ -47,10 +47,12 @@ Read-only resources: `memory://current/profile`,
 ## Встраивание
 
 ```python
-from protoprompt import MemoryScope, MemoryService
+from protoprompt import MemoryScope, MemoryService, ProfileManager
 from protoprompt.integrations import create_mcp_server, create_mcp_http_app
+from protoprompt.profile import InMemoryProfileStore
 
 scope = MemoryScope(tenant="acme", user="u-42", thread="support")
+profiles = ProfileManager(InMemoryProfileStore(), scope=scope)
 service = MemoryService(store, embeddings, scope, profile_manager=profiles)
 
 mcp = create_mcp_server(service)          # mcp.run("stdio")
@@ -59,3 +61,7 @@ app = create_mcp_http_app(service)        # Starlette ASGI, путь /mcp
 
 Один и тот же service используется обоими transport. In-process тесты можно
 писать официальным `mcp.Client(mcp)` без процесса и порта.
+
+Если включены profile endpoints, создавайте `ProfileManager` с точно тем же
+host-owned scope, что и `MemoryService`: при несовпадении конструктор завершится
+до первого profile I/O.

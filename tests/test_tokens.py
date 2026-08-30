@@ -4,7 +4,7 @@ import pytest
 
 from protoprompt.injector import ContextBuilder
 from protoprompt.store.memory import InMemStore
-from protoprompt.tokens import RegexTokenCounter, TokenCounter
+from protoprompt.tokens import ProviderTokenCounter, RegexTokenCounter, TokenCounter
 
 from _mocks import MockLLM
 
@@ -58,6 +58,40 @@ def test_regex_counter_messages_non_string_content():
     msgs = [{"role": "user", "content": 12345}]
     n = counter.count_messages(msgs)
     assert n > 0
+
+
+def test_message_counters_include_tool_calls_and_rich_content_payloads():
+    args = "argument " * 200
+    tool_call = [{
+        "role": "assistant",
+        "content": None,
+        "tool_calls": [{
+            "id": "call_1",
+            "type": "function",
+            "function": {"name": "search", "arguments": args},
+        }],
+    }]
+    rich_content = [{
+        "role": "user",
+        "content": [{
+            "type": "input_text",
+            "text": "hello",
+            "metadata": {"source": "attachment"},
+        }],
+    }]
+    regex = RegexTokenCounter()
+    provider = ProviderTokenCounter("openai", fallback=regex)
+
+    assert regex.count_messages(tool_call) > 200
+    assert provider.count_messages(tool_call) > 200
+    assert regex.count_messages(rich_content) > regex.count("hello") + 4
+
+
+def test_message_counters_reject_non_json_provider_payloads():
+    with pytest.raises(TypeError, match="JSON-compatible"):
+        RegexTokenCounter().count_messages([
+            {"role": "assistant", "content": None, "tool_calls": object()},
+        ])
 
 
 @pytest.mark.asyncio

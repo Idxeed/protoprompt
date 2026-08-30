@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import re
 
+from protoprompt.tokens.message_payload import message_text
 from protoprompt.tokens.protocol import TokenCounter
 
 _WORD_RE = re.compile(r"\w+|[^\w\s]", re.UNICODE)
@@ -45,8 +46,5 @@ class RegexTokenCounter:
     def count_messages(self, messages: list[dict]) -> int:
         total = 0
         for msg in messages:
-            content = msg.get("content", "")
-            if not isinstance(content, str):
-                content = str(content)
-            total += self.count(content) + _PER_MESSAGE_OVERHEAD
+            total += self.count(message_text(msg)) + _PER_MESSAGE_OVERHEAD
         return total

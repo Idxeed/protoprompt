@@ -37,6 +37,9 @@ class ProfileManager:
             :func:`protoprompt.profile.merge.merge`).
         clock: zero-arg callable returning an ISO-8601 timestamp for
             ``updated_at`` (injectable for tests).
+        scope: optional host-owned namespace. A non-empty scope requires a
+            store with native ``supports_profile_scopes`` support, so the
+            manager never has to infer ownership from a physical storage key.
     """
 
     def __init__(
@@ -59,6 +62,13 @@ class ProfileManager:
         self._clock = clock
         self._locks: dict[str, asyncio.Lock] = {}
         self._scope = scope
+        if self._has_storage_scope and not getattr(
+            store, "supports_profile_scopes", False
+        ):
+            raise ValueError(
+                "a non-empty MemoryScope requires a profile store with "
+                "native supports_profile_scopes=True"
+            )
         self._event_sink = event_sink
 
     async def update(self, user_id: str, signals: list[Signal]) -> UserProfile:
@@ -73,7 +83,7 @@ class ProfileManager:
 
         lock = self._locks.setdefault(user_id, asyncio.Lock())
         async with lock:
-            existing = await await_if_needed(self._store.get(user_id))
+            existing = await self._get_profile(user_id)
             profile = existing if existing is not None else UserProfile(user_id=user_id)
             delta = await self._source.extract(user_id, signals)
             now = self._clock()
@@ -95,7 +105,7 @@ class ProfileManager:
 
                 compare_and_put = getattr(self._store, "compare_and_put", None)
                 if compare_and_put is None:
-                    await await_if_needed(self._store.put(merged))
+                    await self._put_profile(merged)
                     self._emit_profile(
                         "updated",
                         trace_id,
@@ -106,8 +116,10 @@ class ProfileManager:
                     return merged
 
                 expected = profile.version if existing is not None else None
-                saved = await await_if_needed(
-                    compare_and_put(merged, expected_version=expected)
+                saved = await self._compare_and_put_profile(
+                    compare_and_put,
+                    merged,
+                    expected_version=expected,
                 )
                 if saved:
                     self._emit_profile(
@@ -119,7 +131,7 @@ class ProfileManager:
                     )
                     return merged
 
-                existing = await await_if_needed(self._store.get(user_id))
+                existing = await self._get_profile(user_id)
                 profile = (
                     existing if existing is not None else UserProfile(user_id=user_id)
                 )
@@ -127,18 +139,64 @@ class ProfileManager:
             raise RuntimeError(f"profile update for {user_id!r} conflicted repeatedly")
 
     async def get(self, user_id: str) -> UserProfile | None:
-        return await await_if_needed(self._store.get(user_id))
+        return await self._get_profile(user_id)
+
+    @property
+    def scope(self) -> MemoryScope | None:
+        """Return the immutable host-owned storage scope, when configured."""
+        return self._scope
 
     async def reset(self, user_id: str) -> UserProfile:
         """Start over: persist and return a fresh, empty profile."""
         fresh = UserProfile(user_id=user_id)
-        await await_if_needed(self._store.put(fresh))
+        await self._put_profile(fresh)
         self._emit_profile("reset", new_trace_id(), perf_counter(), version=0)
         return fresh
 
     async def delete(self, user_id: str) -> None:
-        await await_if_needed(self._store.delete(user_id))
+        await self._delete_profile(user_id)
         self._emit_profile("deleted", new_trace_id(), perf_counter())
+
+    @property
+    def _has_storage_scope(self) -> bool:
+        return self._scope is not None and self._scope.has_identity
+
+    async def _get_profile(self, user_id: str) -> UserProfile | None:
+        if self._has_storage_scope:
+            return await await_if_needed(
+                self._store.get(user_id, scope=self._scope)
+            )
+        return await await_if_needed(self._store.get(user_id))
+
+    async def _put_profile(self, profile: UserProfile) -> None:
+        if self._has_storage_scope:
+            await await_if_needed(self._store.put(profile, scope=self._scope))
+            return
+        await await_if_needed(self._store.put(profile))
+
+    async def _compare_and_put_profile(
+        self,
+        compare_and_put: Callable[..., Any],
+        profile: UserProfile,
+        *,
+        expected_version: int | None,
+    ) -> bool:
+        if self._has_storage_scope:
+            return await await_if_needed(compare_and_put(
+                profile,
+                expected_version=expected_version,
+                scope=self._scope,
+            ))
+        return await await_if_needed(compare_and_put(
+            profile,
+            expected_version=expected_version,
+        ))
+
+    async def _delete_profile(self, user_id: str) -> None:
+        if self._has_storage_scope:
+            await await_if_needed(self._store.delete(user_id, scope=self._scope))
+            return
+        await await_if_needed(self._store.delete(user_id))
 
     def _emit_profile(
         self,

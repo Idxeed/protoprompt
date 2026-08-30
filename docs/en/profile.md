@@ -84,6 +84,31 @@ store (profiles are read by exact key, not by meaning):
 - `SqliteProfileStore` — persistent, no external services;
 - `as_async_profile(store)` — wrapper for `asyncio` (worker threads).
 
+### Scoped profile isolation
+
+`InMemoryProfileStore`, `SqliteProfileStore`, and their async variants support
+a non-empty `MemoryScope`. They store an isolated physical key while returning
+the original logical `user_id`:
+
+```python
+from protoprompt import MemoryScope
+from protoprompt.profile import ProfileManager, SqliteProfileStore
+
+manager = ProfileManager(
+    SqliteProfileStore("users.db"),
+    scope=MemoryScope(tenant="acme", user="u1"),
+)
+```
+
+Only trusted host code should create `MemoryScope`. A custom store without
+`supports_profile_scopes=True` cannot be used with a non-empty scope:
+`ProfileManager` raises `ValueError` before its first read. This is a deliberate
+fail-closed boundary—do not emulate scoping by concatenating keys or implicitly
+adopt legacy unscoped profiles. During migration, copy only records explicitly
+authorized for the destination scope. If a legacy physical-key collision is
+found, scoped reads treat it as absent and scoped writes, resets, deletes, and
+compare-and-swap operations raise `ValueError` rather than destroying it.
+
 ## Rendering into context
 
 `ContextInput` accepts a structured profile directly:

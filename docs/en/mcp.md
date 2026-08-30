@@ -47,10 +47,12 @@ Read-only resources: `memory://current/profile`,
 ## Embedding the server
 
 ```python
-from protoprompt import MemoryScope, MemoryService
+from protoprompt import MemoryScope, MemoryService, ProfileManager
 from protoprompt.integrations import create_mcp_server, create_mcp_http_app
+from protoprompt.profile import InMemoryProfileStore
 
 scope = MemoryScope(tenant="acme", user="u-42", thread="support")
+profiles = ProfileManager(InMemoryProfileStore(), scope=scope)
 service = MemoryService(store, embeddings, scope, profile_manager=profiles)
 
 mcp = create_mcp_server(service)          # mcp.run("stdio")
@@ -59,3 +61,7 @@ app = create_mcp_http_app(service)        # Starlette ASGI at /mcp
 
 Both transports share the same service. In-process tests can use the official
 `mcp.Client(mcp)` without a subprocess or port.
+
+When profile endpoints are enabled, create `ProfileManager` with the exact
+same host-owned scope as `MemoryService`; construction fails before profile I/O
+if the scopes differ.

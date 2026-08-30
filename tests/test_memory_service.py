@@ -15,6 +15,37 @@ def test_memory_service_requires_host_scope():
         MemoryService(InMemStore(), MockLLM(), MemoryScope())
 
 
+@pytest.mark.parametrize(
+    "profile_scope",
+    [
+        None,
+        MemoryScope(),
+        MemoryScope(tenant="acme", user="bob"),
+    ],
+)
+def test_memory_service_rejects_profile_manager_scope_mismatch(profile_scope):
+    service_scope = MemoryScope(tenant="acme", user="alice")
+    manager = ProfileManager(InMemoryProfileStore(), scope=profile_scope)
+
+    with pytest.raises(ValueError, match="profile_manager scope"):
+        MemoryService(
+            InMemStore(),
+            MockLLM(),
+            service_scope,
+            profile_manager=manager,
+        )
+
+
+def test_memory_service_rejects_manager_without_scope_contract():
+    with pytest.raises(ValueError, match="profile_manager scope"):
+        MemoryService(
+            InMemStore(),
+            MockLLM(),
+            MemoryScope(tenant="acme", user="alice"),
+            profile_manager=object(),  # type: ignore[arg-type]
+        )
+
+
 @pytest.mark.asyncio
 async def test_memory_service_remember_search_explain_forget():
     service = MemoryService(

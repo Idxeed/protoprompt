@@ -1,6 +1,6 @@
 [project]
 name = "protoprompt"
-version = "0.6.0"
+version = "0.6.1"
 description = "Layered context builder for LLM prompts: RAG + compressed session memory + user profile"
 requires-python = ">=3.11"
 license = "MIT"

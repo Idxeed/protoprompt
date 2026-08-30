@@ -35,10 +35,53 @@ print("dropped:", out.budget_report.dropped_blocks)
 print("per-section:", out.budget_report.section_tokens)
 ```
 
+## Full request budgeting
+
+`build()` limits only the assembled system context. When an application adds
+history and the current turn itself, use `build_messages()` as the safe
+request-level API. It accounts for system context, provider framing, retained
+history items, and the mandatory final turn under one limit.
+
+```python
+messages = await builder.build_messages(
+    ContextInput(query=question, system_prompt="Answer concisely."),
+    history=history,
+    user_message=question,
+    output_reserve=1_024,
+)
+```
+
+`output_reserve` leaves room for the model's response. If the mandatory final
+turn plus the reserve does not fit, `TokenBudgetExceededError` is raised rather
+than silently trimming it. For integrations where the current turn contains
+multiple portable message items (for example a tool call), pass
+`final_messages`. Those items must use JSON-compatible values: structured
+content, `tool_calls`, `tool_call_id`, and other fields are included in the
+estimate.
+
+Retained OpenAI-style history keeps an assistant `tool_calls` item and its
+matching `tool` results as one atomic group. Agents/Responses history is a
+contiguous dependency graph: call/output pairs (including hosted MCP approvals
+and SDK-valid anonymous server-side tool searches), streamed shell/tool-search
+outputs, program-owned children, and their preceding reasoning items are
+retained or omitted together. This
+also supports interleaved program invocations without reordering items. Input
+controls such as `compaction_trigger` and `item_reference` are omitted from
+optional history, and reasoning is kept only with a real model-emitted
+follower.
+
+When the mandatory final input starts with a tool output, its complete trailing
+history graph is reserved as required context. If that dependency cannot fit,
+the builder raises `TokenBudgetExceededError` instead of emitting an orphaned
+final output. Anonymous **server-side** tool-search outputs are paired with
+history calls by SDK order across that boundary; client-side searches require a
+`call_id`.
+
 ## Counting tokens
 
 The default `RegexTokenCounter` is fast, dependency-free, and
-multilingual. For exact counts install the `tiktoken` extra:
+multilingual. The optional `TiktokenCounter` provides a model-aware local
+estimate for text plus deterministic message framing:
 
 ```bash
 pip install "protoprompt[tiktoken]"
@@ -51,6 +94,11 @@ counter = TiktokenCounter(model="gpt-4o-mini")
 # or
 counter = TiktokenCounter(encoding="cl100k_base")
 ```
+
+The ceiling is hard in the units of the counter you select. Provider wire
+formats and model limits can change, so use the provider's native
+`count_tokens` API for exact or billable counts at the request boundary, and
+set the provider's response limit to match `output_reserve`.
 
 You can also plug in your own implementation — the protocol is one
 method:

@@ -7,6 +7,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.6.1] - 2026-08-30
+
+### Fixed
+- `TokenBudgetedContextBuilder.build_messages()` now reserves the final user
+  turn and optional output capacity before retrieval. Its final accounting
+  covers rendered system context, retained history, provider message framing,
+  and the mandatory turn under one input budget.
+- The OpenAI Agents session callback follows the same request-level ceiling;
+  an oversized mandatory Agents item is rejected instead of bypassing the
+  configured budget.
+- Retained Chat Completions and Agents/Responses tool-call histories preserve
+  complete call/output graphs (including hosted MCP approvals, interleaved
+  program-owned children, streamed shell/tool-search outputs, anonymous
+  server-side tool-search pairs, and linked reasoning) or drop them
+  atomically, never returning a dangling tool result
+  or request through the budgeted API. Input-only Responses controls are not
+  replayed as optional history.
+- A final tool output reserves its required trailing history graph (including
+  ordered anonymous server-side tool-search dependencies) and raises rather
+  than dropping that graph when the complete protocol dependency cannot fit.
+- Built-in and provider-aware token counters account for structured content,
+  tool calls, and other provider-relevant message fields instead of silently
+  counting `content` alone.
+- `ProviderTokenCounter("openai")` now loads the correct optional tiktoken
+  adapter and retains its deterministic fallback when tiktoken is unavailable
+  or does not know a model name.
+- `InMemoryProfileStore`, `SqliteProfileStore`, and their async variants can
+  persist a logical profile id behind an isolated `MemoryScope` physical key,
+  while public `UserProfile.user_id` remains logical.
+
+### Security
+- Scoped profile reads reject a legacy unscoped record that merely collides
+  with a derived scoped key, preventing that record from being exposed through
+  the scoped profile API.
+- Scoped profile mutators also reject that collision before a reset, delete,
+  write, or compare-and-swap operation can overwrite the legacy record.
+- `MemoryService` rejects a `ProfileManager` whose host-owned scope is absent
+  or differs from the service scope, before any profile read or write.
+
+### Migration
+- Existing unscoped profiles intentionally remain unscoped. When enabling
+  `MemoryScope` for profiles, copy only the records you explicitly authorize
+  into the destination scope; the runtime will not adopt an unscoped profile
+  implicitly.
+- A non-empty profile `MemoryScope` now requires a store with native
+  `supports_profile_scopes=True`. Custom, Redis, and Postgres profile stores
+  must add that explicit capability before they can serve scoped profiles.
+
 ## [0.6.0] - 2026-08-28
 
 ### Added

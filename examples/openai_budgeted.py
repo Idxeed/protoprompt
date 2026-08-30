@@ -40,6 +40,7 @@ async def main() -> None:
     builder = TokenBudgetedContextBuilder(
         store, llm,
         max_tokens=2000,  # компактный бюджет: видно, как режутся блоки
+        output_reserve=400,  # оставляем место для ответа модели
         priorities=("system", "session", "rag", "profile"),
     )
 
@@ -54,9 +55,7 @@ async def main() -> None:
         user_message="Сводка по итогам Q3 и приоритетам Q4?",
     )
 
-    report = (await builder.build(
-        ContextInput(query="Какие итоги третьего квартала?", doc_ids=["reports"])
-    )).budget_report
+    report = builder.last_report
     assert report is not None
     print(f"бюджет {report.budget} | used {report.used_tokens}"
           f" | history kept {report.history_kept}/{len(history)}")
