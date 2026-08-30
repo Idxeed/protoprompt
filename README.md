@@ -14,7 +14,7 @@ embeddable context runtime: RAG, память диалога, профиль п�
 [Примеры](examples/) ·
 [Каталог интеграций](INTEGRATIONS.md) ·
 [Roadmap](ROADMAP.md) ·
-[Launch v0.15](LAUNCH-v0.15.md) ·
+[Launch v0.16](LAUNCH-v0.16.md) ·
 [Как добавить интеграцию](CONTRIBUTING.md) ·
 [Changelog](CHANGELOG.md)
 
@@ -81,9 +81,11 @@ gate проверяет scope, lifecycle, deletion/source revocation и exact Le
 token/byte accounting на SQLite и PostgreSQL. Он не является latency,
 throughput или model-quality benchmark.
 
-v0.15 добавляет frozen dual-backend evidence protocol для strict Ledger
+v0.15 добавил frozen dual-backend evidence protocol для strict Ledger
 selection: один content-free synthetic fixture обязан дать одинаковую
-семантику на SQLite и PostgreSQL. Он не делает claim о качестве модели,
+семантику на SQLite и PostgreSQL. v0.16 hardens reference-agent boundary:
+user-owned state, identity-bound project namespaces, strict native jail
+operations и явный provider transport. Это не делает claim о качестве модели,
 general recall, latency, throughput или package `1.0.0`.
 
 ## Установка
@@ -121,6 +123,19 @@ pip install "protoprompt @ git+https://github.com/Idxeed/protoprompt.git@master"
 ```
 
 Требуется Python 3.11 или новее.
+
+### Изменение HTTP-клиентов в 0.16
+
+`HttpxLLMClient` и `OllamaClient` теперь по умолчанию создают транспорт с
+`trust_env=False`. Это больше не наследует proxy/CA-настройки процесса и не
+может незаметно направить prompts или bearer token через ambient route. Если
+приложение сознательно полагалось на такие environment-настройки, включите их
+явно и только для доверенного endpoint:
+
+```python
+HttpxLLMClient(base_url="https://llm.example", trust_env=True)
+OllamaClient(host="https://ollama.example", trust_env=True)
+```
 
 ## Быстрый старт
 
@@ -244,9 +259,23 @@ remote-Ollama opt-in и пределах token estimate — в
 В монорепозитории есть CLI поверх `protoprompt.agent.WorkingMemory`:
 
 ```bash
+pip install -e ".[ollama]"
 pip install -e "apps/agent-cli[ollama]"
 pp-agent /path/to/project
 ```
+
+В релизе 0.16 `protoprompt-cli` не публикуется отдельно в PyPI:
+соответствующие wheel и sdist прикрепляются к GitHub Release. Для локального
+Ollama setup:
+
+```bash
+python -m pip install "protoprompt[ollama]==0.16.0"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.0/protoprompt_cli-0.16.0-py3-none-any.whl"
+```
+
+Вместо wheel можно после установки соответствующей версии ядра поставить
+source из тега:
+`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.0#subdirectory=apps/agent-cli"`.
 
 Он поддерживает сессии, hot/cold memory, план-режим и подтверждение опасных
 инструментов. Каждый вызов модели собирается через immutable `ContextPlan`:

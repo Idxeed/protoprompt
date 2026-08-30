@@ -22,6 +22,9 @@ class OllamaClient:
         chat_model: default model for :meth:`chat` when none is passed.
         embed_model: default model for :meth:`embed`; matches the
             project-wide default ``nomic-embed-text``.
+        trust_env: whether to honour ambient proxy/CA environment settings;
+            disabled by default so local prompt and document data are not
+            silently rerouted.
     """
 
     def __init__(
@@ -31,6 +34,7 @@ class OllamaClient:
         embed_model: str = "nomic-embed-text",
         timeout: float = 300.0,
         transport: Any | None = None,
+        trust_env: bool = False,
     ) -> None:
         try:
             import httpx
@@ -46,6 +50,7 @@ class OllamaClient:
             "base_url": host.rstrip("/"),
             "timeout": timeout,
             "headers": {"Content-Type": "application/json"},
+            "trust_env": trust_env,
         }
         if transport is not None:
             kwargs["transport"] = transport

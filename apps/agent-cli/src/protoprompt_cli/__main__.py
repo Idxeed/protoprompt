@@ -13,17 +13,32 @@ from protoprompt.agent import WorkingMemory
 from protoprompt.agent.scorer import ScorerWeights
 
 from protoprompt_cli import persistence
-from protoprompt_cli.config import load_config, project_config_path
+from protoprompt_cli.config import load_config, user_config_path
 from protoprompt_cli.core import AgentCore
-from protoprompt_cli.factory import make_llm
+from protoprompt_cli.factory import make_llm, resolve_models
 from protoprompt_cli.repl import Repl
 from protoprompt_cli.startup import choose_project
-from protoprompt_cli.tools import ToolRunner
+from protoprompt_cli.terminal import escape_terminal_text
+from protoprompt_cli.tools import PERM_DENY, ToolRunner
 from protoprompt_cli import __version__
 
 
+class _SafeArgumentParser(argparse.ArgumentParser):
+    """Keep parser errors from becoming a terminal-control bypass.
+
+    ``argparse`` reflects unrecognised command-line arguments in errors.  The
+    normal CLI contract treats them as local input, but escaping here keeps
+    this final stdout/stderr route consistent with model and tool output.
+    """
+
+    def _print_message(self, message, file=None):
+        if message:
+            message = escape_terminal_text(message)
+        super()._print_message(message, file)
+
+
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(prog="pp-agent")
+    parser = _SafeArgumentParser(prog="pp-agent")
     parser.add_argument("--version", action="version", version=__version__)
     parser.add_argument("path", nargs="?", default=None,
                         help="каталог проекта (по умолчанию — cwd)")
@@ -47,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--backend", default=None,
                         help="LLM-бэкенд: ollama | openai | httpx")
     parser.add_argument("--config", default=None,
-                        help="путь к config.toml")
+                        help="явно доверенный путь к config.toml")
     parser.add_argument("--budget", type=int, default=None,
                         help="токен-бюджет памяти")
     parser.add_argument("--request-max-tokens", type=int, default=None,
@@ -63,7 +78,12 @@ def build_parser() -> argparse.ArgumentParser:
 
 async def _run(args: argparse.Namespace) -> int:
     root = persistence.find_root(args.path or Path.cwd())
-    config_path = args.config or project_config_path(root)
+    identity = persistence.capture_project_identity(root)
+    root = identity.root
+    # A repository can contain arbitrary TOML.  Only an explicit --config or
+    # a per-user state path may choose providers and non-secret endpoints;
+    # credentials always come from the fixed PP_* environment contract.
+    config_path = args.config or user_config_path(identity)
     cfg = load_config(config_path)
     if args.backend:
         cfg["llm"]["backend"] = args.backend
@@ -75,16 +95,18 @@ async def _run(args: argparse.Namespace) -> int:
         cfg["agent"]["output_reserve_tokens"] = args.output_reserve
     session = args.resume_session or args.session or persistence.DEFAULT_SESSION
 
+    chat_model, embed_model = resolve_models(cfg)
     llm = make_llm(cfg)
-    persistence.ensure_state_dir(root)
-    store = SqliteStore(str(persistence.cold_db_path(root)))
+    persistence.ensure_state_dir(identity)
+    store = SqliteStore(str(persistence.cold_db_path(identity)))
     memory_cfg = cfg["memory"]
     mem = WorkingMemory(
         store=store,
         llm=llm,
         counter=RegexTokenCounter(),
         max_tokens=int(memory_cfg["max_tokens"]),
-        namespace=persistence.namespace_for(root),
+        namespace=identity.namespace,
+        embed_model=embed_model,
         recall_cooldown_steps=int(memory_cfg["recall_cooldown_steps"]),
         dedup_threshold=float(memory_cfg["dedup_threshold"]),
         max_pinned_tokens=int(
@@ -93,12 +115,23 @@ async def _run(args: argparse.Namespace) -> int:
         weights=ScorerWeights(ref_half_life=20),
     )
 
-    perms = persistence.load_json(persistence.perms_json_path(root), {}) or {}
-    tools = ToolRunner(root, perms=perms)
+    loaded_perms = (
+        persistence.load_json(persistence.perms_json_path(identity), {}) or {}
+    )
+    # A durable grant must never become authority automatically in a later
+    # process: there is no portable atomic way to bind a pathname-based tool
+    # action to the original directory object for its whole lifetime.  Keep
+    # durable denials (safe restriction), while every allow is session-only.
+    perms = (
+        {name: mode for name, mode in loaded_perms.items() if mode == PERM_DENY}
+        if isinstance(loaded_perms, dict)
+        else {}
+    )
+    tools = ToolRunner(root, perms=perms, project_identity=identity)
     core = AgentCore(
         mem, llm, tools,
         system_prompt=cfg["agent"]["system_prompt"],
-        chat_model=cfg["llm"].get("chat_model") or "",
+        chat_model=chat_model,
         max_iterations=int(cfg["agent"]["max_iterations"]),
         tail_size=int(cfg["agent"]["tail"]),
         request_max_tokens=int(cfg["agent"]["request_max_tokens"]),
@@ -106,11 +139,11 @@ async def _run(args: argparse.Namespace) -> int:
     )
     core.plan_mode = args.plan
 
-    persistence.load_session(mem, root, session)
+    persistence.load_session(mem, identity, session)
     if args.continue_session and not args.resume_session and not args.session:
-        latest = persistence.latest_session(root)
+        latest = persistence.latest_session(identity)
         if latest:
-            if persistence.load_session(mem, root, latest):
+            if persistence.load_session(mem, identity, latest):
                 session = latest
 
     if args.prompt is not None:
@@ -119,10 +152,15 @@ async def _run(args: argparse.Namespace) -> int:
         if args.trace:
             from protoprompt_cli.repl import Tracer
 
-            mem._trace = Tracer(lambda line: sys.stdout.write(line + "\n"), mem)
+            # Trace labels can contain model/tool-derived summaries.  Keep
+            # batch mode behind the same terminal boundary as REPL output.
+            mem._trace = Tracer(
+                lambda line: sys.stdout.write(escape_terminal_text(line) + "\n"),
+                mem,
+            )
         stream_cb = None
         if args.stream:
-            stream_cb = lambda token: sys.stdout.write(token)
+            stream_cb = lambda token: sys.stdout.write(escape_terminal_text(token))
         result = await core.turn(args.prompt, stream_cb=stream_cb)
         if args.output_format == "json":
             payload = {
@@ -133,20 +171,28 @@ async def _run(args: argparse.Namespace) -> int:
                 "streamed": result.streamed,
                 "usage": core.usage,
             }
-            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            print(escape_terminal_text(json.dumps(payload, ensure_ascii=False, indent=2)))
         elif result.reply and not result.streamed:
-            print(result.reply)
-        persistence.save_session(mem, root, session)
+            print(escape_terminal_text(result.reply))
+        identity.assert_current(root)
+        persistence.save_session(mem, identity, session)
         return 0
 
     repl = Repl(
-        core, mem, tools, root=root, cfg=cfg, session=session,
+        core,
+        mem,
+        tools,
+        root=root,
+        project_identity=identity,
+        cfg=cfg,
+        session=session,
         stream=True if args.stream is None else args.stream,
     )
     if args.trace:
         repl._set_trace(True)
     await repl.run()
-    persistence.save_session(mem, root, session)
+    identity.assert_current(root)
+    persistence.save_session(mem, identity, session)
     return 0
 
 
@@ -169,7 +215,7 @@ def main(argv: list[str] | None = None) -> int:
         print()
         return 130
     except Exception as exc:
-        print(f"pp-agent: error: {exc}", file=sys.stderr)
+        print(f"pp-agent: error: {escape_terminal_text(exc)}", file=sys.stderr)
         return 1
 
 

@@ -1,0 +1,13 @@
+# The FastAPI example intentionally builds from the repository root, but its
+# image needs only the package metadata, core package and example entry point.
+# Default-deny keeps developer state and ignored files out of the Docker build
+# context as well as out of image layers.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!protoprompt/
+!protoprompt/**
+!examples/
+examples/*
+!examples/fastapi_memory_service.py

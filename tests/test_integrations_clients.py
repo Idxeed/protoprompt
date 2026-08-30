@@ -72,6 +72,21 @@ async def test_httpx_client_chat():
     assert sent["temperature"] == 0.3
 
 
+async def test_httpx_client_uses_the_configured_completion_cap_field():
+    calls: list[dict] = []
+    client = HttpxLLMClient(
+        base_url="http://fake/v1",
+        completion_token_field="max_completion_tokens",
+        transport=httpx.MockTransport(_openai_mock_handler(calls)),
+    )
+
+    await client.chat([{"role": "user", "content": "hi"}], max_tokens=42)
+
+    sent = calls[0]["body"]
+    assert sent["max_completion_tokens"] == 42
+    assert "max_tokens" not in sent
+
+
 async def test_httpx_client_embed_ordering():
     calls: list[dict] = []
     client = HttpxLLMClient(
@@ -80,6 +95,39 @@ async def test_httpx_client_embed_ordering():
     )
     vectors = await client.embed(["a", "b", "c"], model="emb")
     assert vectors == [[0.0, 1.0], [1.0, 1.0], [2.0, 1.0]]
+
+
+async def test_httpx_client_uses_configured_model_defaults():
+    calls: list[dict] = []
+    client = HttpxLLMClient(
+        base_url="http://fake/v1",
+        chat_model="chat-default",
+        embed_model="embed-default",
+        transport=httpx.MockTransport(_openai_mock_handler(calls)),
+    )
+
+    await client.chat([{"role": "user", "content": "hi"}])
+    await client.embed(["a"])
+
+    assert calls[0]["body"]["model"] == "chat-default"
+    assert calls[1]["body"]["model"] == "embed-default"
+
+
+async def test_http_clients_do_not_honor_ambient_proxy_configuration_by_default():
+    http_client = HttpxLLMClient(
+        base_url="http://fake/v1",
+        transport=httpx.MockTransport(_openai_mock_handler([])),
+    )
+    ollama_client = OllamaClient(
+        host="http://fake",
+        transport=httpx.MockTransport(_ollama_mock_handler([])),
+    )
+    try:
+        assert http_client._client._trust_env is False
+        assert ollama_client._client._trust_env is False
+    finally:
+        await http_client.aclose()
+        await ollama_client.aclose()
 
 
 async def test_httpx_client_error_raises():

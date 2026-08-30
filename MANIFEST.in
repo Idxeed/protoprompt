@@ -1,8 +1,10 @@
 include README.md
 include README.en.md
 include LICENSE
+include .dockerignore
 include CHANGELOG.md
 include RELEASE_NOTES.md
+include SECURITY_REVIEW-*.md
 include CONTRIBUTING.md
 include INTEGRATIONS.md
 include ROADMAP.md

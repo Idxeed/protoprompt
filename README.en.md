@@ -8,7 +8,7 @@
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.md) · [v0.15 launch kit](LAUNCH-v0.15.md)
+[Русская версия](README.md) · [v0.16 launch kit](LAUNCH-v0.16.md)
 
 **Reliable agent memory under a fixed context budget.** ProtoPrompt is an
 embeddable context runtime for LLM applications. The core combines **RAG over
@@ -76,10 +76,12 @@ property/state-machine gate checks scope, lifecycle, deletion/source
 revocation, and exact Ledger token/byte accounting on SQLite and PostgreSQL.
 It is not a latency, throughput, or model-quality benchmark.
 
-v0.15 adds a frozen dual-backend evidence protocol for strict Ledger
+v0.15 added a frozen dual-backend evidence protocol for strict Ledger
 selection: one content-free synthetic fixture must produce the same semantics
-on SQLite and PostgreSQL. It makes no model-quality, general-recall, latency,
-throughput, or package-`1.0.0` claim.
+on SQLite and PostgreSQL. v0.16 hardens the reference-agent boundary with
+user-owned state, identity-bound project namespaces, strict native jail
+operations, and explicit provider transport. It makes no model-quality,
+general-recall, latency, throughput, or package-`1.0.0` claim.
 
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of
@@ -119,6 +121,19 @@ pip install "protoprompt[fastembed]"
 
 # Dev / docs
 pip install "protoprompt[chroma,qdrant,dev]"
+```
+
+### HTTP-client migration in 0.16
+
+`HttpxLLMClient` and `OllamaClient` now create their transport with
+`trust_env=False` by default. They no longer inherit process proxy/CA settings,
+so prompts and bearer credentials cannot silently take an ambient route. An
+application that deliberately relied on those environment settings must opt in
+for a trusted endpoint:
+
+```python
+HttpxLLMClient(base_url="https://llm.example", trust_env=True)
+OllamaClient(host="https://ollama.example", trust_env=True)
 ```
 
 ## Quickstart
@@ -257,9 +272,22 @@ remote-Ollama opt-in, and token-estimate boundaries.
 The repository also contains a CLI built on `protoprompt.agent.WorkingMemory`:
 
 ```bash
+pip install -e ".[ollama]"
 pip install -e "apps/agent-cli[ollama]"
 pp-agent /path/to/project
 ```
+
+For 0.16, `protoprompt-cli` is not separately uploaded to PyPI. Its matching
+wheel and sdist are attached to the GitHub Release; install the matching core
+with the desired backend first:
+
+```bash
+python -m pip install "protoprompt[ollama]==0.16.0"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.0/protoprompt_cli-0.16.0-py3-none-any.whl"
+```
+
+Alternatively, after installing the matching core, install the tagged source:
+`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.0#subdirectory=apps/agent-cli"`.
 
 It supports sessions, hot/cold memory, planning mode, and confirmation for
 dangerous tools. Every provider request goes through an immutable `ContextPlan`:

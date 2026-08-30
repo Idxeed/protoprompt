@@ -30,8 +30,8 @@ pp-ollama-chat
 совместимой версии `protoprompt`:
 
 ```bash
-python -m pip install "protoprompt[documents,fastapi,ollama]==0.15.0"
-python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.15.0#subdirectory=apps/ollama-chat"
+python -m pip install "protoprompt[documents,fastapi,ollama]==0.16.0"
+python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.0#subdirectory=apps/ollama-chat"
 ```
 
 Приложение проверяется вместе с релизом `protoprompt`, но пока поставляется
@@ -106,13 +106,20 @@ OLLAMA_CHAT_REQUEST_MAX_TOKENS=4096 OLLAMA_CHAT_OUTPUT_RESERVE=512 pp-ollama-cha
 
 ## Безопасность и сеть
 
-- Сервер по умолчанию привязан к loopback. Non-loopback bind требует явного
-  `pp-ollama-chat --host 0.0.0.0 --allow-network`; при этом приложение не
-  добавляет аутентификацию — не публикуйте его в интернет как есть.
+- Сервер по умолчанию привязан к loopback и принимает только Host
+  `localhost`, `127.0.0.1` или `::1`; это защищает локальный UI от DNS
+  rebinding. Non-loopback bind требует явного host policy, например
+  `pp-ollama-chat --host 0.0.0.0 --allow-network --allowed-host chat.internal`.
+  При этом приложение не добавляет аутентификацию — не публикуйте его в
+  интернет как есть и ставьте отдельный auth/reverse-proxy boundary.
 - Remote Ollama запрещена по умолчанию. Чтобы сознательно разрешить её,
   установите `OLLAMA_CHAT_ALLOW_REMOTE=1`. При таком режиме **текст сообщений
   и содержимое PDF уходят на удалённый endpoint**; интерфейс показывает
   предупреждение.
+- Исходящие запросы к Ollama не наследуют `HTTP_PROXY`, `HTTPS_PROXY` или
+  process-wide CA-настройки: local PDF/чат не должен незаметно уйти через
+  proxy. Для remote endpoint используйте прямой доверенный маршрут, а не
+  ambient proxy-переменные.
 - Нет CORS, есть базовые CSP/anti-framing headers, а API-ответы не кэшируются.
   Это defence-in-depth для локального приложения, не замена auth boundary.
 - До разбора multipart/JSON приложение ограничивает raw body: PDF — размером

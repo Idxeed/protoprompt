@@ -173,6 +173,11 @@ jobs:
               expected = {
                   "protoprompt/profile/schema.json",
                   "pyproject.toml",
+                  ".dockerignore",
+                  "CHANGELOG.md",
+                  "RELEASE_NOTES.md",
+                  "SECURITY_REVIEW-v0.16.md",
+                  "LAUNCH-v0.16.md",
                   "CONTRIBUTING.md",
                   "INTEGRATIONS.md",
                   "ROADMAP.md",
@@ -222,6 +227,83 @@ jobs:
           cache: pip
       - run: python -m pip install ".[dev]" "./apps/agent-cli"
       - run: pytest -q apps/agent-cli/tests -m "not integration"
+
+  agent-cli-package:
+    name: agent CLI wheel + sdist smoke test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: python -m pip install --upgrade pip build twine
+      - name: Build and validate agent CLI distributions
+        run: |
+          python -m build --wheel --outdir dist-core
+          python -m build --sdist --wheel --outdir dist-agent-cli apps/agent-cli
+          python -m twine check dist-agent-cli/*
+      - name: Verify agent CLI wheel and sdist contents
+        run: |
+          python - <<'PY'
+          import email
+          import glob
+          import tarfile
+          import zipfile
+
+          wheel = glob.glob("dist-agent-cli/*.whl")[0]
+          with zipfile.ZipFile(wheel) as archive:
+              names = set(archive.namelist())
+              assert "protoprompt_cli/__init__.py" in names
+              assert "protoprompt_cli/__main__.py" in names
+              metadata_name = next(
+                  name for name in names if name.endswith(".dist-info/METADATA")
+              )
+              metadata = email.message_from_bytes(archive.read(metadata_name))
+              assert metadata["Name"] == "protoprompt-cli"
+              assert metadata["Version"] == "0.16.0"
+              requirements = metadata.get_all("Requires-Dist") or []
+              assert any(
+                  requirement.startswith("protoprompt")
+                  and ">=0.16.0" in requirement
+                  and "<0.17.0" in requirement
+                  for requirement in requirements
+              ), requirements
+
+          sdist = glob.glob("dist-agent-cli/*.tar.gz")[0]
+          with tarfile.open(sdist) as archive:
+              names = set(archive.getnames())
+              root = next(name.split("/", 1)[0] for name in names if "/" in name)
+              expected = {
+                  "pyproject.toml",
+                  "src/protoprompt_cli/__init__.py",
+                  "src/protoprompt_cli/__main__.py",
+                  "src/protoprompt_cli/repl.py",
+              }
+              missing = {path for path in expected if f"{root}/{path}" not in names}
+              assert not missing, missing
+          PY
+      - name: Smoke pp-agent from clean installed artifacts
+        shell: bash
+        run: |
+          python -m venv /tmp/protoprompt-agent-cli-smoke
+          smoke_python=/tmp/protoprompt-agent-cli-smoke/bin/python
+          "$smoke_python" -m pip install --no-deps dist-core/*.whl dist-agent-cli/*.whl
+          cd /tmp
+          test "$(/tmp/protoprompt-agent-cli-smoke/bin/pp-agent --version)" = "0.16.0"
+
+  agent-cli-windows:
+    name: agent CLI tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install ".[dev]" "./apps/agent-cli"
+      - run: python -m pytest -q apps/agent-cli/tests -m "not integration"
 
   ollama-chat:
     name: Ollama reference app

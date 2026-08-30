@@ -12,6 +12,12 @@ from protoprompt_cli.core import AgentCore
 from protoprompt_cli.tools import ToolRunner
 
 
+@pytest.fixture(autouse=True)
+def isolated_agent_state(tmp_path, monkeypatch):
+    """Keep every pp-agent persistence test out of the real user profile."""
+    monkeypatch.setenv("PROTOPROMPT_AGENT_STATE_DIR", str(tmp_path / "agent-state"))
+
+
 @pytest.fixture
 def mem_factory():
     def make(max_tokens=400, store=None, llm=None, **kw):

@@ -63,8 +63,10 @@ jobs:
         run: |
           package_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           app_version="$(python -c 'import tomllib; print(tomllib.load(open("apps/ollama-chat/pyproject.toml", "rb"))["project"]["version"])')"
+          agent_cli_version="$(python -c 'import tomllib; print(tomllib.load(open("apps/agent-cli/pyproject.toml", "rb"))["project"]["version"])')"
           runtime_version="$(python -c 'from protoprompt import __version__; print(__version__)')"
           app_runtime_version="$(python -c 'from protoprompt_ollama_chat import __version__; print(__version__)')"
+          agent_cli_runtime_version="$(python -c 'from protoprompt_cli import __version__; print(__version__)')"
           expected_tag="v${package_version}"
           if [[ "${RELEASE_TAG}" != "${expected_tag}" ]]; then
             echo "tag ${RELEASE_TAG} does not match package version ${expected_tag}" >&2
@@ -74,12 +76,20 @@ jobs:
             echo "ollama reference app version ${app_version} does not match ${package_version}" >&2
             exit 1
           fi
+          if [[ "${agent_cli_version}" != "${package_version}" ]]; then
+            echo "agent CLI version ${agent_cli_version} does not match ${package_version}" >&2
+            exit 1
+          fi
           if [[ "${runtime_version}" != "${package_version}" ]]; then
             echo "protoprompt runtime version ${runtime_version} does not match ${package_version}" >&2
             exit 1
           fi
           if [[ "${app_runtime_version}" != "${package_version}" ]]; then
             echo "ollama reference app runtime version ${app_runtime_version} does not match ${package_version}" >&2
+            exit 1
+          fi
+          if [[ "${agent_cli_runtime_version}" != "${package_version}" ]]; then
+            echo "agent CLI runtime version ${agent_cli_runtime_version} does not match ${package_version}" >&2
             exit 1
           fi
 
@@ -109,10 +119,15 @@ jobs:
       - name: Build strict Russian and English documentation
         run: python scripts/build_docs.py --clean
 
-      - name: Build distributions and validate metadata
+      - name: Build core distributions and validate metadata
         run: |
           python -m build --sdist --wheel
           python -m twine check dist/*
+
+      - name: Build agent CLI distributions and validate metadata
+        run: |
+          python -m build --sdist --wheel --outdir dist-agent-cli apps/agent-cli
+          python -m twine check dist-agent-cli/*
 
       - name: Build source-only Ollama reference distribution
         run: |
@@ -141,12 +156,27 @@ jobs:
           "$smoke_python" -I -c \
             "from protoprompt_ollama_chat.app import create_app; assert create_app"
 
+      - name: Run pp-agent from a clean release environment
+        shell: bash
+        run: |
+          python -m venv /tmp/protoprompt-agent-cli-release-smoke
+          smoke_python=/tmp/protoprompt-agent-cli-release-smoke/bin/python
+          "$smoke_python" -m pip install --no-deps dist/*.whl dist-agent-cli/*.whl
+          cd /tmp
+          test "$(/tmp/protoprompt-agent-cli-release-smoke/bin/pp-agent --version)" = "$(python -c 'from protoprompt_cli import __version__; print(__version__)')"
+
       - name: Prepare release metadata
         shell: bash
         run: |
           mkdir release-metadata
-          (cd dist && sha256sum *.whl *.tar.gz) > release-metadata/SHA256SUMS
           cp RELEASE_NOTES.md release-metadata/RELEASE_NOTES.md
+          cp SECURITY_REVIEW-v0.16.md release-metadata/SECURITY_REVIEW-v0.16.md
+          (cd dist && sha256sum *.whl *.tar.gz) > release-metadata/PYPI_SHA256SUMS
+          {
+            (cd dist && sha256sum *.whl *.tar.gz)
+            (cd dist-agent-cli && sha256sum *.whl *.tar.gz)
+            (cd release-metadata && sha256sum SECURITY_REVIEW-v0.16.md)
+          } | sort -k 2 > release-metadata/SHA256SUMS
           python - <<'PY'
           import json
           import subprocess
@@ -154,9 +184,16 @@ jobs:
 
           with open("pyproject.toml", "rb") as source:
               project = tomllib.load(source)["project"]
+          with open("apps/agent-cli/pyproject.toml", "rb") as source:
+              agent_cli = tomllib.load(source)["project"]
           manifest = {
               "name": project["name"],
               "version": project["version"],
+              "agent_cli": {
+                  "name": agent_cli["name"],
+                  "version": agent_cli["version"],
+              },
+              "security_review": "SECURITY_REVIEW-v0.16.md",
               "tag": __import__("os").environ["GITHUB_REF_NAME"],
               "commit": subprocess.check_output(
                   ["git", "rev-parse", "HEAD"], text=True
@@ -174,6 +211,16 @@ jobs:
           path: |
             dist/*.whl
             dist/*.tar.gz
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload verified agent CLI distributions
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: agent-cli-dist
+          path: |
+            dist-agent-cli/*.whl
+            dist-agent-cli/*.tar.gz
           if-no-files-found: error
           retention-days: 7
 
@@ -208,7 +255,7 @@ jobs:
 
       - name: Verify distribution checksums
         shell: bash
-        run: (cd dist && sha256sum --check ../release-metadata/SHA256SUMS)
+        run: (cd dist && sha256sum --check ../release-metadata/PYPI_SHA256SUMS)
 
       - name: Publish to TestPyPI via OIDC
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
@@ -239,7 +286,7 @@ jobs:
 
       - name: Verify distribution checksums
         shell: bash
-        run: (cd dist && sha256sum --check ../release-metadata/SHA256SUMS)
+        run: (cd dist && sha256sum --check ../release-metadata/PYPI_SHA256SUMS)
 
       - name: Publish to PyPI via OIDC
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # release/v1
@@ -265,19 +312,19 @@ jobs:
               Path("release-metadata/RELEASE_MANIFEST.json").read_text(encoding="utf-8")
           )
           checksums: dict[str, str] = {}
-          for line in Path("release-metadata/SHA256SUMS").read_text(encoding="utf-8").splitlines():
+          for line in Path("release-metadata/PYPI_SHA256SUMS").read_text(encoding="utf-8").splitlines():
               digest, filename = line.split(maxsplit=1)
               filename = filename.removeprefix("*")
               if len(digest) != 64 or any(char not in "0123456789abcdef" for char in digest):
-                  raise SystemExit(f"invalid SHA256SUMS entry for {filename!r}")
+                  raise SystemExit(f"invalid PyPI checksum entry for {filename!r}")
               if filename in checksums:
-                  raise SystemExit(f"duplicate SHA256SUMS entry for {filename!r}")
+                  raise SystemExit(f"duplicate PyPI checksum entry for {filename!r}")
               checksums[filename] = digest
 
           wheels = [name for name in checksums if name.endswith(".whl")]
           sdists = [name for name in checksums if name.endswith(".tar.gz")]
           if len(checksums) != 2 or len(wheels) != 1 or len(sdists) != 1:
-              raise SystemExit("expected exactly one wheel and one sdist in SHA256SUMS")
+              raise SystemExit("expected exactly one core wheel and one core sdist for PyPI")
           for filename, expected_digest in checksums.items():
               actual_digest = hashlib.sha256(Path("dist", filename).read_bytes()).hexdigest()
               if actual_digest != expected_digest:
@@ -340,6 +387,12 @@ jobs:
           name: python-dist
           path: release-assets/
 
+      - name: Download verified agent CLI distributions
+        uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          name: agent-cli-dist
+          path: release-assets/
+
       - name: Download verified release metadata
         uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
@@ -373,6 +426,14 @@ jobs:
           manifest = json.loads(Path("RELEASE_MANIFEST.json").read_text(encoding="utf-8"))
           if manifest.get("tag") != release_tag:
               raise SystemExit("release manifest tag does not match the workflow tag")
+          agent_cli = manifest.get("agent_cli")
+          if not isinstance(agent_cli, dict):
+              raise SystemExit("release manifest has no agent CLI package metadata")
+          if not isinstance(agent_cli.get("name"), str) or not isinstance(agent_cli.get("version"), str):
+              raise SystemExit("release manifest has invalid agent CLI package metadata")
+          security_review = manifest.get("security_review")
+          if security_review != "SECURITY_REVIEW-v0.16.md":
+              raise SystemExit("release manifest has no valid security review asset")
           expected_commit = manifest.get("commit")
           if not isinstance(expected_commit, str) or len(expected_commit) != 40:
               raise SystemExit("release manifest has no valid source commit")
@@ -390,8 +451,22 @@ jobs:
               expected_digests[filename] = f"sha256:{digest}"
           wheels = [name for name in expected_digests if name.endswith(".whl")]
           sdists = [name for name in expected_digests if name.endswith(".tar.gz")]
-          if len(expected_digests) != 2 or len(wheels) != 1 or len(sdists) != 1:
-              raise SystemExit("expected exactly one wheel and one sdist in SHA256SUMS")
+          if len(expected_digests) != 5 or len(wheels) != 2 or len(sdists) != 2:
+              raise SystemExit("expected core/CLI wheel/sdist pairs and security review in SHA256SUMS")
+          agent_cli_prefix = "{}-{}".format(
+              agent_cli["name"].replace("-", "_"), agent_cli["version"]
+          )
+          agent_cli_assets = [
+              name for name in expected_digests if name.startswith(agent_cli_prefix)
+          ]
+          if (
+              len(agent_cli_assets) != 2
+              or sum(name.endswith(".whl") for name in agent_cli_assets) != 1
+              or sum(name.endswith(".tar.gz") for name in agent_cli_assets) != 1
+          ):
+              raise SystemExit("SHA256SUMS does not contain the declared agent CLI wheel/sdist pair")
+          if security_review not in expected_digests:
+              raise SystemExit("SHA256SUMS does not contain the declared security review")
           expected_digests["SHA256SUMS"] = "sha256:" + hashlib.sha256(
               Path("SHA256SUMS").read_bytes()
           ).hexdigest()
@@ -448,7 +523,7 @@ jobs:
               actual_digests[name] = digest
           if set(actual_digests) != set(expected_digests):
               raise SystemExit(
-                  "GitHub Release assets differ from the verified wheel, sdist, and SHA256SUMS"
+                   "GitHub Release assets differ from the verified release artifacts and SHA256SUMS"
               )
           mismatched = sorted(
               name for name, expected in expected_digests.items()
@@ -476,7 +551,7 @@ jobs:
             verify_release_with_retry
             exit 0
           fi
-          gh release create "${RELEASE_TAG}" *.whl *.tar.gz SHA256SUMS \
+          gh release create "${RELEASE_TAG}" *.whl *.tar.gz SECURITY_REVIEW-v0.16.md SHA256SUMS \
             --title "${RELEASE_TAG}" \
             --notes-file RELEASE_NOTES.md \
             --verify-tag

@@ -788,6 +788,9 @@ class Runtime:
             host=self.config.ollama_host,
             chat_model=self.config.chat_model,
             embed_model=self.config.embed_model,
+            # Local reference data must not be silently routed through an
+            # ambient HTTP(S)_PROXY or process-provided CA configuration.
+            trust_env=False,
         )
         self.indexer = DocumentIndexer(
             self.store,
@@ -1064,14 +1067,54 @@ def _loopback_bind(host: str) -> bool:
     return host.lower().strip("[]") in {"localhost", "127.0.0.1", "::1"}
 
 
+_LOCAL_ALLOWED_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _normalise_host(value: str) -> str | None:
+    """Parse a Host header or CLI value without accepting URL-shaped input."""
+    value = value.strip()
+    # ``urlparse('//::1')`` treats an unbracketed IPv6 literal as a malformed
+    # authority.  A bare loopback literal is valid for the CLI policy, while
+    # an HTTP Host header still arrives in the bracketed form below.
+    if value.casefold() == "::1":
+        return "::1"
+    try:
+        parsed = urlparse(f"//{value}")
+        port = parsed.port
+    except ValueError:
+        return None
+    if (
+        not parsed.hostname
+        or parsed.username is not None
+        or parsed.password is not None
+        or parsed.path
+        or parsed.params
+        or parsed.query
+        or parsed.fragment
+        or (port is not None and not 1 <= port <= 65535)
+    ):
+        return None
+    return parsed.hostname.casefold().rstrip(".")
+
+
+def _allowed_host_set(values: tuple[str, ...] | list[str] | None) -> frozenset[str]:
+    raw_values = values or tuple(_LOCAL_ALLOWED_HOSTS)
+    hosts = {_normalise_host(value) for value in raw_values}
+    if None in hosts or not hosts:
+        raise ValueError("allowed hosts must be bare host names or IP addresses")
+    return frozenset(host for host in hosts if host is not None)
+
+
 def create_app(
     data_dir: str | Path | None = None,
     *,
     runtime_factory: Callable[[Path], Runtime] | None = None,
+    allowed_hosts: tuple[str, ...] | list[str] | None = None,
 ) -> FastAPI:
     root = Path(data_dir).expanduser() if data_dir is not None else _default_data_dir()
     static_dir = Path(__file__).parent / "static"
     make_runtime = runtime_factory or Runtime
+    accepted_hosts = _allowed_host_set(allowed_hosts)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -1091,6 +1134,18 @@ def create_app(
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next):
+        request_host = _normalise_host(request.headers.get("host", ""))
+        if request_host not in accepted_hosts:
+            return JSONResponse(
+                {"detail": "invalid host header"},
+                status_code=400,
+                headers={
+                    "Cache-Control": "no-store",
+                    "X-Content-Type-Options": "nosniff",
+                    "X-Frame-Options": "DENY",
+                    "Referrer-Policy": "no-referrer",
+                },
+            )
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
@@ -1349,7 +1404,9 @@ def create_app(
             import httpx
 
             host = runtime(request).config.ollama_host
-            async with httpx.AsyncClient(timeout=5, follow_redirects=False) as client:
+            async with httpx.AsyncClient(
+                timeout=5, follow_redirects=False, trust_env=False
+            ) as client:
                 response = await client.get(f"{host}/api/tags")
                 response.raise_for_status()
             payload = response.json()
@@ -1510,15 +1567,36 @@ def main() -> None:
         action="store_true",
         help="allow a non-loopback web bind; no authentication is added",
     )
+    parser.add_argument(
+        "--allowed-host",
+        action="append",
+        default=[],
+        help="required Host name or IP for a non-loopback bind; repeatable",
+    )
     args = parser.parse_args()
     if not _loopback_bind(args.host) and not args.allow_network:
         parser.error("non-loopback bind needs --allow-network")
+    if _loopback_bind(args.host):
+        if args.allowed_host:
+            parser.error("--allowed-host is only valid with a non-loopback bind")
+        allowed_hosts = tuple(_LOCAL_ALLOWED_HOSTS)
+    else:
+        if not args.allowed_host:
+            parser.error("non-loopback bind needs at least one --allowed-host")
+        try:
+            allowed_hosts = tuple(_allowed_host_set(args.allowed_host))
+        except ValueError as exc:
+            parser.error(str(exc))
     if not 1 <= args.port <= 65535:
         parser.error("--port must be between 1 and 65535")
 
     import uvicorn
 
-    uvicorn.run(create_app(args.data_dir), host=args.host, port=args.port)
+    uvicorn.run(
+        create_app(args.data_dir, allowed_hosts=allowed_hosts),
+        host=args.host,
+        port=args.port,
+    )
 
 
 if __name__ == "__main__":

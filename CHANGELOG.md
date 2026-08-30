@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-08-31
+
+### Added
+- `pp-agent` now binds user-owned state, sessions and durable denials to a
+  canonical filesystem identity rather than a repository-controlled
+  `.protoprompt/` directory. Replacing a checkout at the same pathname gets a
+  new namespace.
+- Windows project discovery uses a native, component-relative no-reparse
+  probe and recognises both a normal Git directory and a regular `.git` file
+  used by Git worktrees.
+- CI now exercises the non-integration agent CLI suite on Windows.
+
+### Changed
+- Provider defaults resolve per backend; the OpenAI agent path uses the
+  direct configured REST client, an explicit endpoint and the fixed `PP_*`
+  credential contract instead of ambient SDK configuration.
+- The core package, bundled Ollama/PDF reference application, and
+  `protoprompt-cli` GitHub Release artifacts ship in lockstep as `0.16.0`.
+  The CLI is not a separate PyPI upload in this release.
+
+### Security
+- Jailed tools reject links, hard links and mount/reparse crossings; Linux
+  requires `openat2`/`renameat2` and verifies staged replacements, while
+  Windows fails closed for unsafe overwrite and tree-traversal operations.
+- HTTP/Ollama clients ignore ambient proxy and CA environment configuration by
+  default, so a local endpoint cannot silently exfiltrate prompt, PDF or bearer
+  data through `HTTP_PROXY`; callers must opt in with `trust_env=True`.
+- A project path, its ancestors and Git marker are rejected on Windows when
+  they traverse UNC or reparse objects. Windows identity rechecks use the
+  native component-relative no-reparse path rather than `Path.resolve()`.
+- Project identity now combines device/inode with a stable root creation
+  generation and a live root descriptor. Linux requires `statx` `BTIME`; a
+  filesystem without it fails closed rather than let a recycled inode inherit
+  sessions, memory, configuration or policy after a restart.
+- Approved jailed shell commands use an inherited descriptor-pinned Linux
+  working directory; hosts without that primitive (including Windows) fail
+  closed instead of launching in a replaceable project path.
+- `/git` uses that same Bash permission path. Interactive approval displays a
+  complete terminal-escaped structured action (or rejects it when it cannot
+  fit), so a truncated command tail or hidden write/edit attribute cannot be
+  silently approved.
+- `pp-agent` renders streaming/non-streaming model output, tool/file output,
+  traces, prompts and startup-menu paths through one inert terminal boundary:
+  C0/C1, DEL and Unicode format/bidi controls are shown visibly while normal
+  newlines remain readable, so they cannot alter a later consent prompt.
+- Persisted `allow` grants never revive after restart; only durable `deny`
+  restrictions remain. Repository-local configuration and state are not
+  loaded automatically.
+
 ## [0.15.0] - 2026-08-30
 
 ### Added

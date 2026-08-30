@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from _mocks import FakeReader, FakeWriter, MockLLM
@@ -9,7 +11,7 @@ from _mocks import FakeReader, FakeWriter, MockLLM
 from protoprompt import SqliteStore
 from protoprompt.agent import WorkingMemory
 
-from protoprompt_cli import persistence, render
+from protoprompt_cli import persistence, render, tools as tools_module
 from protoprompt_cli.core import AgentCore
 from protoprompt_cli.repl import HELP_TEXT, Repl
 from protoprompt_cli.tools import ToolRunner
@@ -231,6 +233,117 @@ async def test_ask_permission_accepts_russian_da():
     assert await repl._ask_permission(Action(name="bash", body="ls")) is True
 
 
+async def test_ask_permission_shows_full_escaped_payload_before_yes():
+    from protoprompt_cli.actions import Action
+
+    snapshots = []
+
+    def reader(prompt):
+        snapshots.append((prompt, writer.text))
+        return "y"
+
+    repl, _, writer = _build([], root=".", readline=reader)
+    command = "echo safe\r\x1b]0;spoof\x07\nthen-visible-tail"
+
+    assert await repl._ask_permission(Action(name="bash", body=command)) is True
+
+    assert len(snapshots) == 1
+    prompt, visible_before_answer = snapshots[0]
+    assert 'разрешить "bash"?' in prompt
+    assert "then-visible-tail" in visible_before_answer
+    assert "\\r" in visible_before_answer
+    assert "\\u001b" in visible_before_answer
+    assert "\\u0007" in visible_before_answer
+    assert "\r" not in visible_before_answer
+    assert "\x1b" not in visible_before_answer
+    assert "\x07" not in visible_before_answer
+
+
+async def test_ask_permission_sanitizes_its_prompt_too():
+    from protoprompt_cli.actions import Action
+
+    prompts = []
+
+    def reader(prompt):
+        prompts.append(prompt)
+        return "n"
+
+    repl, _, writer = _build([], root=".", readline=reader)
+    unsafe_name = "\x1b]52;c;spoof\x07"
+
+    assert await repl._ask_permission(Action(name=unsafe_name, body="payload")) is False
+
+    assert prompts
+    assert "\x1b" not in prompts[0]
+    assert "\x07" not in prompts[0]
+    assert "\x1b" not in writer.text
+    assert "\x07" not in writer.text
+
+
+async def test_ask_permission_shows_structured_write_payload_before_always(tmp_path):
+    from protoprompt_cli.actions import Action
+
+    snapshots = []
+
+    def reader(prompt):
+        snapshots.append((prompt, writer.text))
+        return "a"
+
+    repl, _, writer = _build([], root=str(tmp_path), readline=reader)
+    action = Action(
+        name="write",
+        body="complete new content",
+        kwargs={"path": "src/\x1b]0;spoof\x07new.py"},
+    )
+
+    assert await repl._ask_permission(action) is True
+
+    assert repl.tools.perms["write"] == "allow"
+    assert len(snapshots) == 1
+    _, visible_before_answer = snapshots[0]
+    assert 'field["path"] = "src/\\u001b]0;spoof\\u0007new.py"' in visible_before_answer
+    assert 'field["content"] = "complete new content"' in visible_before_answer
+    assert "\x1b" not in visible_before_answer
+    assert "\x07" not in visible_before_answer
+
+
+async def test_ask_permission_rejects_payload_that_cannot_be_shown_completely():
+    from protoprompt_cli.actions import MAX_APPROVAL_PREVIEW_BYTES, Action
+
+    def fail_reader(prompt):
+        raise AssertionError(f"must not ask approval for hidden payload: {prompt}")
+
+    repl, _, writer = _build([], root=".", readline=fail_reader)
+    hidden_tail = "MALICIOUS_SUFFIX_MUST_NOT_BE_APPROVED"
+    action = Action(
+        name="bash",
+        body=("x" * MAX_APPROVAL_PREVIEW_BYTES) + hidden_tail,
+    )
+
+    assert await repl._ask_permission(action) is False
+
+    assert "безопасный лимит показа" in writer.text
+    assert "sha256=" in writer.text
+    assert hidden_tail not in writer.text
+
+
+async def test_ask_permission_rejects_payload_changed_during_confirmation():
+    from protoprompt_cli.actions import Action
+
+    action = Action(name="bash", body="echo reviewed")
+
+    def reader(prompt):
+        action.body = "echo replaced-after-preview"
+        return "a"
+
+    repl, _, writer = _build([], root=".", readline=reader)
+
+    assert await repl._ask_permission(action) is False
+
+    assert "payload изменился" in writer.text
+    assert repl.tools.perms["bash"] != "allow"
+
+
 async def test_tool_runner_gets_ask_callback():
     from protoprompt_cli.actions import Action
 
@@ -242,11 +355,13 @@ async def test_tool_runner_gets_ask_callback():
 # ── права и их персистентность ──────────────────────────────────
 
 
-async def test_allow_persists_perms(tmp_path):
+async def test_allow_is_session_only(tmp_path):
     repl, _, writer = _build([], root=str(tmp_path))
     await repl.dispatch("/allow bash")
     assert repl.tools.perms["bash"] == "allow"
-    assert persistence.load_json(persistence.perms_json_path(tmp_path))["bash"] == "allow"
+    saved = persistence.load_json(persistence.perms_json_path(tmp_path), {})
+    assert "bash" not in saved
+    assert "до конца сессии" in writer.text
 
 
 async def test_deny_persists_perms(tmp_path):
@@ -270,15 +385,15 @@ async def test_perms_prints_table(tmp_path):
     assert any("bash" in line and "allow" in line for line in writer.lines)
 
 
-async def test_ask_always_option_persists(tmp_path):
+async def test_ask_always_option_is_session_only(tmp_path):
     from protoprompt_cli.actions import Action
 
     repl, _, writer = _build([], root=str(tmp_path), readline=FakeReader(["a"]))
     assert await repl._ask_permission(Action(name="bash", body="ls")) is True
     assert repl.tools.perms["bash"] == "allow"
-    saved = persistence.load_json(persistence.perms_json_path(tmp_path))
-    assert saved["bash"] == "allow"
-    assert "разрешён всегда" in writer.text
+    saved = persistence.load_json(persistence.perms_json_path(tmp_path), {})
+    assert "bash" not in saved
+    assert "до конца сессии" in writer.text
 
 
 async def test_auto_save_every_n_turns(tmp_path):
@@ -385,6 +500,29 @@ async def test_add_reads_file_into_memory(tmp_path):
     assert any("def helper" in i.text for i in mem.items.values())
     added = next(i for i in mem.items.values() if "def helper" in i.text)
     assert added.pinned
+
+
+async def test_add_uses_the_bounded_file_reader(tmp_path, monkeypatch):
+    monkeypatch.setattr(tools_module, "MAX_READ_BYTES", 16)
+    (tmp_path / "large.txt").write_text("x" * 100, encoding="utf-8")
+    repl, mem, writer = _build([], root=str(tmp_path))
+    await repl.dispatch("/add large.txt")
+    assert "обрезано" in writer.text
+    assert any("file truncated at inspection limit" in item.text for item in mem.items.values())
+
+
+async def test_add_does_not_follow_an_external_symlink(tmp_path):
+    external = tmp_path.parent / "outside-add-secret.txt"
+    external.write_text("TOP_SECRET", encoding="utf-8")
+    link = tmp_path / "linked-secret.txt"
+    try:
+        link.symlink_to(external)
+    except OSError:
+        pytest.skip("symlink creation is unavailable on this host")
+    repl, mem, writer = _build([], root=str(tmp_path))
+    await repl.dispatch("/add linked-secret.txt")
+    assert "пропуск" in writer.text
+    assert not mem.items
 
 
 async def test_add_missing_file_reports():
@@ -508,14 +646,140 @@ async def test_new_clears_raw_tail_and_previous_manifest(tmp_path):
     assert "OLD_NEW_RAW_SENTINEL" not in sent_content
 
 
-async def test_git_command_passthrough(tmp_path):
-    (tmp_path / ".git").mkdir()
-    (tmp_path / "file.txt").write_text("hello", encoding="utf-8")
-    subprocess = __import__("subprocess")
-    subprocess.run(["git", "init", "-q"], cwd=str(tmp_path), check=True)
+async def test_git_command_uses_bash_permission_path(tmp_path, monkeypatch):
+    from protoprompt_cli.tools import ToolResult
+
     repl, _, writer = _build([], root=str(tmp_path))
+    actions = []
+
+    async def run(action):
+        actions.append(action)
+        return ToolResult(True, "git output", tool="bash")
+
+    monkeypatch.setattr(repl.tools, "run", run)
+
+    await repl.dispatch('/git log --format="%h %s" --author "Jane Doe"')
+
+    assert len(actions) == 1
+    assert actions[0].name == "bash"
+    assert actions[0].body == "git log '--format=%h %s' --author 'Jane Doe'"
+    assert writer.text == "git output"
+
+
+@pytest.mark.parametrize("command", ["!echo unsafe", "/git status"])
+async def test_tool_and_git_output_cannot_change_terminal_state(
+    tmp_path, monkeypatch, command
+):
+    from protoprompt_cli.tools import ToolResult
+
+    unsafe = "before\x1b]52;c;clipboard\x07\rafter\x9b31m"
+    repl, _, writer = _build(
+        [command, "/exit"] if command.startswith("!") else [],
+        root=str(tmp_path),
+    )
+
+    async def run(action):
+        return ToolResult(True, unsafe, tool="bash")
+
+    monkeypatch.setattr(repl.tools, "run", run)
+    if command.startswith("!"):
+        await repl.run()
+    else:
+        await repl.dispatch(command)
+
+    assert unsafe not in writer.text
+    assert "\x1b" not in writer.text
+    assert "\x07" not in writer.text
+    assert "\r" not in writer.text
+    assert "\x9b" not in writer.text
+    assert r"\u001b]52;c;clipboard\u0007\u000dafter\u009b31m" in writer.text
+
+
+async def test_nonstream_model_reply_and_memory_views_are_terminal_safe():
+    unsafe = "answer\x1b]52;c;clipboard\x07\u202e"
+    repl, mem, writer = _build(["question", "/exit"], llm=MockLLM(responses=[unsafe]))
+    repl.stream = False
+
+    await repl.run()
+    await repl.dispatch("/memory")
+    await repl.dispatch("/context")
+
+    assert unsafe not in writer.text
+    assert "\x1b" not in writer.text
+    assert "\x07" not in writer.text
+    assert "\u202e" not in writer.text
+    assert r"\u001b]52;c;clipboard\u0007\u202e" in writer.text
+    assert mem.items
+
+
+async def test_streamed_model_text_is_safe_before_later_permission_prompt(tmp_path):
+    class StreamingMockLLM(MockLLM):
+        async def chat_stream(self, messages, model="", on_token=None, **options):
+            self.chat_calls.append({"messages": list(messages), "model": model, **options})
+            response = self.responses.pop(0)
+            for token in ("\x1b[8mspoofed-question", response):
+                on_token(token)
+            return response
+
+    prompts = []
+    answers = iter(["run it", "n", "/exit"])
+
+    def reader(prompt):
+        prompts.append(prompt)
+        return next(answers)
+
+    llm = StreamingMockLLM(responses=[
+        '<action name="bash">echo never-run</action>',
+        "safe final reply",
+    ])
+    repl, _, writer = _build([], root=str(tmp_path), llm=llm, readline=reader)
+
+    await repl.run()
+
+    assert any('разрешить "bash"? [y/N/a] ' in prompt for prompt in prompts)
+    assert "запрошенный payload" in writer.text
+    assert "\x1b" not in writer.text
+    assert r"\u001b[8mspoofed-question" in writer.text
+
+
+async def test_git_command_quotes_shell_metacharacters_before_bash(tmp_path, monkeypatch):
+    from protoprompt_cli.tools import ToolResult
+
+    repl, _, _ = _build([], root=str(tmp_path))
+    actions = []
+
+    async def run(action):
+        actions.append(action)
+        return ToolResult(True, "", tool="bash")
+
+    monkeypatch.setattr(repl.tools, "run", run)
+
+    await repl.dispatch("/git status; echo injected")
+
+    assert len(actions) == 1
+    assert actions[0].body == "git 'status;' echo injected"
+
+
+async def test_git_command_respects_bash_permission(tmp_path):
+    repl, _, writer = _build([], root=str(tmp_path))
+    repl.tools.perms["bash"] = "deny"
+
     await repl.dispatch("/git status")
-    assert writer.text.strip(), "git status должен вернуть вывод"
+
+    assert "permission denied: bash" in writer.text
+
+
+async def test_git_command_rejects_malformed_shell_quoting(tmp_path, monkeypatch):
+    repl, _, writer = _build([], root=str(tmp_path))
+
+    async def fail_if_called(action):
+        raise AssertionError(f"ToolRunner must not run malformed Git args: {action}")
+
+    monkeypatch.setattr(repl.tools, "run", fail_if_called)
+
+    await repl.dispatch('/git commit -m "unterminated')
+
+    assert "некорректные аргументы git" in writer.text
 
 
 async def test_git_without_args_usage():
@@ -533,10 +797,12 @@ async def test_history_prints_recent_input():
     assert "first question" not in writer.text
 
 
-async def test_init_creates_project_config(tmp_path):
+async def test_init_creates_user_owned_config(tmp_path):
     repl, _, writer = _build([], root=str(tmp_path))
     await repl.dispatch("/init")
-    config = tmp_path / ".protoprompt" / "config.toml"
+    from protoprompt_cli.config import user_config_path
+
+    config = user_config_path(tmp_path)
     assert config.is_file()
     contents = config.read_text(encoding="utf-8")
     assert "backend" in contents
@@ -544,8 +810,10 @@ async def test_init_creates_project_config(tmp_path):
 
 
 async def test_init_does_not_overwrite_existing_config(tmp_path):
-    config = tmp_path / ".protoprompt" / "config.toml"
-    config.parent.mkdir()
+    from protoprompt_cli.config import user_config_path
+
+    config = user_config_path(tmp_path)
+    config.parent.mkdir(parents=True)
     config.write_text("custom = true", encoding="utf-8")
     repl, _, writer = _build([], root=str(tmp_path))
     await repl.dispatch("/init")
@@ -558,7 +826,10 @@ async def test_shell_shorthand_uses_permission_and_memory(tmp_path):
         ["!echo hello", "y", "/exit"], root=str(tmp_path)
     )
     await repl.run()
-    assert "hello" in writer.text
+    if sys.platform == "linux":
+        assert "hello" in writer.text
+    else:
+        assert "safe jailed shell cwd" in writer.text
     assert any("shell:" in item.summary for item in mem.items.values())
 
 

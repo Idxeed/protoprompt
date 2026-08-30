@@ -4,6 +4,6 @@ CLI-обвязка поверх ``protoprompt.agent.WorkingMemory``: REPL, сл�
 инструменты, персистентность. Мозг — библиотека.
 """
 
-__version__ = "0.1.0"
+__version__ = "0.16.0"
 
 __all__ = ["__version__"]

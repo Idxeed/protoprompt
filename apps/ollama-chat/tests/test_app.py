@@ -14,6 +14,7 @@ import httpx
 import pytest
 
 from protoprompt import RegexTokenCounter
+import protoprompt_ollama_chat.app as app_module
 from protoprompt_ollama_chat.app import (
     ConversationRepository,
     Runtime,
@@ -156,13 +157,60 @@ def _make_app(
     return create_app(tmp_path, runtime_factory=factory), llm, holder
 
 
+def test_runtime_disables_ambient_proxy_configuration_for_ollama(
+    tmp_path: Path, monkeypatch
+) -> None:
+    captured: dict[str, Any] = {}
+
+    class CapturingOllama(FakeOllama):
+        def __init__(self, **kwargs: Any) -> None:
+            captured.update(kwargs)
+            super().__init__()
+
+    monkeypatch.setattr(app_module, "OllamaClient", CapturingOllama)
+    Runtime(tmp_path, config=_config())
+
+    assert captured["trust_env"] is False
+
+
 @pytest.fixture
 async def app_client(tmp_path: Path):
     app, llm, holder = _make_app(tmp_path)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             yield client, llm, holder["runtime"]
+
+
+async def test_local_app_rejects_untrusted_host_for_static_and_api_routes(
+    tmp_path: Path,
+) -> None:
+    app, _, _ = _make_app(tmp_path)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1"
+        ) as client:
+            static = await client.get("/", headers={"Host": "attacker.example"})
+            api = await client.get(
+                "/api/health", headers={"Host": "attacker.example"}
+            )
+    assert static.status_code == 400
+    assert api.status_code == 400
+    assert api.headers["cache-control"] == "no-store"
+
+
+async def test_local_app_accepts_bracketed_ipv6_loopback_host(tmp_path: Path) -> None:
+    app, _, _ = _make_app(tmp_path)
+    async with app.router.lifespan_context(app):
+        transport = httpx.ASGITransport(app=app)
+        async with httpx.AsyncClient(
+            transport=transport, base_url="http://127.0.0.1"
+        ) as client:
+            response = await client.get(
+                "/api/health", headers={"Host": "[::1]:8000"}
+            )
+    assert response.status_code == 200
 
 
 def _sse_payload(response: httpx.Response, event_name: str) -> Any:
@@ -217,7 +265,7 @@ async def test_oversized_message_is_rejected_before_embedding_or_transcript_writ
     )
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             conversation = await client.post("/api/conversations")
             conversation_id = conversation.json()["id"]
             response = await client.post("/api/chat", json={
@@ -268,7 +316,7 @@ async def test_cancelled_context_planning_releases_the_conversation_lock(
     app, _, holder = _make_app(tmp_path, llm=llm)
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             conversation = await client.post("/api/conversations")
             conversation_id = conversation.json()["id"]
             pending = asyncio.create_task(client.post("/api/chat", json={
@@ -340,7 +388,7 @@ async def test_archived_memory_survives_history_window_and_is_recalled(
     )
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             conversation = await client.post("/api/conversations")
             conversation_id = conversation.json()["id"]
             first = await client.post("/api/chat", json={
@@ -369,7 +417,7 @@ async def test_unanswered_user_turn_does_not_stall_memory_watermark(tmp_path: Pa
     app, _, holder = _make_app(tmp_path, _config(memory_interval=2))
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             conversation = await client.post("/api/conversations")
             conversation_id = conversation.json()["id"]
             runtime = holder["runtime"]
@@ -461,7 +509,7 @@ async def test_chunked_oversized_pdf_is_rejected_before_multipart_spooling(
 
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             response = await client.post(
                 "/api/documents",
                 content=chunked_body(),
@@ -563,7 +611,7 @@ async def test_partial_stream_failure_is_not_saved_as_an_assistant_answer(
     )
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             conversation = await client.post("/api/conversations")
             conversation_id = conversation.json()["id"]
             response = await client.post("/api/chat", json={
@@ -754,6 +802,6 @@ async def test_health_marks_explicit_remote_ollama_mode(tmp_path: Path) -> None:
     )
     async with app.router.lifespan_context(app):
         transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        async with httpx.AsyncClient(transport=transport, base_url="http://127.0.0.1") as client:
             response = await client.get("/api/health")
     assert response.json()["mode"] == "remote"

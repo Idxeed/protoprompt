@@ -1,7 +1,8 @@
-"""Конфигурация pp-agent: дефолты + config.toml + env-переменные.
+"""Конфигурация pp-agent: дефолты + trusted config.toml + env-переменные.
 
-Приоритет источников (возрастающий): ``DEFAULT_CONFIG`` → файл
-``.protoprompt/config.toml`` (tomllib) → env ``PP_*``.
+Приоритет источников (возрастающий): ``DEFAULT_CONFIG`` → явно выбранный
+пользователем или user-owned файл ``config.toml`` (tomllib) → env ``PP_*``.
+Repository-local configuration is never selected automatically.
 """
 
 from __future__ import annotations
@@ -12,11 +13,16 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
+from protoprompt_cli.persistence import state_dir
+
 DEFAULT_CONFIG: dict[str, Any] = {
     "llm": {
         "backend": "ollama",
         "chat_model": "",
-        "embed_model": "nomic-embed-text",
+        # Empty means "use the selected provider's default".  A concrete
+        # global default here would accidentally make OpenAI request an
+        # Ollama embedding model.
+        "embed_model": "",
         "ollama": {"host": "http://localhost:11434"},
         "openai": {
             "model": "gpt-4o-mini",
@@ -24,7 +30,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "httpx": {
             "base_url": "http://localhost:11434/v1",
-            "api_key_env": "PP_OPENAI_API_KEY",
         },
     },
     "memory": {
@@ -61,7 +66,6 @@ ENV_OVERRIDES: dict[str, tuple[str, ...]] = {
     "PP_CHAT_MODEL": ("llm", "chat_model"),
     "PP_EMBED_MODEL": ("llm", "embed_model"),
     "PP_OLLAMA_HOST": ("llm", "ollama", "host"),
-    "PP_OPENAI_API_KEY": ("llm", "openai", "api_key"),
     "PP_OPENAI_BASE_URL": ("llm", "openai", "base_url"),
     "PP_HTTPX_BASE_URL": ("llm", "httpx", "base_url"),
     "PP_MAX_TOKENS": ("memory", "max_tokens"),
@@ -103,6 +107,16 @@ def load_config(path: str | Path | None = None) -> dict:
         if p.is_file():
             with p.open("rb") as fh:
                 cfg = _deep_merge(cfg, tomllib.load(fh))
+    # An agent configuration can choose endpoints and models, but must never
+    # carry credentials or name arbitrary host environment variables to read.
+    # The factories use the fixed, documented PP_* variables directly.
+    llm = cfg.get("llm")
+    if isinstance(llm, dict):
+        for backend in ("openai", "httpx"):
+            backend_cfg = llm.get(backend)
+            if isinstance(backend_cfg, dict):
+                backend_cfg.pop("api_key", None)
+                backend_cfg.pop("api_key_env", None)
     for env_name, keys in ENV_OVERRIDES.items():
         raw = os.environ.get(env_name)
         if raw is not None and raw != "":
@@ -111,4 +125,10 @@ def load_config(path: str | Path | None = None) -> dict:
 
 
 def project_config_path(root: str | Path) -> Path:
+    """Legacy project-local config path for explicit user selection only."""
     return Path(root) / ".protoprompt" / "config.toml"
+
+
+def user_config_path(root: str | Path) -> Path:
+    """Return the automatic, user-owned config path for a project."""
+    return state_dir(root) / "config.toml"

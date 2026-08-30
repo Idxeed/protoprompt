@@ -8,8 +8,7 @@
 from __future__ import annotations
 
 import asyncio
-import subprocess
-import sys
+import shlex
 from typing import Any, Callable
 
 from protoprompt import TokenBudgetExceededError
@@ -17,7 +16,8 @@ from protoprompt.agent import WorkingMemory
 
 from protoprompt_cli import persistence, render
 from protoprompt_cli.actions import Action
-from protoprompt_cli.config import project_config_path
+from protoprompt_cli.config import user_config_path
+from protoprompt_cli.terminal import escape_terminal_text
 
 PROMPT = "pp-agent> "
 
@@ -40,17 +40,17 @@ HELP_TEXT = """Слэш-команды:
   /status                   сессия, модель, цель, токены
   /cost                     учёт токенов за сессию
   /perms                    текущие права инструментов
-  /allow <tool>             всегда разрешать инструмент (в perms.json)
+  /allow <tool>             разрешать инструмент до конца сессии
   /deny <tool>              всегда запрещать инструмент
   /sessions                 список сессий проекта
   /resume <name>            переключиться на сессию
   /new [name]               начать новую сессию
   /save                     сохранить сессию
   /resume-state             восстановить последний state.json
-  /git <args...>            прогон git в корне проекта
+  /git <args...>            прогон git через Bash permission layer
   /history [n]              последние введённые строки
-  /init                     создать проектный config.toml
-  !<command>                выполнить shell-команду с подтверждением
+  /init                     создать user-owned config.toml
+  !<command>                выполнить shell-команду с подтверждением (не sandbox)
   /clear                    сбросить горячий набор (с подтверждением)
   /exit                     выход (Ctrl+D)"""
 
@@ -107,6 +107,7 @@ class Repl:
         tools,
         *,
         root,
+        project_identity: persistence.ProjectIdentity | None = None,
         cfg: dict | None = None,
         write: Callable[[str], None] | None = None,
         readline: Callable[[str], str] | None = None,
@@ -118,10 +119,16 @@ class Repl:
         self.mem = mem
         self.tools = tools
         self.root = root
+        self.project_identity = project_identity
         self.cfg = cfg or {}
         self.session = session
         self.stream = stream
-        self.write = write or (lambda line: print(line))
+        self._write_raw = write or (lambda line: print(line))
+        # All visible output, including model streaming, file content and
+        # subprocess output, crosses this single terminal boundary.  An
+        # untrusted ESC/OSC/bidi payload must not persist terminal state into
+        # the next permission prompt.
+        self.write = lambda line: self._write_raw(escape_terminal_text(line))
         self._readline = readline or (lambda prompt: input(prompt))
         self.trace_enabled = False
         self.tracer = Tracer(self.write, mem)
@@ -134,7 +141,7 @@ class Repl:
     # ── ввод/вывод ─────────────────────────────────────────────
 
     async def _read_line(self, prompt: str = PROMPT) -> str:
-        return await asyncio.to_thread(self._readline, prompt)
+        return await asyncio.to_thread(self._readline, escape_terminal_text(prompt))
 
     def _remember(self, line: str) -> None:
         if line and (not self._history or self._history[-1] != line):
@@ -155,21 +162,61 @@ class Repl:
         return "\n".join(lines)
 
     async def _ask_permission(self, action) -> bool:
-        prompt = f"разрешить {action.name} ({action.summary(40)})? [y/N/a] "
+        preview = action.approval_preview()
+        if not preview.complete:
+            self.write(
+                "разрешение отклонено: полный payload не помещается в "
+                "безопасный лимит показа\n"
+                + preview.text
+            )
+            return False
+
+        # ``Action.summary`` intentionally truncates for memory labels.  It
+        # must never be the thing a user approves: y and a/always are offered
+        # only after the full terminal-escaped payload has been shown.
+        self.write("запрошенный payload (показан полностью):\n" + preview.text)
+        prompt = f"разрешить {preview.action_label}? [y/N/a] "
         try:
             answer = await self._read_line(prompt)
         except EOFError:
+            return False
+        # The permission callback awaits terminal input.  Bind the answer to
+        # the exact structured action that was rendered before that await, not
+        # merely to the mutable ``Action`` object identity.
+        current_preview = action.approval_preview()
+        if (
+            not current_preview.complete
+            or current_preview.fingerprint != preview.fingerprint
+        ):
+            self.write(
+                "разрешение отклонено: payload изменился во время подтверждения"
+            )
             return False
         choice = answer.strip().lower()
         if choice in ("a", "always"):
             self.tools.perms[action.name] = "allow"
             self._persist_perms()
-            self.write(f"инструмент {action.name} разрешён всегда")
+            self.write(
+                f"инструмент {preview.action_label} разрешён до конца сессии"
+            )
             return True
         return choice in ("y", "yes", "д", "да")
 
     def _persist_perms(self) -> None:
-        persistence.save_json(persistence.perms_json_path(self.root), self.tools.perms)
+        """Persist only restrictive decisions; grants are session-scoped."""
+        self.tools.assert_project_identity()
+        durable_denials = {
+            name: mode for name, mode in self.tools.perms.items() if mode == "deny"
+        }
+        persistence.save_json(
+            persistence.perms_json_path(self._state_ref()), durable_denials
+        )
+
+    def _state_ref(self):
+        if self.project_identity is not None:
+            self.project_identity.assert_current(self.root)
+            return self.project_identity
+        return self.root
 
     def _set_trace(self, enabled: bool) -> None:
         self.trace_enabled = enabled
@@ -187,7 +234,7 @@ class Repl:
         )
 
     def _save(self) -> None:
-        persistence.save_session(self.mem, self.root, self.session)
+        persistence.save_session(self.mem, self._state_ref(), self.session)
 
     # ── цикл ────────────────────────────────────────────────────
 
@@ -260,7 +307,9 @@ class Repl:
         return False
 
     def _cmd_memory(self, arg: str) -> bool:
-        for line in render.memory_table(self.mem, color=True):
+        # Do not create an ANSI exception to the single safe-output boundary:
+        # memory labels can contain repository/model supplied text.
+        for line in render.memory_table(self.mem, color=False):
             self.write(line)
         return False
 
@@ -303,20 +352,17 @@ class Repl:
             return False
         for raw_path in arg.split():
             try:
-                target = self.tools._resolve(raw_path)
+                target, content, truncated = await self.tools.read_file_bounded(raw_path)
             except Exception as exc:
                 self.write(f"пропуск {raw_path}: {exc}")
                 continue
-            if not target.is_file():
-                self.write(f"пропуск {raw_path}: не файл")
-                continue
-            content = target.read_text(encoding="utf-8", errors="replace")
             rel = str(target.relative_to(self.root))
+            suffix = "\n…(file truncated at inspection limit)" if truncated else ""
             await self.mem.add(
-                "file", f"# {rel}\n{content}",
+                "file", f"# {rel}\n{content}{suffix}",
                 summary=f"{rel}: загружен пользователем", pin=True,
             )
-            self.write(f"[+] {rel}")
+            self.write(f"[+] {rel}" + (" (обрезано)" if truncated else ""))
         return False
 
     async def _cmd_pin(self, arg: str) -> bool:
@@ -452,7 +498,7 @@ class Repl:
             return False
         self.tools.perms[arg] = "allow"
         self._persist_perms()
-        self.write(f"инструмент {arg} разрешён всегда")
+        self.write(f"инструмент {arg} разрешён до конца сессии")
         return False
 
     def _cmd_deny(self, arg: str) -> bool:
@@ -466,7 +512,7 @@ class Repl:
         return False
 
     def _cmd_sessions(self, arg: str) -> bool:
-        sessions = persistence.list_sessions(self.root)
+        sessions = persistence.list_sessions(self._state_ref())
         if not sessions:
             self.write("(сессий ещё нет)")
             return False
@@ -481,12 +527,12 @@ class Repl:
         if not arg:
             self.write("использование: /resume <имя>")
             return False
-        if not persistence.session_exists(self.root, arg):
+        if not persistence.session_exists(self._state_ref(), arg):
             self.write(f"нет сессии {arg!r} (см. /sessions)")
             return False
         target = persistence._sanitize_session(arg)
         self._save()
-        if not persistence.load_session(self.mem, self.root, target):
+        if not persistence.load_session(self.mem, self._state_ref(), target):
             self.write(f"не удалось загрузить сессию {target!r}: файл повреждён")
             return False
         self.session = target
@@ -514,31 +560,32 @@ class Repl:
         return False
 
     def _cmd_resume_state(self, arg: str) -> bool:
-        loaded = persistence.load_state(self.mem, self.root)
+        loaded = persistence.load_state(self.mem, self._state_ref())
         self.write("состояние восстановлено" if loaded else "состояния нет")
         return False
 
-    def _cmd_git(self, arg: str) -> bool:
+    async def _cmd_git(self, arg: str) -> bool:
         if not arg:
             self.write("использование: /git <status|diff|log|commit ...>")
             return False
         try:
-            proc = subprocess.run(
-                ["git"] + arg.split(),
-                cwd=str(self.root),
-                capture_output=True,
-                text=True,
-                timeout=60,
-                errors="replace",
-            )
-        except FileNotFoundError:
-            self.write("git недоступен")
+            git_args = shlex.split(arg)
+        except ValueError as exc:
+            self.write(f"некорректные аргументы git: {exc}")
             return False
-        except subprocess.TimeoutExpired:
-            self.write("git таймаут")
+        if not git_args:
+            self.write("использование: /git <status|diff|log|commit ...>")
             return False
-        output = (proc.stdout or "") + (proc.stderr or "")
-        self.write(output.strip() or f"(пусто, exit={proc.returncode})")
+
+        # Do not launch a separate subprocess from a pathname-based cwd.  The
+        # normalized argv is re-quoted before entering ToolRunner, so shell
+        # metacharacters supplied as Git arguments stay arguments rather than
+        # becoming a second command.  ToolRunner supplies the identity check,
+        # permission prompt, and jailed Bash launch.
+        command = shlex.join(["git", *git_args])
+        result = await self.tools.run(Action(name="bash", body=command))
+        output = result.output if result.ok else (result.error or result.output)
+        self.write(output.strip() or "(пусто)")
         return False
 
     def _cmd_history(self, arg: str) -> bool:
@@ -548,7 +595,7 @@ class Repl:
         return False
 
     def _cmd_init(self, arg: str) -> bool:
-        target = project_config_path(self.root)
+        target = user_config_path(self._state_ref())
         if target.exists():
             self.write(f"config уже существует: {target}")
             return False

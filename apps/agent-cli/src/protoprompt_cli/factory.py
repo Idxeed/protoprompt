@@ -26,6 +26,40 @@ def resolve_backend(cfg: dict | None, explicit: str | None = None) -> str:
     return backend
 
 
+def resolve_models(
+    cfg: dict | None, backend: str | None = None
+) -> tuple[str, str]:
+    """Resolve concrete chat and embedding defaults for one provider.
+
+    ``llm.chat_model`` and ``llm.embed_model`` are explicit user-wide
+    overrides.  When either is blank, fall back to the selected backend rather
+    than allowing Ollama's embedding default to leak into an OpenAI request.
+    """
+    cfg = cfg or {}
+    resolved_backend = resolve_backend(cfg, backend)
+    llm = cfg.get("llm", {})
+    chat_model = llm.get("chat_model") or ""
+    embed_model = llm.get("embed_model") or ""
+
+    if resolved_backend == "ollama":
+        provider = llm.get("ollama", {})
+        return (
+            chat_model or provider.get("model", "llama3.1"),
+            embed_model or provider.get("embed_model", "nomic-embed-text"),
+        )
+    if resolved_backend == "openai":
+        provider = llm.get("openai", {})
+        return (
+            chat_model or provider.get("model", "gpt-4o-mini"),
+            embed_model or provider.get("embed_model", "text-embedding-3-small"),
+        )
+    provider = llm.get("httpx", {})
+    return (
+        chat_model or provider.get("model", ""),
+        embed_model or provider.get("embed_model", ""),
+    )
+
+
 def make_llm(
     cfg: dict | None = None,
     backend: str | None = None,
@@ -35,44 +69,59 @@ def make_llm(
     cfg = cfg or {}
     backend = resolve_backend(cfg, backend)
     llm = cfg.get("llm", {})
-    chat_model = llm.get("chat_model") or ""
-    embed_model = llm.get("embed_model") or ""
+    chat_model, embed_model = resolve_models(cfg, backend)
 
     if backend == "ollama":
         ollama_cfg = llm.get("ollama", {})
         from protoprompt.integrations import OllamaClient
 
-        kwargs: dict[str, Any] = {"host": ollama_cfg.get("host", "http://localhost:11434")}
-        if chat_model:
-            kwargs["chat_model"] = chat_model
-        if embed_model:
-            kwargs["embed_model"] = embed_model
+        kwargs: dict[str, Any] = {
+            "host": ollama_cfg.get("host", "http://localhost:11434"),
+            # The agent's endpoint policy is explicit.  Ambient proxy and CA
+            # settings must not silently redirect a loopback provider.
+            "trust_env": False,
+        }
+        kwargs["chat_model"] = chat_model
+        kwargs["embed_model"] = embed_model
         raw = OllamaClient(**kwargs)
 
     elif backend == "openai":
         openai_cfg = llm.get("openai", {})
-        from protoprompt.integrations import OpenAIClient
+        from protoprompt.integrations import HttpxLLMClient
 
-        kwargs = {}
-        if openai_cfg.get("api_key"):
-            kwargs["api_key"] = openai_cfg["api_key"]
-        if openai_cfg.get("base_url"):
-            kwargs["base_url"] = openai_cfg["base_url"]
-        kwargs["chat_model"] = chat_model or openai_cfg.get("model", "gpt-4o-mini")
-        kwargs["embed_model"] = embed_model or openai_cfg.get(
-            "embed_model", "text-embedding-3-small"
+        # The official SDK deliberately accepts several OPENAI_* ambient
+        # settings (including custom headers).  The agent must have one
+        # auditable credential and endpoint source, so use the stable
+        # OpenAI-compatible REST surface directly instead of inheriting SDK
+        # process-environment behaviour.
+        api_key = os.environ.get("PP_OPENAI_API_KEY")
+        if not api_key:
+            raise ValueError("OpenAI backend requires PP_OPENAI_API_KEY")
+        raw = HttpxLLMClient(
+            base_url=openai_cfg.get("base_url") or "https://api.openai.com/v1",
+            api_key=api_key,
+            chat_model=chat_model,
+            embed_model=embed_model,
+            trust_env=False,
+            completion_token_field="max_completion_tokens",
         )
-        raw = OpenAIClient(**kwargs)
 
     elif backend == "httpx":
         httpx_cfg = llm.get("httpx", {})
         from protoprompt.integrations import HttpxLLMClient
 
-        env_name = httpx_cfg.get("api_key_env")
-        api_key = os.environ.get(env_name) if env_name else ""
+        # Keep the credential source fixed rather than accepting api_key_env
+        # from configuration.  PP_OPENAI_API_KEY is retained as a compatible
+        # fallback for OpenAI-compatible gateways.
+        api_key = os.environ.get("PP_HTTPX_API_KEY") or os.environ.get(
+            "PP_OPENAI_API_KEY"
+        )
         raw = HttpxLLMClient(
             base_url=httpx_cfg.get("base_url", "http://localhost:11434/v1"),
             api_key=api_key,
+            chat_model=chat_model,
+            embed_model=embed_model,
+            trust_env=False,
         )
 
     else:  # pragma: no cover — resolve_backend уже отсеял

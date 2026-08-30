@@ -1,10 +1,11 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.15.0` добавляет frozen dual-backend semantic evidence для strict
-> Ledger recall: один content-free synthetic fixture обязателен к exact parity
-> на SQLite и PostgreSQL. Это усиливает release gate без расширения public API;
-> следующий этап — остальные RC-gates к `1.0.0`.
-> Обновлён: 2026-08-30.
+> Статус: `0.16.0` hardens reference-agent boundary: user-owned state,
+> identity-bound project namespaces, native no-reparse project discovery и
+> fail-closed jailed operations. `0.15.0` остаётся frozen dual-backend semantic
+> evidence для strict Ledger recall. Это усиливает release gate без расширения
+> public API; следующий этап — остальные RC-gates к `1.0.0`.
+> Обновлён: 2026-08-31.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
 > проверяемых критериев готовности.

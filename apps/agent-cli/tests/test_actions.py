@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-from protoprompt_cli.actions import Action, parse_actions, strip_actions
+from protoprompt_cli.actions import (
+    MAX_APPROVAL_PREVIEW_BYTES,
+    Action,
+    parse_actions,
+    strip_actions,
+)
 
 
 def test_empty_and_plain_text_yield_no_actions():
@@ -88,6 +93,52 @@ def test_summary_truncates_long_body():
 def test_summary_for_empty_body_is_just_name():
     action = Action(name="bash", body="   ")
     assert action.summary() == "bash"
+
+
+def test_approval_preview_shows_the_complete_escaped_bash_command():
+    command = "echo safe\r\x1b]0;spoof\x07\nthen-visible-tail"
+    preview = Action(name="bash", body=command).approval_preview()
+
+    assert preview.complete is True
+    assert 'action = "bash"' in preview.text
+    assert 'field["command"] = "echo safe\\r\\u001b]0;spoof\\u0007\\nthen-visible-tail"' in preview.text
+    assert "\r" not in preview.text
+    assert "\x1b" not in preview.text
+    assert "\x07" not in preview.text
+
+
+def test_approval_preview_covers_write_and_edit_structured_values():
+    write_preview = Action(
+        name="write",
+        body="new\ncontent",
+        kwargs={"path": "src/new.py"},
+    ).approval_preview()
+    edit_preview = Action(
+        name="edit",
+        body="ignored source body",
+        kwargs={"path": "src/app.py", "old": "before", "new": "after"},
+    ).approval_preview()
+
+    assert write_preview.complete is True
+    assert 'field["path"] = "src/new.py"' in write_preview.text
+    assert 'field["content"] = "new\\ncontent"' in write_preview.text
+    assert edit_preview.complete is True
+    assert 'field["path"] = "src/app.py"' in edit_preview.text
+    assert 'field["old"] = "before"' in edit_preview.text
+    assert 'field["new"] = "after"' in edit_preview.text
+    assert 'field["body_ignored_by_edit"] = "ignored source body"' in edit_preview.text
+
+
+def test_approval_preview_fails_closed_instead_of_truncating_large_payload():
+    tail = "UNSEEN_MALICIOUS_TAIL"
+    action = Action(name="bash", body=("x" * MAX_APPROVAL_PREVIEW_BYTES) + tail)
+
+    preview = action.approval_preview()
+
+    assert preview.complete is False
+    assert "safe approval limit" in preview.text
+    assert "sha256=" in preview.text
+    assert tail not in preview.text
 
 
 def test_code_fence_does_not_hide_action():
