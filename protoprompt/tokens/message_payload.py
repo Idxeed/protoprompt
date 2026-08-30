@@ -40,6 +40,18 @@ def message_text(message: Mapping[str, Any]) -> str:
     return f"{content_text}\n{extras_text}" if content_text else extras_text
 
 
+def json_safe_value(value: Any, *, path: str = "value") -> Any:
+    """Normalize a portable payload into JSON-compatible built-in values.
+
+    This is the companion to :func:`message_text` for consumers that need a
+    stable deep snapshot rather than a token-counting string.  It accepts the
+    same Mapping/Sequence shapes and rejects the same non-finite or arbitrary
+    object values, so a budgeted request cannot validate one representation and
+    later freeze another with different semantics.
+    """
+    return _json_value(value, path=path)
+
+
 def _content_text(content: Any) -> str:
     """Keep the established text-block fast path, serialize all else.
 

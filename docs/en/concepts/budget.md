@@ -77,6 +77,44 @@ final output. Anonymous **server-side** tool-search outputs are paired with
 history calls by SDK order across that boundary; client-side searches require a
 `call_id`.
 
+## Explainable plans and request receipts
+
+For a developer UI, an audit record, or concurrent requests, use the additive
+planning API instead of reading the mutable compatibility property
+`last_report` after the call has completed:
+
+```python
+plan = await builder.plan_messages(
+    ContextInput(query=question, system_prompt="Answer concisely."),
+    history=history,
+    user_message=question,
+    output_reserve=1_024,
+)
+
+messages = plan.render_messages()
+receipt = plan.receipt
+assert receipt is not None
+print(receipt.input_tokens, "+", receipt.output_reserve_tokens)
+print(plan.explain())
+```
+
+`ContextPlan` is immutable and owns a deep, JSON-compatible snapshot of the
+rendered provider messages. `ContextRequestReceipt` reports the exact result
+of `count_messages()` for this one request, plus its context, retained-history,
+final-input, reserve and remaining totals. A later request on the same builder
+cannot change an already returned plan or receipt.
+
+`plan.explain()` contains only decision metadata: block id, origin, stable
+reason code, marginal token cost, and an opaque per-builder RAG source
+reference/score when present. It intentionally excludes prompt text, document
+content, final messages, session identifiers, and raw document identifiers, so
+it can be serialized in a developer-facing trace.
+
+For context-only inspection, `await builder.plan(inp)` returns a plan with no
+request receipt; use `plan.render_system_prompt()`. The legacy APIs stay fully
+compatible: `build()` attaches its context-only plan as `ContextOutput.plan`,
+and `build_messages()` renders the same projection as `plan_messages()`.
+
 ## Counting tokens
 
 The default `RegexTokenCounter` is fast, dependency-free, and

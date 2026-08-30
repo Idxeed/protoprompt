@@ -14,6 +14,11 @@ from protoprompt.cache import (
     InMemoryEmbeddingCache,
 )
 from protoprompt.context import ContextInput, ContextOutput
+from protoprompt.context_plan import (
+    ContextBlockDecision,
+    ContextPlan,
+    ContextRequestReceipt,
+)
 from protoprompt.connectivity import MemoryService
 from protoprompt.exceptions import TokenBudgetExceededError
 from protoprompt.events import (
@@ -94,6 +99,9 @@ __all__ = [
     "TokenBudgetedContextBuilder",
     "ContextInput",
     "ContextOutput",
+    "ContextBlockDecision",
+    "ContextPlan",
+    "ContextRequestReceipt",
     "MemoryService",
     "BudgetReport",
     "DEFAULT_PRIORITIES",

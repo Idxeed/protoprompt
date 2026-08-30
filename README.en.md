@@ -1,6 +1,7 @@
 # protoprompt
 
 [![CI](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml/badge.svg)](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/protoprompt.svg)](https://pypi.org/project/protoprompt/)
 [![Coverage](https://img.shields.io/codecov/c/github/Idxeed/protoprompt)](https://codecov.io/gh/Idxeed/protoprompt)
 [![Python 3.11–3.13](https://img.shields.io/badge/python-3.11%E2%80%933.13-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -9,11 +10,12 @@
 
 [Русская версия](README.md)
 
-Composable context and long-term memory for LLM applications. The core combines
-**RAG over documents**, **compressed session memory**, an optional **user
-profile**, token budgeting, and recall provenance. Integration adapters connect
-the same memory contract to bots, agents, APIs, model providers, and production
-storage without coupling those dependencies to the core package.
+**Reliable agent memory under a fixed context budget.** ProtoPrompt is an
+embeddable context runtime for LLM applications. The core combines **RAG over
+documents**, **compressed session memory**, an optional **user profile**, token
+budgeting, and recall provenance. Integration adapters connect the same memory
+contract to bots, agents, APIs, model providers, and production storage without
+coupling those dependencies to the core package.
 
 ![Telegram bot recalls an old fact and shows provenance](docs/assets/telegram-memory.gif)
 
@@ -37,6 +39,14 @@ protocol:
 The `ContextBuilder` orchestrates all three. The result is a single
 `system_prompt` plus a structured `ContextOutput` describing what went in
 (head, tail, RAG, profile) so the UI can show provenance.
+
+The budgeted path also exposes a `ContextPlan` and request receipt, so a UI can
+show exactly which blocks made the final prompt, why, and at what token cost.
+
+Our path to 1.0 is deliberately narrow: retain information for as long as the
+application needs, but admit only an explainable, policy-approved set of
+blocks that fits the active context window. See the [roadmap](ROADMAP.md) for
+the stable memory and context contracts this leads to.
 
 ## Install
 

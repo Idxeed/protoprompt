@@ -1,263 +1,303 @@
-# Roadmap protoprompt
+# Roadmap to 1.0 — ProtoPrompt
 
-> Реализация кандидата `0.6.0` после публичного релиза `0.3.0`.
-> Кандидат ещё не опубликован. Обновлён: 2026-08-28.
-> Полная карта кандидатов и критерии интеграций находятся в
-> [INTEGRATIONS.md](INTEGRATIONS.md).
+> Статус: путь от опубликованного `0.6.1` к `1.0.0`.
+> Обновлён: 2026-08-30.
+>
+> Это не календарное обещание. Каждый minor-релиз выходит только после своих
+> проверяемых критериев готовности.
 
-## Видение
+## Наша категория
 
-`protoprompt` остаётся небольшим независимым движком контекста и памяти.
-Следующий цикл расширяет не число внутренних алгоритмов, а количество мест,
-где существующие RAG, session memory, profile, token budget и provenance можно
-использовать без переписывания приложения.
+**ProtoPrompt — embeddable context runtime для агентов.** Он превращает
+историю, документы, события агента и подтверждённые факты в объяснимый,
+безопасный контекст в жёстком token budget.
 
-Главный пользовательский тест roadmap:
+Главное обещание `1.0`:
 
-> Разработчик существующего бота или агента подключает protoprompt за один
-> вечер, видит, что именно было вспомнено и почему, и может заменить локальное
-> хранилище production-backend без изменения логики памяти.
+> **Retention independent of the active context window; bounded, reliable
+> active context.**
 
-## Текущее состояние
+Долгое хранение не означает, что модель «всегда всё помнит». В активный
+prompt попадают только релевантные блоки, разрешённые политикой, с понятным
+происхождением и стоимостью в конкретном бюджете.
 
-- `0.3.0` опубликован в PyPI, `0.6.0` собран как непубличный кандидат;
-- core не имеет обязательных сторонних зависимостей;
-- release gates `0.4.0`–`0.6.0` реализованы и локально проверены;
-- CI покрывает Python 3.11–3.13, wheel, интеграционный контур и RU/EN docs;
-- готовы RAG, session compression, profile engine, token budget, provenance,
-  runtime bridges, production backends, providers, readers и cloud secrets;
-- `pp-agent` остаётся экспериментальным потребителем core API.
+## Граница продукта
 
-Завершённый roadmap профиля, secrets и RAG сохранён в истории Git:
-<https://github.com/Idxeed/protoprompt/blob/v0.3.0/ROADMAP.md>.
-
-## Принципы очереди
-
-1. Сначала стабильный контракт, потом adapters.
-2. Один стандартный bridge ценнее пяти provider-specific wrappers.
-3. Core остаётся dependency-free; всё внешнее — extras + lazy imports.
-4. Каждый milestone заканчивается runnable use case, а не только API.
-5. Интеграция без contract tests и владельца не считается поддерживаемой.
-6. Alpha breaking change допустим только с явной выгодой и migration path.
-
-## 0.3.x — стабилизация
-
-Цель: собрать реальные сигналы после первого крупного публичного релиза.
-
-- [ ] завести issue templates для bug/integration request;
-- [ ] добавить compatibility smoke test минимальных версий extras;
-- [ ] исправлять только release blockers и документацию;
-- [ ] не добавлять новые абстракции в `0.3.x`;
-- [ ] собрать минимум три внешних сценария использования или интервью.
-
-Выход: известные дефекты `0.3` закрыты, API-разрез `0.4` подтверждён примерами.
-
-## 0.4.0 — Integration Foundation
-
-Цель: подготовить честные узкие контракты для внешних экосистем.
-
-### F1. Разделение model capabilities
-
-- [x] `ChatClientProtocol`;
-- [x] `EmbeddingClientProtocol`;
-- [x] совместимый composite `LLMClientProtocol`;
-- [x] builders принимают минимально необходимую capability;
-- [x] embedding-only clients больше не содержат fake `chat()`;
-- [x] migration guide для пользовательских clients.
-
-### F2. Scope и namespace
-
-- [x] `MemoryScope(tenant, user, thread, kind)`;
-- [x] единое отображение scope в metadata;
-- [x] тесты изоляции и удаления;
-- [x] host-controlled scope для model-facing adapters.
-
-### F3. Adapter contract kit
-
-- [x] reusable tests для chat, embeddings, vector/profile/secret stores;
-- [x] проверки sync/async semantics;
-- [x] проверки lazy import и missing-extra errors;
-- [x] contributor guide «как добавить интеграцию».
-
-### F4. Typed observability events
-
-- [x] события context/retrieve/compress/profile/recall/evict/cache;
-- [x] существующие hooks работают поверх нового слоя;
-- [x] redaction policy по умолчанию;
-- [x] trace/scope correlation без хранения содержимого.
-
-**Release gate:** полный текущий test suite зелёный; публичные символы `0.3`
-работают с deprecation path; docs RU/EN и wheel smoke обновлены.
-
-## 0.4.1 — Connectivity
-
-Цель: подключить protoprompt к трём главным входным экосистемам и показать
-понятный продуктовый сценарий.
-
-### C1. MCP
-
-- [x] `protoprompt[mcp]`;
-- [x] tools `remember/search/forget/profile/explain/budget_report`;
-- [x] read-only resources profile/manifest/last-report;
-- [x] stdio + Streamable HTTP;
-- [x] scope injection со стороны host;
-- [x] in-process tests официального MCP client/server.
-
-### C2. OpenAI Agents SDK
-
-- [x] `ProtoPromptSession`;
-- [x] session input callback для budgeted context;
-- [x] сохранение `pop_item`/clear semantics;
-- [x] пример plain session vs protoprompt recall.
-
-### C3. LangGraph
-
-- [x] store adapter;
-- [x] готовый `build_context` node;
-- [x] sync/async graph tests;
-- [x] пример thread memory + cross-thread profile.
-
-### C4. Telegram memory bot
-
-- [x] runnable aiogram 3 application;
-- [x] SQLite default, OpenAI/Ollama switch;
-- [x] `/memory`, `/why`, `/forget`;
-- [x] synthetic long-dialog scenario;
-- [x] воспроизводимое сравнение FIFO/LRU;
-- [x] короткое видео/GIF для README и релизного поста.
-
-**Release gate:** новый пользователь поднимает Telegram demo по инструкции в
-чистом окружении; MCP Inspector видит tools/resources; оба framework adapters
-проходят upstream-compatible contract tests.
-
-## 0.4.2 — Production Backends
-
-Цель: убрать локальную SQLite как обязательный предел production-сценариев.
-
-### P1. PostgreSQL/pgvector
-
-- [x] `PgVectorStore`;
-- [x] async-first implementation;
-- [x] metadata filters и score threshold;
-- [x] explicit migrations/setup;
-- [x] `PostgresProfileStore` с optimistic locking;
-- [x] Docker integration tests.
-
-### P2. OpenTelemetry
-
-- [x] OTEL spans для typed events;
-- [x] безопасные default attributes;
-- [x] пример Langfuse/Jaeger collector;
-- [x] latency/token/eviction dashboard recipe.
-
-### P3. Redis
-
-- [x] vector store либо решение оставить vector retrieval Postgres;
-- [x] embedding cache с TTL;
-- [x] ephemeral session/profile adapter;
-- [x] concurrency и reconnect tests.
-
-**Release gate:** Postgres survives restart/concurrent updates; migrations
-отделены от startup; telemetry не экспортирует content/secrets по умолчанию.
-
-## 0.5.0 — Providers and Frameworks
-
-Цель: покрыть native APIs, которые generic OpenAI-compatible client не
-представляет честно.
-
-- [x] Anthropic chat client;
-- [x] Google GenAI chat + embeddings;
-- [x] Amazon Bedrock Converse client;
-- [x] provider-aware token counters;
-- [x] PydanticAI adapter;
-- [x] LlamaIndex bridge;
-- [x] Google ADK spike и решение о поддержке;
-- [x] provider conformance matrix в документации.
-
-Native adapter не принимается, если он лишь переименовывает параметры
-существующего compatible client и не добавляет auth/capability/semantics.
-
-## 0.6.0 — Data and Enterprise
-
-Цель: подключить существующие данные и инфраструктурные сервисы.
-
-- [x] text/Markdown/source readers;
-- [x] optional PDF/DOCX/HTML readers;
-- [x] LlamaIndex/Unstructured document converters;
-- [x] Elasticsearch/OpenSearch adapter;
-- [x] минимум два cloud secret stores: AWS Secrets Manager и GCP Secret Manager;
-- [x] FastAPI service recipe;
-- [x] Slack/Discord gate рассмотрен: example не добавлен без подтверждённого спроса.
-
-URL/cloud readers проходят отдельный security review: SSRF, размер, MIME,
-архивные бомбы и provenance источника.
-
-## Research backlog — без обещания версии
-
-- hybrid sparse+dense retrieval;
-- reranker adapters Cohere/Voyage;
-- Milvus, Weaviate, Pinecone, MongoDB Atlas;
-- Haystack, CrewAI, Semantic Kernel, AutoGen;
-- Dapr state store;
-- OpenInference/Phoenix, Ragas, Promptfoo;
-- multimodal context blocks;
-- streaming model responses;
-- background memory consolidation;
-- memory checkpoints/rollback и quarantine для untrusted signals;
-- portable benchmark suite для long-dialog и coding-agent memory.
-
-Элемент переходит из backlog в milestone только по критериям из
-[карты интеграций](INTEGRATIONS.md#15-пересмотр-приоритетов).
-
-## Сквозные критерии готовности
-
-Для каждого релиза:
-
-- [x] core остаётся без обязательных third-party dependencies;
-- [x] Python 3.11–3.13 проходит CI;
-- [x] deterministic tests не требуют сети или cloud credentials;
-- [x] live tests opt-in и имеют таймауты;
-- [x] wheel/sdist, extras metadata и lazy imports проверены;
-- [x] RU/EN docs собираются в strict mode;
-- [x] migration и rollback описаны;
-- [x] privacy/redaction defaults проверены тестами;
-- [x] changelog и runnable example обновлены;
-- [x] интеграция имеет maintainer/deprecation path.
-
-Проверка release candidate `0.6.0` от 2026-08-28:
-
-- exact CI extras (`chroma,qdrant,dev`) и deterministic suite: `394 passed` на
-  Python 3.11, 3.12 и 3.13; внешние sockets запрещены через `pytest-socket`;
-- coverage на Python 3.12: `87.8%`; agent CLI: `188 passed`;
-- live PostgreSQL/pgvector, Redis, Elasticsearch 9, OpenSearch 3 и локальный
-  Chroma: `10 passed`; AWS/GCP live contracts остаются opt-in и требуют
-  тестовых cloud credentials;
-- wheel/sdist прошли `twine check`, isolated zero-dependency import и проверку
-  28 extras/66 optional requirements; sdist содержит deployment/docs assets;
-- RU/EN MkDocs прошли strict build; восемь offline examples и FastAPI HTTP
-  lifecycle выполнены; Kubernetes manifest принят API server minikube в
-  `--dry-run=server`.
-
-## Риски roadmap
-
-| Риск | Контроль |
+| ProtoPrompt 1.0 владеет | ProtoPrompt 1.0 не пытается заменить |
 |---|---|
-| framework APIs быстро меняются | узкие adapters, version matrix, contract tests |
-| optional dependencies конфликтуют | изолированные extras, нет `all` extra |
-| core превращается в orchestrator | жёсткие non-goals в `INTEGRATIONS.md` |
-| слишком широкий `0.4` | foundation/connectivity/production релизы |
-| provider wrappers не дают ценности | adapter только при уникальной семантике |
-| telemetry раскрывает данные | deny-by-default export и redaction tests |
-| scope ломает multi-tenancy | host-controlled namespace + isolation tests |
-| roadmap снова устаревает | пересмотр после каждого minor release |
+| Жизненным циклом памяти, provenance, scope, trust и удалением | Agent loop, planner, tool execution и multi-agent orchestration |
+| Выбором контекста и строгим token budget | Полный ingestion/RAG framework или каталог data connectors |
+| Памятью фактов, решений, предпочтений, эпизодов и процедур | Универсальную graph/vector database |
+| Объяснением: что, почему и за сколько токенов попало в prompt | Обязательный облачный control plane или SaaS UI |
+| Тонкими bridges к фреймворкам | LangChain, LangGraph или LlamaIndex |
 
-## Ближайший implementation slice
+LangChain/LangGraph, LlamaIndex, OpenAI Agents SDK и PydanticAI — каналы
+распространения, а не модель ядра. Новая интеграция до `1.0` принимается
+только если проверяет memory/context contract, а не просто добавляет логотип.
 
-Первый PR после утверждения roadmap:
+## Точка старта: 0.6.1
 
-1. split `ChatClientProtocol` / `EmbeddingClientProtocol`;
-2. migration существующих clients без удаления `LLMClientProtocol`;
-3. adapter contract test kit;
-4. минимальный MCP vertical slice: `memory_search` + `last-report` resource.
+В `0.6.1` уже есть необходимый фундамент:
 
-Это проверит новый архитектурный шов до массового добавления integrations.
+- RAG, bounded document readers, session compression, profile engine и
+  budgeted context;
+- scope `tenant/user/thread`, content-safe telemetry и provenance;
+- SQLite, PostgreSQL/pgvector, Redis, Chroma, Qdrant,
+  Elasticsearch/OpenSearch;
+- MCP, LangGraph, OpenAI Agents SDK, PydanticAI и LlamaIndex bridges;
+- экспериментальная hot/cold agent memory с scoring, manifest и checkpoint
+  export.
+
+`0.6.1` исправил критические фундаментальные гарантии: final-request token
+budget, provider-aware token counting, scoped profile identity и безопасную
+проверку Responses tool graph. Он опубликован с проверенными sdist/wheel.
+
+До `1.0` не хватает не очередного store или provider, а четырёх цельных
+контрактов:
+
+1. `ContextPlan`: воспроизводимое решение о составе prompt, а не только
+   готовая строка и разрозненный report.
+2. `MemoryRecord`: версия факта/решения/предпочтения с evidence, trust,
+   актуальностью и связями вместо безличного vector chunk.
+3. Memory lifecycle: candidate → validation → reconciliation →
+   consolidation/expiry/forget/rollback без молчаливой перезаписи истории.
+4. Agent memory runtime: опыт выполнения задач и playbooks как first-class
+   память, а не побочный артефакт CLI.
+
+## Инварианты 1.x
+
+1. **Host-controlled scope.** Модель не выбирает tenant, user, thread,
+   visibility или trust level.
+2. **Provenance everywhere.** Каждый memory/context block имеет origin,
+   scope и источник; content не экспортируется в telemetry по умолчанию.
+3. **Никаких silent writes.** Данные из документа, tool output или LLM
+   extraction untrusted, пока `MemoryPolicy` не подтвердит их.
+4. **История важнее перезаписи.** Изменённый факт становится
+   `superseded`/`retracted`, а не исчезает бесследно.
+5. **Удаление полное и проверяемое.** Первичная запись, embedding, индекс и
+   производные записи удаляются в соответствии с retention policy.
+6. **Budget is a contract.** План учитывает system/developer messages,
+   history, current user turn, tool payloads и output reserve; причина
+   исключения доступна через API.
+7. **Core остаётся лёгким.** Нет обязательных third-party dependencies;
+   providers, storage и bridges остаются optional extras.
+8. **Compatibility before elegance.** Существующие `ContextBuilder`,
+   `Pipeline`, `ProfileManager` и bridges получают documented migration path.
+
+## Целевая модель
+
+```text
+documents ───────────────┐
+conversation/session ───┤
+agent events/artifacts ─┼─> Memory Ledger ─┐
+profile/confirmed facts ┘                  │
+                                           ├─> ContextPolicy
+current task + model budget ───────────────┘          │
+                                                      v
+                                             immutable ContextPlan
+                                                      │
+                                                      v
+                                       messages + explanation + receipt
+```
+
+`Memory Ledger` — единственный durable source of truth. Working set, vector
+index, summaries и framework-specific state — его projections/caches, а не
+конкурирующие истины.
+
+## 0.7.0 — Truth & Evaluation
+
+**Цель:** сделать выбор контекста прозрачным и измеримым до изменения модели
+памяти.
+
+### Контракты
+
+- `ContextBlockDecision`: включён, исключён, обрезан или зарезервирован;
+  origin, reason code, token cost, provenance и score там, где это безопасно.
+- `ContextPlan`: immutable снимок selection, renderer system prompt/message
+  payload и JSON-safe `explain()` без raw prompt/document content.
+- `ContextRequestReceipt`: точный final-message cost, output reserve,
+  history/context/final-input totals для одного запроса.
+- `ContextPolicy` и `ContextRequest` — следующий API-slice, когда legacy
+  builder будет переведён на planner без feature flag.
+
+### Работа
+
+- [x] Исправить final-message budget, profile scope identity и provider token
+  fallback в `0.6.1`.
+- [x] Перевести budgeted builder на internal planner и дать additive
+  `plan()` / `plan_messages()` без поломки `build()` / `build_messages()`.
+- [x] Добавить `plan.explain()` и developer recipe для просмотра решения.
+- [x] Ввести request-scoped receipt вместо reliance на mutable last report.
+- [ ] Перевести `pp-agent` на единый safe final-request path.
+- [ ] Выпустить ProtoPrompt Memory Benchmark v0.1: versioned offline fixtures,
+  fixed baselines (sliding window, rolling summary, vector recall, `0.6`
+  pipeline) и machine-readable report.
+- [ ] Подключить local Ollama/PDF app как hardened reference integration:
+  final budgeting, provenance UI, scoped deletion и loopback-safe defaults.
+
+### Release gate
+
+- Одинаковый request и candidate snapshot дают одинаковый selection без LLM.
+- Ни один deterministic plan не превышает input budget; output reserve есть в
+  receipt.
+- У каждого included/excluded block есть origin, token cost и reason code.
+- Existing public API и contract tests проходят без behavioral regression.
+- Benchmark полностью offline, seeded, versioned и воспроизводим; baseline
+  заморожен до оптимизаций `0.8`.
+
+## 0.8.0 — Memory Semantics & Lifecycle
+
+**Цель:** превратить durable memory из набора summaries/vector chunks в
+управляемую, версионируемую предметную модель.
+
+### Каноническая запись
+
+`MemoryRecord` содержит как минимум:
+
+- `kind`: `fact`, `decision`, `preference`, `episode`, `procedure`;
+- record id, schema version, owner/scope и host-controlled trust level;
+- content или content reference, content hash и source/evidence references;
+- confidence, timestamps, validity interval и retention policy;
+- lifecycle state: `candidate`, `active`, `superseded`, `retracted`,
+  `expired`, `quarantined`;
+- typed relations: `supersedes`, `derived_from`, `supports`, `contradicts`.
+
+### Работа
+
+- Ввести append-only `MemoryEvent` и materialized `MemoryRecord` view:
+  observed, asserted, confirmed, superseded, expired, retracted.
+- Ввести `MemoryWriter` и `MemoryPolicy`: extract → validate → reconcile →
+  accept/quarantine/reject.
+- Реализовать deterministic conflict handling: пользователь переехал,
+  решение отменено, предпочтение изменилось, источник отозван.
+- Добавить `forget(record_id)`, `forget_by_source(...)` и scoped deletion с
+  проверяемым каскадом в indexes/projections.
+- Сделать schema-versioned SQLite implementation и PostgreSQL/pgvector
+  implementation; добавить export, dry-run migration, backup и rollback.
+- Дать legacy `ProfileManager`, session summaries и `MemoryService` adapters к
+  ledger без внезапной миграции данных пользователей.
+- Ввести quarantine и safe rendering/data delimiters для PDF, tool output и
+  LLM extraction; untrusted content не получает system priority.
+
+### Release gate
+
+- `superseded`, `retracted`, `expired` и `quarantined` records не попадают в
+  default `ContextPlan`.
+- Conflict suite детерминированно проходит для всех lifecycle transitions.
+- Удаление очищает primary store, vector index и derived records.
+- Scope isolation покрыта property/integration tests для SQLite и Postgres.
+- Миграция `0.6 → 0.8` имеет dry-run, backup/export и rollback path.
+
+## 0.9.0 — Agent Memory Runtime
+
+**Цель:** сделать память полезной для выполнения и продолжения задач агента,
+а не только для воспоминания диалога.
+
+### Работа
+
+- Использовать `MemoryEvent` для goal, observation, tool result, artifact
+  change, outcome и human feedback.
+- Добавить `Episode`: цель → действия → результат → вывод, с evidence на
+  tool calls/artifacts.
+- Создавать `Procedure`/playbook только из успешных или host-confirmed
+  эпизодов; не превращать неудачный model output в инструкцию.
+- Перенести полезные части экспериментального `WorkingMemory` (scoring,
+  hot/cold zones, manifests, checkpoints) в ledger + planner.
+- Добавить controlled consolidation, checkpoints/resume и policy-driven recall
+  facts, episodes, procedures, RAG evidence и current task через ContextPlan.
+- Перевести bridges к LangGraph, OpenAI Agents SDK, PydanticAI и LlamaIndex на
+  единый contract там, где это не ломает public semantics.
+- Выпустить ProtoPrompt Memory Benchmark v1.0 как regression gate.
+
+### Benchmark cases
+
+- delayed recall через 100–1000 ходов;
+- updates, retractions и contradictory facts;
+- cross-thread preference и scope/tenant leakage;
+- prompt injection из PDF/tool output в memory;
+- resume многошаговой agent task после restart;
+- качество и стоимость при фиксированных 1k/2k/4k budgets;
+- latency planning/retrieval и полнота удаления.
+
+### Release gate
+
+- Reference agent завершает checkpointed task после restart, поднимая только
+  релевантные facts/episodes/procedures.
+- Benchmark offline, seeded и versioned; held-out cases/baselines frozen до
+  tuning policies.
+- На reference setup: не менее `+15` percentage points к sliding-window
+  baseline по delayed recall при равном бюджете и без регрессии к `0.6`.
+- Conflict suite показывает `≤2%` contradiction rate; scope/security suite:
+  `0` cross-scope leaks и `0` untrusted records с system-priority.
+- Planning overhead p95 не выше 50 ms на 10k local records без remote I/O и
+  embedding call на зафиксированной reference configuration.
+
+## 1.0.0 release candidates — Stabilize, don't expand
+
+После `0.9.0` начинается API freeze. Новая feature не входит в RC без
+доказательства, что исправляет нарушение обещания `1.0`.
+
+### Работа
+
+- Зафиксировать stable public APIs: `ContextPlan`, `MemoryRecord`,
+  `MemoryEvent`, `MemoryWriter`, `MemoryPolicy` и storage conformance contract.
+- Явно отделить stable API от experimental/research: old `WorkingMemory`,
+  policy experiments и non-core adapters не получают гарантию 1.x молча.
+- Провести stress, concurrency и crash-recovery tests SQLite/Postgres.
+- Добавить fuzz/property tests для scope, lifecycle transitions, deletion и
+  token packing.
+- Провести security review: provenance spoofing, prompt injection, stale
+  records, PII/redaction, authorization и data erasure.
+- Проверить wheels/sdists, Python 3.11–3.13, lazy extras, RU/EN docs и
+  compatibility matrix.
+- Получить три independent reference installs: local Ollama/PDF, framework
+  agent и multi-tenant Postgres.
+
+### RC exit gate
+
+- Нет unresolved P0/P1 в lifecycle, scope, deletion или budget.
+- Migration guide от `0.6` проверен на fixtures/reference apps.
+- Все benchmark/security regression gates зелёные два релизных цикла подряд.
+- Schema migrations имеют forward path и documented rollback; data loss не
+  допускается как побочный эффект обычного upgrade.
+
+## 1.0.0 — Stable Context Runtime
+
+`1.0.0` выходит только тогда, когда можно честно обещать:
+
+- lifecycle и meaning stable core types не ломаются в `1.x` без SemVer major;
+- каждый ContextPlan соблюдает budget и объясняет selection;
+- scope, provenance, trust и deletion имеют documented semantics;
+- durable storage schema versioned, migratable и testable;
+- core остаётся zero-dependency, adapters не определяют модель ядра;
+- пользователь выбирает только нужный слой: context planning, durable memory
+  или framework bridge.
+
+## Сквозные метрики
+
+| Направление | Target к 1.0 |
+|---|---|
+| Budget | 0 violations в deterministic suite |
+| Explainability | 100% plan decisions имеют source, reason и token cost |
+| Safety | 0 cross-scope leaks; default policy не recalls inactive/quarantined records |
+| Deletion | 100% primary/index/derived deletion в integration suite |
+| Memory quality | `+15 pp` vs sliding window на frozen delayed-recall setup |
+| Contradictions | `≤2%` на frozen conflict suite |
+| Runtime | p95 planning `≤50 ms` на 10k local records без remote I/O |
+| Compatibility | Python 3.11–3.13, dependency-free core, documented 0.6 migration |
+| Adoption | 3 independently reviewed reference integrations |
+
+Метрики — regression contracts на зафиксированной reference configuration, а
+не универсальные маркетинговые обещания для любой модели и базы данных.
+
+## Что сознательно остаётся вне 1.0
+
+- массовый каталог provider/vector DB/framework integrations;
+- workflow/orchestration engine, tool runner и planning framework;
+- hosted multi-tenant control plane;
+- universal multimodal/graph RAG;
+- self-modifying memory policies без host confirmation;
+- заявления о «perfect recall» или «infinite context».
+
+Такие вещи могут вернуться после `1.0` только как RFC, если усиливают
+lifecycle, planning или evaluation, а не размывают категорию.

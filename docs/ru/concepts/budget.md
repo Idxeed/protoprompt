@@ -76,6 +76,45 @@ orphaned final output. Анонимный **server-side** tool-search output
 сопоставляется с history call по порядку SDK через эту границу; для client-side
 tool search обязателен `call_id`.
 
+## Объяснимый план и receipt запроса
+
+Для developer UI, audit record или конкурентных запросов используйте новый
+additive planning API, а не mutable compatibility-свойство `last_report` после
+завершения вызова:
+
+```python
+plan = await builder.plan_messages(
+    ContextInput(query=question, system_prompt="Отвечай кратко."),
+    history=history,
+    user_message=question,
+    output_reserve=1_024,
+)
+
+messages = plan.render_messages()
+receipt = plan.receipt
+assert receipt is not None
+print(receipt.input_tokens, "+", receipt.output_reserve_tokens)
+print(plan.explain())
+```
+
+`ContextPlan` immutable и хранит глубокий JSON-compatible snapshot итоговых
+provider messages. `ContextRequestReceipt` сообщает точный результат
+`count_messages()` для этого конкретного запроса, а также totals context,
+сохранённой history, final input, reserve и оставшегося budget. Поздний запрос
+на том же builder не может изменить уже возвращённые plan или receipt.
+
+`plan.explain()` содержит только decision metadata: id блока, origin,
+стабильный reason code, marginal token cost и opaque per-builder reference на
+RAG source/score, если они есть. В нём намеренно нет текста prompt/document,
+final messages, идентификаторов session и raw document id, поэтому его можно
+сериализовать в developer trace.
+
+Для context-only inspection используйте `await builder.plan(inp)` — у такого
+плана нет request receipt, а system context доступен через
+`plan.render_system_prompt()`. Legacy APIs остаются совместимыми: `build()`
+кладёт context-only plan в `ContextOutput.plan`, а `build_messages()` рендерит
+ту же projection, что и `plan_messages()`.
+
 ## Подсчёт токенов
 
 `RegexTokenCounter` по умолчанию быстрый, без зависимостей и

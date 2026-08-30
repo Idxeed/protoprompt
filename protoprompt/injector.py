@@ -4,6 +4,7 @@ import logging
 from time import perf_counter
 
 from protoprompt.context import ContextInput, ContextOutput
+from protoprompt.context_plan import ContextRequestReceipt
 from protoprompt.events import (
     ContextEvent,
     EventDispatcher,
@@ -64,6 +65,7 @@ class ContextBuilder:
             store, llm, scope=self._scope, event_sink=event_sink
         )
         self._last_report: "object | None" = None
+        self._last_receipt: ContextRequestReceipt | None = None
 
     @property
     def last_report(self) -> "object | None":
@@ -71,6 +73,16 @@ class ContextBuilder:
         call (always ``None`` on the non-budgeted base builder).
         """
         return self._last_report
+
+    @property
+    def last_receipt(self) -> ContextRequestReceipt | None:
+        """Latest immutable request receipt, retained only for convenience.
+
+        New concurrent code should use the receipt returned by the individual
+        planning call; this compatibility property can naturally be replaced
+        by a later build on the same builder.
+        """
+        return self._last_receipt
 
     async def build(self, inp: ContextInput) -> ContextOutput:
         started_at = perf_counter()

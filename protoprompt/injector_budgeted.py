@@ -1,11 +1,20 @@
 from __future__ import annotations
 
+import hashlib
 import logging
+import math
+import secrets
 from collections.abc import Mapping
 from dataclasses import dataclass, field, replace
 from time import perf_counter
 
 from protoprompt.context import ContextInput, ContextOutput
+from protoprompt.context_plan import (
+    ContextBlockDecision,
+    ContextPlan,
+    ContextRequestReceipt,
+    snapshot_portable_messages,
+)
 from protoprompt.exceptions import TokenBudgetExceededError
 from protoprompt.events import ContextEvent, EventDispatcher, EventSink, RetrieveEvent, dispatch, elapsed_ms, new_trace_id, scope_id
 from protoprompt.hooks import ContextHooks, fire
@@ -34,6 +43,39 @@ DEFAULT_PRIORITIES: tuple[Priority, ...] = (
     SEGMENT_SESSION,
     SEGMENT_RAG,
 )
+
+# The policy is intentionally explicit in every receipt.  A future policy
+# change can then be compared in offline benchmarks without inferring rules
+# from a package version or an opaque trace.
+CONTEXT_PLAN_POLICY_VERSION = "legacy-budget-greedy-v1"
+
+
+def _snapshot_context_input(inp: ContextInput) -> ContextInput:
+    """Capture caller-owned context before asynchronous retrieval begins.
+
+    ContextInput contains mutable selections such as ``doc_ids``. The budget
+    and retrieval scope must describe one request, even when a caller reuses
+    and changes its input object while embedding or storage access is awaiting.
+    ``profile`` is deliberately left intact because it is rendered before the
+    first await in ``_build``; copying arbitrary profile implementations would
+    change the established public input contract.
+    """
+    return ContextInput(
+        query=inp.query,
+        chat_id=inp.chat_id,
+        system_prompt=inp.system_prompt,
+        doc_ids=list(inp.doc_ids) if inp.doc_ids is not None else None,
+        score_threshold=inp.score_threshold,
+        embedding_model=inp.embedding_model,
+        top_k_rag=inp.top_k_rag,
+        top_k_session=inp.top_k_session,
+        include_rag=inp.include_rag,
+        include_session=inp.include_session,
+        include_profile=inp.include_profile,
+        profile_text=inp.profile_text,
+        profile=inp.profile,
+        language=inp.language,
+    )
 
 
 @dataclass
@@ -806,9 +848,24 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         self._counter: TokenCounter = counter or RegexTokenCounter()
         self._max_tokens = max_tokens
         self._priorities = priorities
+        # A plan may expose a RAG source reference to a developer UI, but it
+        # must never disclose an arbitrary host document id.  This key is
+        # intentionally process-local: references are correlatable only while
+        # this builder lives and cannot be reverse-looked-up from a saved plan.
+        self._plan_source_key = secrets.token_bytes(32)
         if output_reserve < 0:
             raise ValueError("output_reserve must be non-negative")
         self._output_reserve = output_reserve
+
+    def _opaque_plan_source_ref(self, source_id: str) -> str:
+        """Return a stable-per-builder, non-reversible source reference."""
+        digest = hashlib.blake2b(
+            source_id.encode("utf-8", errors="surrogatepass"),
+            key=self._plan_source_key,
+            digest_size=12,
+            person=b"pp-plan-ref",
+        ).hexdigest()
+        return f"source:{digest}"
 
     async def build(self, inp: ContextInput) -> ContextOutput:
         """Assemble context under this builder's default output reserve.
@@ -833,6 +890,12 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             counter=self._counter,
         )
 
+    async def plan(self, inp: ContextInput) -> ContextPlan:
+        """Return an immutable context-only plan without changing build API."""
+        output = await self.build(inp)
+        assert output.plan is not None
+        return output.plan
+
     async def _build(
         self,
         inp: ContextInput,
@@ -842,18 +905,58 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         output_reserve: int,
         counter: TokenCounter,
     ) -> ContextOutput:
+        # This shared boundary serves build(), plan(), and plan_messages().
+        # Take one full snapshot before the first await so a reused ContextInput
+        # cannot change a validated budget, document filter, or session scope.
+        inp = _snapshot_context_input(inp)
         started_at = perf_counter()
         trace_id = new_trace_id()
         report = BudgetReport(
             budget=report_budget,
             output_reserve_tokens=output_reserve,
         )
+        decisions: list[ContextBlockDecision] = []
+
+        def record_decision(
+            block_id: str,
+            origin: str,
+            decision: str,
+            reason: str,
+            token_cost: int = 0,
+            *,
+            candidate_tokens: int | None = None,
+            source_id: str | None = None,
+            score: float | None = None,
+        ) -> None:
+            safe_score = (
+                float(score)
+                if isinstance(score, (int, float)) and math.isfinite(score)
+                else None
+            )
+            decisions.append(ContextBlockDecision(
+                block_id=block_id,
+                origin=origin,
+                decision=decision,  # type: ignore[arg-type]
+                reason=reason,
+                token_cost=token_cost,
+                candidate_tokens=candidate_tokens,
+                source_id=source_id,
+                score=safe_score,
+            ))
 
         system_cost = counter.count(inp.system_prompt) if inp.system_prompt else 0
         if system_cost > max_tokens:
             raise TokenBudgetExceededError(system_cost, max_tokens, SEGMENT_SYSTEM)
         report.section_tokens[SEGMENT_SYSTEM] = system_cost
         fire(self._hooks.on_section_used, SEGMENT_SYSTEM, system_cost)
+        record_decision(
+            SEGMENT_SYSTEM,
+            SEGMENT_SYSTEM,
+            "included" if inp.system_prompt else "excluded",
+            "mandatory" if inp.system_prompt else "not_provided",
+            system_cost,
+            candidate_tokens=system_cost,
+        )
 
         requested_profile = ""
         if inp.include_profile:
@@ -879,12 +982,34 @@ class TokenBudgetedContextBuilder(ContextBuilder):
                 )
                 report.dropped_blocks.append(SEGMENT_PROFILE)
                 fire(self._hooks.on_block_dropped, SEGMENT_PROFILE, "over_budget")
+                record_decision(
+                    SEGMENT_PROFILE,
+                    SEGMENT_PROFILE,
+                    "excluded",
+                    "over_budget",
+                    candidate_tokens=max(0, proposed_cost - used_tokens),
+                )
             else:
                 profile_block = requested_profile
                 profile_cost = proposed_cost - used_tokens
                 used_tokens = proposed_cost
                 report.section_tokens[SEGMENT_PROFILE] = profile_cost
                 fire(self._hooks.on_section_used, SEGMENT_PROFILE, profile_cost)
+                record_decision(
+                    SEGMENT_PROFILE,
+                    SEGMENT_PROFILE,
+                    "included",
+                    "requested",
+                    profile_cost,
+                    candidate_tokens=counter.count(requested_profile),
+                )
+        else:
+            record_decision(
+                SEGMENT_PROFILE,
+                SEGMENT_PROFILE,
+                "excluded",
+                "empty" if inp.include_profile else "not_requested",
+            )
 
         pool: dict[Priority, list[_Candidate]] = {
             SEGMENT_RAG: [],
@@ -945,13 +1070,41 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             if inp.include_rag:
                 report.dropped_blocks.append(SEGMENT_RAG)
                 fire(self._hooks.on_block_dropped, SEGMENT_RAG, "no_budget")
+                record_decision(SEGMENT_RAG, SEGMENT_RAG, "excluded", "no_budget")
             if inp.include_session and inp.chat_id:
                 report.dropped_blocks.append(SEGMENT_SESSION)
                 fire(self._hooks.on_block_dropped, SEGMENT_SESSION, "no_budget")
+                record_decision(
+                    SEGMENT_SESSION, SEGMENT_SESSION, "excluded", "no_budget"
+                )
 
         kept_rag: list[str] = []
         kept_rag_chunks: list[RetrievedChunk] = []
         kept_session: list[str] = []
+
+        def record_candidate(
+            cand: _Candidate,
+            decision: str,
+            reason: str,
+            token_cost: int = 0,
+        ) -> None:
+            record_decision(
+                cand.label,
+                cand.section,
+                decision,
+                reason,
+                token_cost,
+                candidate_tokens=counter.count(cand.text),
+                # Neither a session identifier nor arbitrary host document id
+                # may escape through ``plan.explain()``. RAG gets an opaque
+                # reference that is stable only for this builder lifetime.
+                source_id=(
+                    self._opaque_plan_source_ref(cand.chunk.doc_id)
+                    if cand.chunk is not None
+                    else None
+                ),
+                score=cand.chunk.score if cand.chunk is not None else None,
+            )
 
         def proposed_total(cand: _Candidate, text: str) -> int:
             rag = [*kept_rag, text] if cand.section == SEGMENT_RAG else kept_rag
@@ -979,11 +1132,18 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             used_tokens = total
             report.section_tokens[cand.label] = incremental_cost
             fire(self._hooks.on_section_used, cand.label, incremental_cost)
+            record_candidate(
+                cand,
+                "included" if text == cand.text else "truncated",
+                "selected" if text == cand.text else "truncated_to_budget",
+                incremental_cost,
+            )
 
         def drop(cand: _Candidate, reason: str) -> None:
             if cand.label not in report.dropped_blocks:
                 report.dropped_blocks.append(cand.label)
                 fire(self._hooks.on_block_dropped, cand.label, reason)
+                record_candidate(cand, "excluded", reason)
 
         active_sections = [
             section
@@ -1020,11 +1180,41 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             if stop_all:
                 break
 
+        # A custom priority tuple may intentionally omit a retrieval layer.
+        # Keep that choice visible in the plan without changing the legacy
+        # report/hook semantics for such candidates.
+        recorded_candidate_ids = {
+            decision.block_id
+            for decision in decisions
+            if decision.origin in (SEGMENT_RAG, SEGMENT_SESSION)
+        }
+        for section, candidates in pool.items():
+            for cand in candidates:
+                if cand.label not in recorded_candidate_ids:
+                    record_candidate(cand, "excluded", "policy_excluded")
+
+        if not inp.include_rag and not pool[SEGMENT_RAG]:
+            record_decision(SEGMENT_RAG, SEGMENT_RAG, "excluded", "not_requested")
+        if (not inp.include_session or not inp.chat_id) and not pool[SEGMENT_SESSION]:
+            record_decision(
+                SEGMENT_SESSION, SEGMENT_SESSION, "excluded", "not_requested"
+            )
+
         system_prompt = self._assemble_prompt(
             inp.system_prompt, profile_block, kept_rag, kept_session, inp.language
         )
         report.used_tokens = counter.count(system_prompt)
         report.remaining_tokens = max_tokens - report.used_tokens
+        plan = ContextPlan(
+            schema_version=1,
+            trace_id=trace_id,
+            policy_id=CONTEXT_PLAN_POLICY_VERSION,
+            system_prompt=system_prompt,
+            rag_blocks=tuple(kept_rag),
+            session_blocks=tuple(kept_session),
+            profile_used=bool(profile_block),
+            decisions=tuple(decisions),
+        )
 
         output = ContextOutput(
             system_prompt=system_prompt,
@@ -1033,6 +1223,7 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             session_blocks=kept_session,
             profile_used=bool(profile_block),
             budget_report=report,
+            plan=plan,
         )
         dispatch(self._event_sink, ContextEvent(
             action="completed",
@@ -1091,7 +1282,7 @@ class TokenBudgetedContextBuilder(ContextBuilder):
                 high = mid - 1
         return " ".join(words[:low]) + "…" if low else ""
 
-    async def build_messages(
+    async def plan_messages(
         self,
         inp: ContextInput,
         history: list[dict] | None = None,
@@ -1100,8 +1291,8 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         final_messages: list[dict] | None = None,
         output_reserve: int | None = None,
         counter: TokenCounter | None = None,
-    ) -> list[dict]:
-        """Build a request that cannot exceed the configured token budget.
+    ) -> ContextPlan:
+        """Plan a provider request that cannot exceed the token budget.
 
         The budget covers the rendered system context, every retained history
         item (including tool messages), final user or ``final_messages``
@@ -1109,6 +1300,8 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         ``output_reserve`` can override the builder default for one request.
         A caller-supplied final turn is never silently truncated; an oversized
         turn raises :class:`TokenBudgetExceededError` before retrieval happens.
+        The returned plan owns a frozen copy of the rendered messages and a
+        request-scoped receipt; it is safe to keep after later builder calls.
         """
         if user_message is not None and final_messages is not None:
             raise ValueError("pass either user_message or final_messages, not both")
@@ -1121,10 +1314,13 @@ class TokenBudgetedContextBuilder(ContextBuilder):
 
         tail_messages: list[dict] = []
         if final_messages is not None:
-            tail_messages = list(final_messages)
+            tail_messages = snapshot_portable_messages(final_messages)
         elif user_message:
             tail_messages = [{"role": "user", "content": user_message}]
-        history_items = list(history or [])
+        # Capture a recursive JSON snapshot before the first await. A caller
+        # may otherwise mutate an embedded tool call after dependency
+        # validation but before this request is rendered.
+        history_items = snapshot_portable_messages(list(history or []))
         dependency_history, dependency_start, dependency_is_valid = (
             _tail_history_dependency(history_items, tail_messages)
         )
@@ -1168,10 +1364,49 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         )
         report = out.budget_report
         assert report is not None
+        base_plan = out.plan
+        assert base_plan is not None
+        context_tokens = report.used_tokens
+        request_decisions = list(base_plan.decisions)
+        request_decisions.append(ContextBlockDecision(
+            block_id="output_reserve",
+            origin="output_reserve",
+            decision="reserved",
+            reason="configured",
+            token_cost=reserve,
+        ))
+        request_decisions.append(ContextBlockDecision(
+            block_id=f"new_input[0:{len(tail_messages)}]",
+            origin="new_input",
+            decision="included" if tail_messages else "excluded",
+            reason="mandatory" if tail_messages else "not_provided",
+            token_cost=tail_tokens,
+            candidate_tokens=tail_tokens,
+        ))
+        if dependency_history:
+            request_decisions.append(ContextBlockDecision(
+                block_id=f"history[{dependency_start}:{len(history_items)}]",
+                origin="history",
+                decision="reserved",
+                reason="required_tool_dependency",
+                token_cost=dependency_tokens,
+                candidate_tokens=dependency_tokens,
+            ))
 
         messages: list[dict] = []
         if out.system_prompt:
             messages.append({"role": "system", "content": out.system_prompt})
+        rendered_context_tokens = active_counter.count_messages(messages)
+        if messages:
+            framing_tokens = max(0, rendered_context_tokens - context_tokens)
+            if framing_tokens:
+                request_decisions.append(ContextBlockDecision(
+                    block_id="system_message_framing",
+                    origin=SEGMENT_SYSTEM,
+                    decision="reserved",
+                    reason="provider_framing",
+                    token_cost=framing_tokens,
+                ))
 
         fixed_tokens = (
             active_counter.count_messages(messages)
@@ -1194,11 +1429,22 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         if selection_history:
             spent = 0
             for group, indices in reversed(_history_groups(selection_history)):
+                group_label = (
+                    f"history[{indices[0]}:{indices[-1] + 1}]"
+                    if indices
+                    else "history"
+                )
                 if not group:
                     for index in indices:
                         label = f"history[{index}]"
                         report.dropped_blocks.append(label)
                         fire(self._hooks.on_block_dropped, label, "tool_pair_incomplete")
+                    request_decisions.append(ContextBlockDecision(
+                        block_id=group_label,
+                        origin="history",
+                        decision="excluded",
+                        reason="tool_pair_incomplete",
+                    ))
                     continue
                 cost = active_counter.count_messages(group)
                 if spent + cost > remaining:
@@ -1206,9 +1452,24 @@ class TokenBudgetedContextBuilder(ContextBuilder):
                         label = f"history[{index}]"
                         report.dropped_blocks.append(label)
                         fire(self._hooks.on_block_dropped, label, "over_budget")
+                    request_decisions.append(ContextBlockDecision(
+                        block_id=group_label,
+                        origin="history",
+                        decision="excluded",
+                        reason="over_budget",
+                        candidate_tokens=cost,
+                    ))
                     continue
                 spent += cost
                 kept_history[0:0] = group
+                request_decisions.append(ContextBlockDecision(
+                    block_id=group_label,
+                    origin="history",
+                    decision="included",
+                    reason="selected",
+                    token_cost=cost,
+                    candidate_tokens=cost,
+                ))
             report.history_kept = len(kept_history) + len(dependency_history)
             report.history_tokens = spent + dependency_tokens
             remaining -= spent
@@ -1230,8 +1491,51 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         report.used_tokens = message_tokens
         report.user_message_tokens = tail_tokens
         report.remaining_tokens = self._max_tokens - total_tokens
+        receipt = ContextRequestReceipt(
+            trace_id=base_plan.trace_id,
+            max_tokens=self._max_tokens,
+            input_tokens=message_tokens,
+            output_reserve_tokens=reserve,
+            remaining_tokens=report.remaining_tokens,
+            context_tokens=rendered_context_tokens,
+            history_tokens=report.history_tokens,
+            final_input_tokens=tail_tokens,
+        )
+        plan = ContextPlan.with_messages(
+            base_plan,
+            messages,
+            receipt,
+            tuple(request_decisions),
+        )
         self._last_report = report
-        return messages
+        self._last_receipt = receipt
+        return plan
+
+    async def build_messages(
+        self,
+        inp: ContextInput,
+        history: list[dict] | None = None,
+        user_message: str | None = None,
+        *,
+        final_messages: list[dict] | None = None,
+        output_reserve: int | None = None,
+        counter: TokenCounter | None = None,
+    ) -> list[dict]:
+        """Render the immutable :meth:`plan_messages` projection.
+
+        This keeps the legacy return type intact. New code that needs an
+        explanation or concurrent-safe accounting should call
+        :meth:`plan_messages` directly.
+        """
+        plan = await self.plan_messages(
+            inp,
+            history,
+            user_message,
+            final_messages=final_messages,
+            output_reserve=output_reserve,
+            counter=counter,
+        )
+        return plan.render_messages()
 
     def _truncate_to_budget(self, text: str, budget: int) -> str:
         """Cut ``text`` so it fits into ``budget`` tokens, ending on a

@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Additive `ContextPlan`, `ContextBlockDecision`, and
+  `ContextRequestReceipt` contracts for the budgeted builder. `plan()` returns
+  an immutable context-only decision snapshot; `plan_messages()` returns an
+  immutable, deep-copied provider request plus exact request accounting.
+- Content-free, JSON-safe `ContextPlan.explain()` metadata for developer UIs,
+  audit trails, and deterministic context-selection regression tests.
+
+### Changed
+- `TokenBudgetedContextBuilder.build()` now attaches its context-only plan as
+  `ContextOutput.plan`. `build_messages()` retains its existing list return
+  type and renders the equivalent `plan_messages()` projection.
+- README and roadmap now state the focused product direction: reliable agent
+  memory under a fixed, explainable context budget.
+
+### Security
+- Ignore local reference-app data, runtime key/token/pid files, SQLite WAL
+  sidecars, and `node_modules` to prevent accidental commits of credentials,
+  user documents, vector indexes, or dependency trees.
+- Snapshot mutable `ContextInput` selections before asynchronous retrieval, so
+  an in-flight caller cannot replace a validated prompt, document filter, or
+  session identifier mid-request. Opaque RAG provenance also handles every
+  Python string identifier without crashing on an unpaired surrogate.
+
 ## [0.6.1] - 2026-08-30
 
 ### Fixed

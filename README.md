@@ -1,11 +1,13 @@
 # protoprompt
 
 [![CI](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/Idxeed/protoprompt/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/protoprompt.svg)](https://pypi.org/project/protoprompt/)
 [![Python 3.11–3.13](https://img.shields.io/badge/python-3.11%E2%80%933.13-blue)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
 
-**Контекстный движок для LLM-приложений:** RAG, память диалога, профиль
-пользователя и строгий токен-бюджет через единый Python API.
+**Надёжная память агента в фиксированном контекстном окне.** ProtoPrompt —
+embeddable context runtime: RAG, память диалога, профиль пользователя и
+объяснимый строгий token budget через единый Python API.
 
 [Документация](https://idxeed.github.io/protoprompt/ru/) ·
 [English](README.en.md) ·
@@ -32,14 +34,15 @@ LLM обычно нужна не просто история чата, а нес
 
 `protoprompt` собирает эти слои в одном месте и возвращает не только готовый
 промпт, но и provenance — какие RAG-чанки, блоки памяти и данные профиля были
-использованы.
+использованы. Наша ставка до `1.0`: **хранить можно долго, но в активный
+контекст попадёт только объяснимый набор, который действительно помещается**.
 
 | Возможность | Что входит |
 |---|---|
 | RAG | чанкинг, индексация, top-k поиск, фильтры, reranking и provenance |
 | Память сессии | эвристическое или LLM-сжатие длинных диалогов |
 | Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
-| Токен-бюджет | жёсткий лимит, приоритеты слоёв и отчёт об обрезке |
+| Токен-бюджет | жёсткий лимит, приоритеты слоёв, `ContextPlan`/receipt и объяснение обрезки |
 | Хранилища | in-memory, SQLite, ChromaDB, Qdrant, pgvector, Elasticsearch/OpenSearch и Redis services |
 | LLM и embeddings | OpenAI, Anthropic, Google GenAI, Bedrock, Ollama и локальные модели |
 | Секреты | encrypted SQLite, AWS Secrets Manager и GCP Secret Manager |
