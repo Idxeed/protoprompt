@@ -1,9 +1,9 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.14.0` добавляет bounded backend-neutral property/state-machine
-> conformance для Ledger v6: scope, lifecycle, deletion/source revocation и
-> exact token/byte recall accounting проверяются на SQLite и PostgreSQL без
-> расширения public API; следующий этап — остальные RC-gates к `1.0.0`.
+> Статус: `0.15.0` добавляет frozen dual-backend semantic evidence для strict
+> Ledger recall: один content-free synthetic fixture обязателен к exact parity
+> на SQLite и PostgreSQL. Это усиливает release gate без расширения public API;
+> следующий этап — остальные RC-gates к `1.0.0`.
 > Обновлён: 2026-08-30.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
@@ -424,6 +424,28 @@ authorization layer, PostgreSQL migration toolkit, performance claim или
 универсальный fuzzing service или claim о 10k-record runtime. Отдельный v1
 benchmark и reference hardware manifest остаются необходимы для target
 planning p95.
+
+## v1.0 evidence protocol — dual-backend semantic recall
+
+Это evidence gate для будущей стабильной линии, но **не** объявление package
+`1.0.0`. Он фиксирует один narrow synthetic selection fixture и запрещает
+подменять его claim-ами о model quality, latency, throughput, 10k runtime или
+общем преимуществе над другими фреймворками.
+
+- [x] Зафиксировать 18-case fixture для 100/500/1000 active records,
+  budgets 1k/2k/4k и lifecycle `active`/`superseded`/`retracted`/
+  `source_revoked`.
+- [x] Прогонять тот же strict admission/recall contract на SQLite и PostgreSQL,
+  нормализовать только backend ID и требовать exact frozen semantic parity.
+- [x] Связать `suite.json`, content-free `expected.json` и `manifest.json`
+  canonical SHA-256; добавить в CI/publish gate и sdist proof.
+- [x] Проверять tenant/user/thread isolation, source-revocation erasure,
+  whole-record token/UTF-8 byte budgets, receipt reconciliation и
+  content-free `explain()` в этой fixed matrix.
+- [ ] Добавить отдельный raw performance protocol (10k corpus, warm-up,
+  repetitions, p50/p95, reference hardware/software manifest) до любого
+  runtime claim.
+- [ ] Добавить held-out quality/conflict protocol до целей `+15 pp` и `≤2%`.
 
 ## 1.0.0 release candidates — Stabilize, don't expand
 

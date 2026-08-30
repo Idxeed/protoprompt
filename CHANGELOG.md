@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-08-30
+
+### Added
+- Frozen `v1.0` Ledger recall evidence protocol: a content-free 18-case
+  synthetic selection fixture covering delayed recall, lifecycle transitions,
+  scope isolation, token/UTF-8-byte packing, receipt reconciliation, and
+  explanation boundaries.
+- Dual-backend verification for that protocol. A verified result requires
+  fresh SQLite and PostgreSQL runs to match one normalized expected report;
+  fixture and expected hashes are bound by a manifest and run in integration
+  and release CI.
+
+### Security
+- Source-revocation evidence now asserts durable retraction, payload/source
+  metadata scrubbing, and exclusion from active selection rather than merely
+  checking a lifecycle marker is absent from a rendered context.
+
 ## [0.14.0] - 2026-08-30
 
 ### Added

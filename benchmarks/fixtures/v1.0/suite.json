@@ -1,0 +1,190 @@
+{
+  "schema_version": 1,
+  "suite_version": "v1.0",
+  "suite_kind": "ledger_dual_backend_recall",
+  "suite_id": "frozen-ledger-recall-evidence-v1",
+  "candidate_id": "protoprompt_ledger_recall_strict_v1",
+  "baseline_id": "tail-active-greedy-json-v1",
+  "counter_id": "regex-token-counter-v1",
+  "policy": {
+    "active_read_limit": 1000,
+    "allowed_kinds": [
+      "fact",
+      "decision",
+      "preference"
+    ],
+    "candidate_limit": 1000,
+    "candidate_scan_byte_budget": 1048576,
+    "confidence_weight": 10.0,
+    "minimum_confidence": 0.5,
+    "policy_id": "ledger-recall-evidence-strict-v1",
+    "recency_weight": 1.0,
+    "relevance_weight": 100.0,
+    "require_admission_audit": true,
+    "schema_version": 1
+  },
+  "tail_window_records": 20,
+  "history_depths": [
+    100,
+    500,
+    1000
+  ],
+  "foreign_scope_axes": {
+    "100": "tenant",
+    "500": "user",
+    "1000": "thread"
+  },
+  "corpus": {
+    "query": "durable beacon recall",
+    "target_template": "{marker} durable beacon recall verified archival fact depth {depth}",
+    "replacement_template": "{marker} durable beacon recall corrected archival fact depth {depth}",
+    "filler_template": "filler archival transcript depth {depth} item {index}",
+    "foreign_template": "{marker} durable beacon recall foreign scope sentinel depth {depth}"
+  },
+  "cases": [
+    {
+      "id": "active-depth-100-budget-1000",
+      "history_depth": 100,
+      "lifecycle": "active",
+      "token_budget": 1000,
+      "byte_budget": 16384,
+      "recall_denominator": true
+    },
+    {
+      "id": "active-depth-100-budget-2000",
+      "history_depth": 100,
+      "lifecycle": "active",
+      "token_budget": 2000,
+      "byte_budget": 32768,
+      "recall_denominator": true
+    },
+    {
+      "id": "active-depth-100-budget-4000",
+      "history_depth": 100,
+      "lifecycle": "active",
+      "token_budget": 4000,
+      "byte_budget": 65536,
+      "recall_denominator": true
+    },
+    {
+      "id": "superseded-depth-100-budget-1000",
+      "history_depth": 100,
+      "lifecycle": "superseded",
+      "token_budget": 1000,
+      "byte_budget": 16384,
+      "recall_denominator": false
+    },
+    {
+      "id": "retracted-depth-100-budget-2000",
+      "history_depth": 100,
+      "lifecycle": "retracted",
+      "token_budget": 2000,
+      "byte_budget": 32768,
+      "recall_denominator": false
+    },
+    {
+      "id": "source-revoked-depth-100-budget-4000",
+      "history_depth": 100,
+      "lifecycle": "source_revoked",
+      "token_budget": 4000,
+      "byte_budget": 65536,
+      "recall_denominator": false
+    },
+    {
+      "id": "active-depth-500-budget-1000",
+      "history_depth": 500,
+      "lifecycle": "active",
+      "token_budget": 1000,
+      "byte_budget": 16384,
+      "recall_denominator": true
+    },
+    {
+      "id": "active-depth-500-budget-2000",
+      "history_depth": 500,
+      "lifecycle": "active",
+      "token_budget": 2000,
+      "byte_budget": 32768,
+      "recall_denominator": true
+    },
+    {
+      "id": "active-depth-500-budget-4000",
+      "history_depth": 500,
+      "lifecycle": "active",
+      "token_budget": 4000,
+      "byte_budget": 65536,
+      "recall_denominator": true
+    },
+    {
+      "id": "superseded-depth-500-budget-1000",
+      "history_depth": 500,
+      "lifecycle": "superseded",
+      "token_budget": 1000,
+      "byte_budget": 16384,
+      "recall_denominator": false
+    },
+    {
+      "id": "retracted-depth-500-budget-2000",
+      "history_depth": 500,
+      "lifecycle": "retracted",
+      "token_budget": 2000,
+      "byte_budget": 32768,
+      "recall_denominator": false
+    },
+    {
+      "id": "source-revoked-depth-500-budget-4000",
+      "history_depth": 500,
+      "lifecycle": "source_revoked",
+      "token_budget": 4000,
+      "byte_budget": 65536,
+      "recall_denominator": false
+    },
+    {
+      "id": "active-depth-1000-budget-1000",
+      "history_depth": 1000,
+      "lifecycle": "active",
+      "token_budget": 1000,
+      "byte_budget": 16384,
+      "recall_denominator": true
+    },
+    {
+      "id": "active-depth-1000-budget-2000",
+      "history_depth": 1000,
+      "lifecycle": "active",
+      "token_budget": 2000,
+      "byte_budget": 32768,
+      "recall_denominator": true
+    },
+    {
+      "id": "active-depth-1000-budget-4000",
+      "history_depth": 1000,
+      "lifecycle": "active",
+      "token_budget": 4000,
+      "byte_budget": 65536,
+      "recall_denominator": true
+    },
+    {
+      "id": "superseded-depth-1000-budget-1000",
+      "history_depth": 1000,
+      "lifecycle": "superseded",
+      "token_budget": 1000,
+      "byte_budget": 16384,
+      "recall_denominator": false
+    },
+    {
+      "id": "retracted-depth-1000-budget-2000",
+      "history_depth": 1000,
+      "lifecycle": "retracted",
+      "token_budget": 2000,
+      "byte_budget": 32768,
+      "recall_denominator": false
+    },
+    {
+      "id": "source-revoked-depth-1000-budget-4000",
+      "history_depth": 1000,
+      "lifecycle": "source_revoked",
+      "token_budget": 4000,
+      "byte_budget": 65536,
+      "recall_denominator": false
+    }
+  ]
+}

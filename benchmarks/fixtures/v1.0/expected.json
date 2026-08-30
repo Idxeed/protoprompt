@@ -1,0 +1,634 @@
+{
+  "fixture_sha256": "a97394373d757b204f8f037ef19b6cb8c2817aca0fc681a3db4caacaee8bdc57",
+  "report": {
+    "baseline_id": "tail-active-greedy-json-v1",
+    "benchmark_kind": "ledger_dual_backend_recall",
+    "candidate_id": "protoprompt_ledger_recall_strict_v1",
+    "fixture_sha256": "a97394373d757b204f8f037ef19b6cb8c2817aca0fc681a3db4caacaee8bdc57",
+    "normalized_backend_report": {
+      "backend_id": "normalized",
+      "baseline_id": "tail-active-greedy-json-v1",
+      "benchmark_kind": "ledger_dual_backend_recall",
+      "candidate_id": "protoprompt_ledger_recall_strict_v1",
+      "cases": [
+        {
+          "id": "active-depth-100-budget-1000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 40,
+              "used_bytes": 3017,
+              "used_tokens": 987
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1527,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "active-depth-100-budget-2000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 82,
+              "used_bytes": 6083,
+              "used_tokens": 1995
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1527,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "active-depth-100-budget-4000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 100,
+              "used_bytes": 7388,
+              "used_tokens": 2427
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1527,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "superseded-depth-100-budget-1000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 40,
+              "used_bytes": 3023,
+              "used_tokens": 987
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1563,
+              "used_tokens": 507
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "retracted-depth-100-budget-2000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 82,
+              "used_bytes": 6053,
+              "used_tokens": 1993
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1527,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "source-revoked-depth-100-budget-4000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 99,
+              "used_bytes": 7285,
+              "used_tokens": 2401
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1527,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "active-depth-500-budget-1000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 40,
+              "used_bytes": 3056,
+              "used_tokens": 987
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1547,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "active-depth-500-budget-2000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 82,
+              "used_bytes": 6164,
+              "used_tokens": 1995
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1547,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "active-depth-500-budget-4000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 165,
+              "used_bytes": 12306,
+              "used_tokens": 3987
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1547,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "superseded-depth-500-budget-1000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 40,
+              "used_bytes": 3062,
+              "used_tokens": 987
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1582,
+              "used_tokens": 507
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "retracted-depth-500-budget-2000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 82,
+              "used_bytes": 6135,
+              "used_tokens": 1993
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1547,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "source-revoked-depth-500-budget-4000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 165,
+              "used_bytes": 12277,
+              "used_tokens": 3985
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1547,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "active-depth-1000-budget-1000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 40,
+              "used_bytes": 3097,
+              "used_tokens": 987
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1567,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "active-depth-1000-budget-2000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 82,
+              "used_bytes": 6247,
+              "used_tokens": 1995
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1567,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "active-depth-1000-budget-4000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": true,
+            "passed_checks": 10,
+            "recall_denominator": true,
+            "status": "ok",
+            "strict": {
+              "selected_count": 165,
+              "used_bytes": 12472,
+              "used_tokens": 3987
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1567,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "superseded-depth-1000-budget-1000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 40,
+              "used_bytes": 3103,
+              "used_tokens": 987
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1603,
+              "used_tokens": 507
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "retracted-depth-1000-budget-2000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 82,
+              "used_bytes": 6217,
+              "used_tokens": 1993
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1567,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        },
+        {
+          "id": "source-revoked-depth-1000-budget-4000",
+          "result": {
+            "check_count": 10,
+            "checks": {
+              "explain_is_content_free": true,
+              "foreign_scope_excluded": true,
+              "same_active_eligible_universe": true,
+              "source_revocation_enforced": true,
+              "strict_budget_fits": true,
+              "strict_lifecycle_selection": true,
+              "strict_receipt_reconciles": true,
+              "tail_budget_fits": true,
+              "tail_lifecycle_selection": true,
+              "whole_records_only": true
+            },
+            "ledger_target_available": false,
+            "passed_checks": 10,
+            "recall_denominator": false,
+            "status": "ok",
+            "strict": {
+              "selected_count": 165,
+              "used_bytes": 12442,
+              "used_tokens": 3985
+            },
+            "tail": {
+              "selected_count": 20,
+              "used_bytes": 1567,
+              "used_tokens": 505
+            },
+            "tail_target_available": false
+          }
+        }
+      ],
+      "fixture_sha256": "a97394373d757b204f8f037ef19b6cb8c2817aca0fc681a3db4caacaee8bdc57",
+      "report_schema_version": 1,
+      "suite_version": "v1.0",
+      "summary": {
+        "all_pass": true,
+        "case_count": 18,
+        "passing_case_count": 18,
+        "selection_recall_in_frozen_synthetic_corpus": {
+          "delta_pp": 100.0,
+          "denominator": 9,
+          "ledger_hits": 9,
+          "ledger_percent": 100.0,
+          "tail_hits": 0,
+          "tail_percent": 0.0
+        }
+      }
+    },
+    "report_schema_version": 1,
+    "required_backend_ids": [
+      "postgres_v6",
+      "sqlite_v6"
+    ],
+    "suite_version": "v1.0"
+  },
+  "report_schema_version": 1
+}

@@ -89,6 +89,11 @@ jobs:
       - name: Run integration tests
         run: pytest -m integration -v
 
+      - name: Verify frozen dual-backend Ledger recall evidence
+        run: >-
+          python scripts/run_memory_benchmark.py --suite v1.0
+          --ledger-backend all --verify
+
   memory-benchmark:
     name: offline memory benchmark
     runs-on: ubuntu-latest
@@ -187,6 +192,10 @@ jobs:
                   "benchmarks/ledger_checkpoint_benchmark.py",
                   "benchmarks/fixtures/v0.3/suite.json",
                   "benchmarks/fixtures/v0.3/expected.json",
+                  "benchmarks/ledger_recall_evidence_benchmark.py",
+                  "benchmarks/fixtures/v1.0/suite.json",
+                  "benchmarks/fixtures/v1.0/expected.json",
+                  "benchmarks/fixtures/v1.0/manifest.json",
                   "docs/en/migration-0.6.md",
                   "docs/ru/migration-0.6.md",
               }

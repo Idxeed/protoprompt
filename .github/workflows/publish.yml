@@ -99,11 +99,12 @@ jobs:
       - name: Verify PostgreSQL Ledger release conformance
         run: python -m pytest -q tests/integration/test_postgres_memory_ledger.py -m integration
 
-      - name: Verify frozen semantic memory, composition, and checkpoint baselines
+      - name: Verify frozen semantic memory and dual-backend Ledger evidence
         run: |
           python scripts/run_memory_benchmark.py --suite v0.1 --verify
           python scripts/run_memory_benchmark.py --suite v0.2 --verify
           python scripts/run_memory_benchmark.py --suite v0.3 --verify
+          python scripts/run_memory_benchmark.py --suite v1.0 --ledger-backend all --verify
 
       - name: Build strict Russian and English documentation
         run: python scripts/build_docs.py --clean

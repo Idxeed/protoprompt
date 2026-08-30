@@ -8,7 +8,7 @@
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.md) · [v0.14 launch kit](LAUNCH-v0.14.md)
+[Русская версия](README.md) · [v0.15 launch kit](LAUNCH-v0.15.md)
 
 **Reliable agent memory under a fixed context budget.** ProtoPrompt is an
 embeddable context runtime for LLM applications. The core combines **RAG over
@@ -75,6 +75,11 @@ v0.14 is RC hardening without a public API expansion: a bounded
 property/state-machine gate checks scope, lifecycle, deletion/source
 revocation, and exact Ledger token/byte accounting on SQLite and PostgreSQL.
 It is not a latency, throughput, or model-quality benchmark.
+
+v0.15 adds a frozen dual-backend evidence protocol for strict Ledger
+selection: one content-free synthetic fixture must produce the same semantics
+on SQLite and PostgreSQL. It makes no model-quality, general-recall, latency,
+throughput, or package-`1.0.0` claim.
 
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of
@@ -280,6 +285,19 @@ python scripts/run_memory_benchmark.py --suite v0.1 --verify
 python scripts/run_memory_benchmark.py --suite v0.2 --verify
 python scripts/run_memory_benchmark.py --suite v0.3 --verify
 ```
+
+The separate v1 evidence gate verifies one strict Ledger fixture on both
+SQLite and PostgreSQL. It requires a local PostgreSQL service and
+`protoprompt[postgres]`; one backend cannot be presented as a verified result:
+
+```bash
+export PROTOPROMPT_POSTGRES_DSN=postgresql://protoprompt:protoprompt@localhost:5432/protoprompt_test
+python scripts/run_memory_benchmark.py --suite v1.0 --ledger-backend all --verify
+```
+
+`v1.0` is the evidence-protocol version, not an already released package
+`1.0.0`. It measures only frozen synthetic-fixture selection semantics, not
+model quality, latency, or throughput.
 
 The versioned fixtures, fixed baselines, and interpretation boundaries are in
 [`benchmarks/README.md`](benchmarks/README.md). CI runs this gate alongside

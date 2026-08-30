@@ -119,6 +119,41 @@ checkpoint secret, or scope correlation ID. This is a PASS/FAIL contract for a
 narrow host-owned selection continuation, not a claim of agent-state recovery,
 lease/exactly-once behavior, or checkpointed workflow execution.
 
+## What v1.0 covers — frozen dual-backend Ledger recall evidence
+
+`v1.0` is the version of this **evidence protocol**, not a claim that the
+package has already shipped `1.0.0`. It is a narrow, deterministic regression
+gate for the strict Ledger read path on both durable implementations:
+SQLite and PostgreSQL. It does not call a model, embedding service, provider,
+or remote retrieval service; PostgreSQL is a local durable-storage dependency.
+
+It requires a local PostgreSQL service and the optional dependency:
+
+```bash
+pip install -e ".[postgres,dev]"
+export PROTOPROMPT_POSTGRES_DSN=postgresql://protoprompt:protoprompt@localhost:5432/protoprompt_test
+python scripts/run_memory_benchmark.py --suite v1.0 --ledger-backend all --verify
+```
+
+`--verify` deliberately refuses a single backend. It runs the same fixture in
+fresh SQLite and PostgreSQL storage, normalizes only the backend identifier,
+and requires both reports to equal the same frozen expected outcome. The
+fixture SHA-256 and expected-report SHA-256 are bound by
+[`fixtures/v1.0/manifest.json`](fixtures/v1.0/manifest.json).
+
+The fixed matrix contains 18 cases: delayed active recall at 100, 500, and
+1,000 records under 1k/2k/4k token and independent byte budgets; then
+superseded, retracted, and source-revoked lifecycle cases for each depth. It
+also tests tenant, user, and thread isolation across the three depths,
+whole-record token/byte packing, plan/resolve receipt reconciliation, and
+content-free explanations.
+
+Its reported `9/9` strict-Ledger versus `0/9` 20-record-tail result is only
+**target availability in this named, synthetic lexical fixture**. The query
+contains the target terms while fillers intentionally do not. It is neither
+model-answer quality, general semantic recall, latency, throughput, a
+10k-record runtime result, nor a comparison with another framework.
+
 ## Fixture policy
 
 `fixtures/v0.1/suite.json` is immutable. It records the schema, embedding
@@ -191,3 +226,38 @@ Fixture, frozen expected report и rendered reports не содержат payloa
 checkpoint secret или scope correlation ID. Это PASS/FAIL контракт для узкого
 host-owned continuation выбора, не заявление о recovery agent state,
 lease/exactly-once behavior или checkpointed workflow execution.
+
+## Что проверяет v1.0 — frozen dual-backend Ledger recall evidence
+
+`v1.0` здесь — версия **протокола доказательств**, а не заявление о выходе
+пакета `1.0.0`. Это узкий детерминированный regression gate strict Ledger
+read-path сразу для двух durable реализаций: SQLite и PostgreSQL. Он не
+вызывает модель, embedding-service, provider или remote retrieval service;
+PostgreSQL остаётся локальной durable-storage зависимостью.
+
+Нужны локальный PostgreSQL и optional-зависимость:
+
+```powershell
+pip install -e ".[postgres,dev]"
+$env:PROTOPROMPT_POSTGRES_DSN = "postgresql://protoprompt:protoprompt@localhost:5432/protoprompt_test"
+python scripts/run_memory_benchmark.py --suite v1.0 --ledger-backend all --verify
+```
+
+`--verify` намеренно не принимает один backend: один и тот же fixture
+запускается в fresh SQLite и PostgreSQL storage, из отчётов нормализуется
+только ID backend-а, и оба обязаны совпасть с одним frozen expected. SHA-256
+fixture и expected-report скреплены
+[`fixtures/v1.0/manifest.json`](fixtures/v1.0/manifest.json).
+
+Фиксированная матрица содержит 18 cases: delayed active recall на 100, 500 и
+1 000 records при token budget 1k/2k/4k и независимом byte budget; затем для
+каждой глубины идут lifecycle cases `superseded`, `retracted` и
+`source_revoked`. Она также проверяет tenant/user/thread isolation по трём
+глубинам, whole-record token/byte packing, plan/resolve receipt reconciliation
+и content-free explain.
+
+Результат `9/9` strict Ledger против `0/9` 20-record tail означает только
+**доступность target в этом именованном synthetic lexical fixture**: query
+содержит слова target, а fillers намеренно их не содержат. Это не качество
+ответов модели, не общее semantic recall, не latency/throughput, не результат
+на 10k records и не сравнение с другим framework.

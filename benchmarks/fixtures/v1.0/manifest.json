@@ -1,0 +1,11 @@
+{
+  "backend_ids": [
+    "postgres_v6",
+    "sqlite_v6"
+  ],
+  "expected_sha256": "426642eb66e69f4c91b0e725197810fecddd2039b0e9f2c16a1380b0ee46c35f",
+  "fixture_sha256": "a97394373d757b204f8f037ef19b6cb8c2817aca0fc681a3db4caacaee8bdc57",
+  "schema_version": 1,
+  "suite_kind": "ledger_dual_backend_recall",
+  "suite_version": "v1.0"
+}

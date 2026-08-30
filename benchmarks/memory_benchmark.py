@@ -38,6 +38,13 @@ from benchmarks.ledger_checkpoint_benchmark import (
     run_ledger_checkpoint_suite,
     validate_ledger_checkpoint_suite,
 )
+from benchmarks.ledger_recall_evidence_benchmark import (
+    LedgerRecallEvidenceBackendError,
+    render_ledger_recall_evidence_markdown,
+    run_ledger_recall_evidence_suite,
+    validate_ledger_recall_evidence_manifest,
+    validate_ledger_recall_evidence_suite,
+)
 
 
 REPORT_SCHEMA_VERSION = 1
@@ -164,6 +171,9 @@ def _validate_suite(suite: Mapping[str, Any]) -> None:
         return
     if suite.get("suite_kind") == "ledger_sealed_checkpoint":
         validate_ledger_checkpoint_suite(suite)
+        return
+    if suite.get("suite_kind") == "ledger_dual_backend_recall":
+        validate_ledger_recall_evidence_suite(suite)
         return
     if suite.get("schema_version") != 1:
         raise BenchmarkFixtureError("unsupported suite schema version")
@@ -338,6 +348,18 @@ def load_expected(
         raise BenchmarkFixtureError("unsupported expected-report schema version")
     if not isinstance(expected.get("report"), Mapping):
         raise BenchmarkFixtureError("expected fixture must contain a report object")
+    # The v1 evidence baseline has a separate manifest because it binds a
+    # normalized result shared by two durable backends.  Validate it whenever
+    # the repository-owned expected fixture is used; an explicit --expected
+    # override remains available to the negative verification tests.
+    if path is None and suite_name == "v1.0":
+        suite = load_suite(suite_name, fixture_root=fixture_root)
+        manifest = _read_json(_fixture_directory(suite_name, fixture_root) / "manifest.json")
+        validate_ledger_recall_evidence_manifest(
+            manifest,
+            suite=suite,
+            expected=expected,
+        )
     return expected
 
 
@@ -877,6 +899,7 @@ async def run_suite(
     suite: Mapping[str, Any],
     *,
     fixture_root: Path | None = None,
+    ledger_backend: str | None = None,
 ) -> dict[str, Any]:
     """Run an already-loaded suite and return only deterministic semantics."""
     _validate_suite(suite)
@@ -889,6 +912,16 @@ async def run_suite(
         return await run_ledger_checkpoint_suite(
             suite,
             fixture_sha256=fixture_sha256(suite),
+        )
+    if suite.get("suite_kind") == "ledger_dual_backend_recall":
+        return run_ledger_recall_evidence_suite(
+            suite,
+            fixture_sha256=fixture_sha256(suite),
+            backend=ledger_backend or "sqlite",
+        )
+    if ledger_backend is not None:
+        raise BenchmarkFixtureError(
+            "--ledger-backend is available only for the v1.0 Ledger evidence suite"
         )
     embedding_config = suite["embedding"]
     embeddings = SeededFeatureHashEmbeddings(
@@ -929,16 +962,71 @@ async def run_suite_by_name(
     suite_name: str = DEFAULT_SUITE,
     *,
     fixture_root: Path | None = None,
+    ledger_backend: str | None = None,
 ) -> dict[str, Any]:
-    return await run_suite(load_suite(suite_name, fixture_root=fixture_root), fixture_root=fixture_root)
+    return await run_suite(
+        load_suite(suite_name, fixture_root=fixture_root),
+        fixture_root=fixture_root,
+        ledger_backend=ledger_backend,
+    )
 
 
-def verify_report(report: Mapping[str, Any], expected: Mapping[str, Any]) -> None:
+def verify_report(
+    report: Mapping[str, Any],
+    expected: Mapping[str, Any],
+    *,
+    require_all_evidence_backends: bool = True,
+) -> None:
     """Verify a report against its frozen, content-free semantic baseline."""
     fixture_hash = expected.get("fixture_sha256")
     if fixture_hash != report.get("fixture_sha256"):
         raise BenchmarkVerificationError("fixture SHA-256 does not match expected baseline")
     expected_report = expected.get("report")
+    if report.get("benchmark_kind") == "ledger_dual_backend_recall":
+        if not isinstance(expected_report, Mapping):
+            raise BenchmarkVerificationError("evidence baseline must contain a report object")
+        expected_normalized = expected_report.get("normalized_backend_report")
+        required_backends = expected_report.get("required_backend_ids")
+        actual_backends = report.get("backend_reports")
+        if (
+            not isinstance(expected_normalized, Mapping)
+            or not isinstance(required_backends, list)
+            or not isinstance(actual_backends, Mapping)
+        ):
+            raise BenchmarkVerificationError("evidence report must contain backend reports")
+        for field in (
+            "report_schema_version",
+            "suite_version",
+            "benchmark_kind",
+            "candidate_id",
+            "baseline_id",
+            "fixture_sha256",
+        ):
+            if expected_report.get(field) != report.get(field):
+                raise BenchmarkVerificationError(
+                    f"evidence report field {field!r} differs from its frozen baseline"
+                )
+        if not actual_backends:
+            raise BenchmarkVerificationError("evidence report must include at least one backend")
+        required_backend_set = set(required_backends)
+        if required_backend_set != {"sqlite_v6", "postgres_v6"} or len(required_backends) != 2:
+            raise BenchmarkVerificationError("evidence baseline must require SQLite and PostgreSQL")
+        if require_all_evidence_backends and set(actual_backends) != required_backend_set:
+            raise BenchmarkVerificationError(
+                "evidence verification requires both SQLite and PostgreSQL backends"
+            )
+        for backend_id, actual in actual_backends.items():
+            if backend_id not in {"sqlite_v6", "postgres_v6"}:
+                raise BenchmarkVerificationError("evidence report requested an unknown backend")
+            if not isinstance(actual, Mapping):
+                raise BenchmarkVerificationError(f"evidence backend {backend_id} is not an object")
+            normalized_actual = dict(actual)
+            normalized_actual["backend_id"] = "normalized"
+            if canonical_json(expected_normalized) != canonical_json(normalized_actual):
+                raise BenchmarkVerificationError(
+                    f"semantic evidence differs from frozen {backend_id} output"
+                )
+        return
     if canonical_json(expected_report) != canonical_json(report):
         raise BenchmarkVerificationError("semantic report differs from frozen expected output")
 
@@ -1000,6 +1088,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         return render_ledger_composition_markdown(report)
     if report.get("benchmark_kind") == "ledger_sealed_checkpoint":
         return render_ledger_checkpoint_markdown(report)
+    if report.get("benchmark_kind") == "ledger_dual_backend_recall":
+        return render_ledger_recall_evidence_markdown(report)
     lines = [
         "# ProtoPrompt Memory Benchmark",
         "",
@@ -1057,6 +1147,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--expected", type=Path, help="override expected.json (test/debug use)")
     parser.add_argument("--json", type=Path, help="write canonical JSON report to this path")
     parser.add_argument("--markdown", type=Path, help="write Markdown report to this path")
+    parser.add_argument(
+        "--ledger-backend",
+        choices=("sqlite", "postgres", "all"),
+        help="backend for the v1.0 Ledger recall evidence suite",
+    )
     return parser
 
 
@@ -1064,7 +1159,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         suite = load_suite(args.suite)
-        report = asyncio.run(run_suite(suite))
+        if (
+            args.verify
+            and suite.get("suite_kind") == "ledger_dual_backend_recall"
+            and args.ledger_backend != "all"
+        ):
+            raise LedgerRecallEvidenceBackendError(
+                "v1.0 verification requires --ledger-backend all"
+            )
+        report = asyncio.run(run_suite(suite, ledger_backend=args.ledger_backend))
         if args.verify:
             verify_report(
                 report,
@@ -1073,13 +1176,19 @@ def main(argv: Sequence[str] | None = None) -> int:
             if suite.get("suite_kind") not in {
                 "ledger_context_composition",
                 "ledger_sealed_checkpoint",
+                "ledger_dual_backend_recall",
             }:
                 assert_candidate_not_worse_than_reference(report)
         if args.json:
             _write_text(args.json, canonical_json(report) + "\n")
         if args.markdown:
             _write_text(args.markdown, render_markdown(report))
-    except (BenchmarkFixtureError, BenchmarkVerificationError, ValueError) as exc:
+    except (
+        BenchmarkFixtureError,
+        BenchmarkVerificationError,
+        LedgerRecallEvidenceBackendError,
+        ValueError,
+    ) as exc:
         print(f"memory benchmark failed: {exc}", file=sys.stderr)
         return 1
     if args.verify:

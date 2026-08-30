@@ -404,3 +404,33 @@ boundary. `forget()` и `erase()` по-прежнему удаляют live Ledg
 То же относится к `LedgerComposedRequest`: он transient и должен быть отправлен
 сразу. Его final validation действует до возврата из `plan_messages()`; поздний
 `forget()` не может отозвать JSON, который host уже передал provider-у.
+
+## Frozen dual-backend evidence protocol (v1.0)
+
+В репозитории есть узкий fixture протокола доказательств `v1.0` для strict
+Ledger read-path. Это не заявление о package release `1.0.0` и не benchmark
+модели, embedding-service, provider-а, latency, throughput или общего качества
+retrieval.
+
+Fixture запускает 18 delayed-recall и lifecycle cases на fresh SQLite и
+PostgreSQL Ledger. После нормализации только ID backend-а оба должны выдать
+один content-free semantic report. Fixed checks покрывают tenant/user/thread
+scope isolation, strict admitted records, whole-record token/UTF-8-byte
+budgets, plan/resolve receipts, lifecycle exclusion, source-revocation
+scrubbing и content-free `explain()`.
+
+Полная проверка запускается только при наличии обоих локальных durable
+backend-ов:
+
+```powershell
+pip install -e ".[postgres,dev]"
+$env:PROTOPROMPT_POSTGRES_DSN = "postgresql://protoprompt:protoprompt@localhost:5432/protoprompt_test"
+python scripts/run_memory_benchmark.py --suite v1.0 --ledger-backend all --verify
+```
+
+Число strict Ledger `9/9` против 20-record tail `0/9` — это только доступность
+target в этом именованном synthetic lexical fixture: query содержит слова
+target, а fillers — нет. Его нельзя использовать как claim о качестве ответа
+модели, сравнении внешних фреймворков, production quality или performance.
+Точная методика — в [benchmark protocol](https://github.com/Idxeed/protoprompt/blob/master/benchmarks/README.md) и
+связанных `suite.json`, `expected.json`, `manifest.json`.

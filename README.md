@@ -14,7 +14,7 @@ embeddable context runtime: RAG, память диалога, профиль п�
 [Примеры](examples/) ·
 [Каталог интеграций](INTEGRATIONS.md) ·
 [Roadmap](ROADMAP.md) ·
-[Launch v0.14](LAUNCH-v0.14.md) ·
+[Launch v0.15](LAUNCH-v0.15.md) ·
 [Как добавить интеграцию](CONTRIBUTING.md) ·
 [Changelog](CHANGELOG.md)
 
@@ -80,6 +80,11 @@ v0.14 — RC-hardening без расширения public API: bounded property/
 gate проверяет scope, lifecycle, deletion/source revocation и exact Ledger
 token/byte accounting на SQLite и PostgreSQL. Он не является latency,
 throughput или model-quality benchmark.
+
+v0.15 добавляет frozen dual-backend evidence protocol для strict Ledger
+selection: один content-free synthetic fixture обязан дать одинаковую
+семантику на SQLite и PostgreSQL. Он не делает claim о качестве модели,
+general recall, latency, throughput или package `1.0.0`.
 
 ## Установка
 
@@ -274,6 +279,19 @@ python scripts/run_memory_benchmark.py --suite v0.1 --verify
 python scripts/run_memory_benchmark.py --suite v0.2 --verify
 python scripts/run_memory_benchmark.py --suite v0.3 --verify
 ```
+
+Отдельный v1 evidence gate проверяет один строгий Ledger fixture сразу на
+SQLite и PostgreSQL. Для него нужны локальный PostgreSQL и
+`protoprompt[postgres]`; одиночный backend нельзя выдать за verified result:
+
+```powershell
+$env:PROTOPROMPT_POSTGRES_DSN = "postgresql://protoprompt:protoprompt@localhost:5432/protoprompt_test"
+python scripts/run_memory_benchmark.py --suite v1.0 --ledger-backend all --verify
+```
+
+`v1.0` — версия протокола доказательств, а не уже вышедшая версия пакета
+`1.0.0`. Он измеряет только зафиксированную selection semantics synthetic
+fixture, не model quality, latency или throughput.
 
 Его сценарии, фиксированные baseline и правила версионирования находятся в
 [`benchmarks/README.md`](benchmarks/README.md). CI проверяет Python 3.11–3.13,

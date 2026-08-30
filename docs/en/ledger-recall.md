@@ -408,3 +408,32 @@ context string already returned or sent elsewhere.
 The same is true of `LedgerComposedRequest`: it is transient and should be sent
 immediately. Its final validation applies only until `plan_messages()` returns;
 a later `forget()` cannot retract JSON the host has already given a provider.
+
+## Frozen dual-backend evidence protocol (v1.0)
+
+The repository carries a narrow `v1.0` **evidence-protocol** fixture for the
+strict Ledger read path. This is not a package `1.0.0` release claim and it
+does not benchmark a model, embedding service, provider, latency, throughput,
+or general retrieval quality.
+
+The fixture runs 18 delayed-recall and lifecycle cases against fresh SQLite
+and PostgreSQL Ledgers. It requires the same content-free semantic report from
+both backends after normalizing only their backend identifier. Its fixed checks
+cover tenant/user/thread scope isolation, strict admitted records,
+whole-record token/UTF-8-byte budgets, plan/resolve receipts, lifecycle
+exclusion, source-revocation scrubbing, and content-free `explain()` output.
+
+Run the full verification only with both local durable backends available:
+
+```bash
+pip install -e ".[postgres,dev]"
+export PROTOPROMPT_POSTGRES_DSN=postgresql://protoprompt:protoprompt@localhost:5432/protoprompt_test
+python scripts/run_memory_benchmark.py --suite v1.0 --ledger-backend all --verify
+```
+
+The reported strict-Ledger `9/9` versus 20-record-tail `0/9` number is target
+availability in this named, synthetic lexical fixture only: the query contains
+the target terms and fillers do not. It must not be used as a model-answer,
+external-framework, production-quality, or performance claim. See the
+[benchmark protocol](https://github.com/Idxeed/protoprompt/blob/master/benchmarks/README.md) and its bound
+`suite.json`, `expected.json`, and `manifest.json` for the precise method.
