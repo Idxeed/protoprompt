@@ -8,7 +8,7 @@
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.md) · [v0.12 launch kit](LAUNCH-v0.12.md)
+[Русская версия](README.md) · [v0.13 launch kit](LAUNCH-v0.13.md)
 
 **Reliable agent memory under a fixed context budget.** ProtoPrompt is an
 embeddable context runtime for LLM applications. The core combines **RAG over
@@ -62,11 +62,14 @@ scope/counter, and keeps raw `unknown` / `legacy_unknown` out of a composed
 request. Neither `pp-ollama-chat` nor `pp-agent` auto-wires it yet; see
 [Bounded ledger recall](docs/en/ledger-recall.md).
 
-v0.12 adds a separate sealed checkpoint for one strict recall selection. A
-host-held HMAC protects it; it retains no task, payload, or provider messages,
-and a restart always re-plans and verifies the exact selection before explicit
-composition. It is not agent-state recovery, a workflow engine, or an
-exactly-once mechanism.
+v0.13 adds experimental `PostgresMemoryLedger`: the same explicit synchronous
+`MemoryWriter` contract and Ledger v6 semantics in a dedicated PostgreSQL
+schema. It accepts fresh v6 setup only, serializes writes with a schema-wide
+advisory lock and a five-second retry boundary, and fails closed on storage
+layout drift. It does not automatically migrate SQLite or old PostgreSQL
+Ledgers, promise throughput, or turn Ledger into agent-state recovery, a
+workflow engine, or an exactly-once mechanism. See the
+[PostgreSQL guide](docs/en/postgres.md).
 
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of

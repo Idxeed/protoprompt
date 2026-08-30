@@ -66,11 +66,15 @@ llm = CompositeLLMClient(
 | `QdrantStore` | `[qdrant]` | server (`url=`), embedded local (`path=`), in-memory |
 | `ChromaStore` | `[chroma]` | as before |
 | `PgVectorStore` | `[postgres]` | async pgvector, explicit schema setup |
+| `PostgresMemoryLedger` | `[postgres]` | experimental synchronous Ledger; fresh-v6 dedicated schema |
 | `ElasticsearchStore` | `[elasticsearch]` | Elasticsearch 9 dense vectors |
 | `OpenSearchStore` | `[opensearch]` | OpenSearch Lucene HNSW |
 
 Redis supplies embedding cache, session, and profile adapters rather than vector
-retrieval. See [PostgreSQL](postgres.md), [Redis](redis.md), and
+retrieval. `PostgresMemoryLedger` is not a vector store or an async adapter:
+it explicitly provisions an isolated PostgreSQL schema and serializes Ledger
+writes with a transaction-scoped advisory lock. See
+[PostgreSQL](postgres.md), [Redis](redis.md), and
 [Elasticsearch/OpenSearch](search.md).
 
 Managed credential stores are `AWSSecretsManagerStore` (`[aws-secrets]`) and

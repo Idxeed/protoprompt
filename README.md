@@ -14,7 +14,7 @@ embeddable context runtime: RAG, память диалога, профиль п�
 [Примеры](examples/) ·
 [Каталог интеграций](INTEGRATIONS.md) ·
 [Roadmap](ROADMAP.md) ·
-[Launch v0.12](LAUNCH-v0.12.md) ·
+[Launch v0.13](LAUNCH-v0.13.md) ·
 [Как добавить интеграцию](CONTRIBUTING.md) ·
 [Changelog](CHANGELOG.md)
 
@@ -45,7 +45,7 @@ LLM обычно нужна не просто история чата, а нес
 | RAG | чанкинг, индексация, top-k поиск, фильтры, reranking и provenance |
 | Память сессии | эвристическое или LLM-сжатие длинных диалогов |
 | Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
-| Memory Ledger *(experimental)* | scoped lifecycle, host admission, immutable provenance/audit, atomic source revocation и проверяемая очистка live rows |
+| Memory Ledger *(experimental)* | scoped lifecycle, host admission, immutable provenance/audit, atomic source revocation и проверяемая очистка live rows; SQLite и optional fresh-v6 PostgreSQL backend |
 | Bounded ledger recall *(experimental)* | local deterministic selection active memory в JSON data lane; opt-in admitted-only composition в exact request, sealed strict-recall resume без agent/provider state, token/byte receipt и final stale check |
 | Токен-бюджет | жёсткий лимит, приоритеты слоёв, `ContextPlan`/receipt и объяснение обрезки |
 | Хранилища | in-memory, SQLite, ChromaDB, Qdrant, pgvector, Elasticsearch/OpenSearch и Redis services |
@@ -68,10 +68,13 @@ request, требует strict admission policy и того же scope/counter; 
 `pp-agent` пока не подключают composer автоматически. См. [Bounded recall из
 ledger](docs/ru/ledger-recall.md).
 
-v0.12 добавляет отдельный sealed checkpoint для одного strict recall selection:
-он защищён host-owned HMAC, не хранит task/payload/provider messages и после
-restart заново планирует и проверяет точный selection перед явной композицией.
-Это не checkpoint agent state, workflow engine или exactly-once механизм.
+v0.13 добавляет experimental `PostgresMemoryLedger`: тот же явный sync
+`MemoryWriter` contract и Ledger v6 в выделенной PostgreSQL schema. Backend
+принимает только fresh v6 setup, сериализует записи schema-wide advisory
+lock-ом с 5-секундной границей retry и fail-closed валидирует storage layout.
+Он не переносит автоматически SQLite/старые PostgreSQL Ledger, не обещает
+throughput и не превращает Ledger в agent state, workflow engine или
+exactly-once механизм. См. [руководство PostgreSQL](docs/ru/postgres.md).
 
 ## Установка
 

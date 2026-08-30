@@ -74,6 +74,29 @@ trust level. У низкоуровневого `SqliteMemoryLedger` этот ж�
 а не Python sandbox и не authorization boundary: не выдавайте ни writer, ни
 ledger недоверенному коду.
 
+## PostgreSQL deployment (экспериментальный)
+
+`PostgresMemoryLedger` даёт ту же доверенную синхронную command-поверхность
+Ledger, что и `SqliteMemoryLedger`, но это отдельно provisioned backend.
+Установите `protoprompt[postgres]`, запустите его явные `dry_run_setup()` и
+`setup()` из migration job и выделите пустую PostgreSQL schema только для него.
+Он принимает лишь свежую schema v6: старый PostgreSQL Ledger не мигрируется, а
+SQLite Ledger file не импортируется.
+
+Каждая запись в этой schema получает transaction-scoped advisory lock, чтобы
+lifecycle, admission, strict recall и checkpoint validation сохранили точную
+семантику при PostgreSQL MVCC. Это намеренно сериализует записи; хост обязан
+обработать `LedgerConflictError`, повторив целую идемпотентную команду с тем же
+стабильным `event_id`, а не SQL-фрагмент. Адаптер синхронный, поэтому в
+async-приложении ему нужна worker/thread boundary. Используйте backup policy
+платформы или `pg_dump`: его `backup()` намеренно не реализует file-copy
+backup.
+
+В [руководстве PostgreSQL и pgvector](postgres.md) описаны обязательные
+настройки schema, прав, backup, restore, retention и capacity. `forget()` или
+`erase()` затрагивает только live Ledger rows; операция сама по себе не
+стирает предыдущие WAL, replica, backup или внешние projection.
+
 ## Admission boundary (v0.10)
 
 `MemoryReviewGate` имеет один фиксированный scope, origin, policy и actor.

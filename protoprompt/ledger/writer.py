@@ -11,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable, Iterable
 
-from protoprompt.ledger.sqlite import SqliteMemoryLedger
+from protoprompt.ledger._backend import _LedgerCommandBackend
 from protoprompt.ledger.types import (
     ErasureReceipt,
     MemoryAdmissionAudit,
@@ -41,14 +41,14 @@ class MemoryWriter:
 
     def __init__(
         self,
-        ledger: SqliteMemoryLedger,
+        ledger: _LedgerCommandBackend,
         *,
         scope: MemoryScope,
         actor: str = "host",
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        if not isinstance(ledger, SqliteMemoryLedger):
-            raise TypeError("ledger must be a SqliteMemoryLedger")
+        if not isinstance(ledger, _LedgerCommandBackend):
+            raise TypeError("ledger must implement the internal Ledger command backend contract")
         scope_dict(scope)
         self._ledger = ledger
         self._scope = scope

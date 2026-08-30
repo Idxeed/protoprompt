@@ -282,6 +282,27 @@ Provider-specific wrapper не добавляется, если generic HTTP с�
 Выбор между прямым `psycopg` и SQLAlchemy принимается после spike. Vector store
 не принуждает пользователя хранить profile/session в той же БД.
 
+### 8.3 PostgreSQL Memory Ledger
+
+`PostgresMemoryLedger` — отдельный синхронный experimental backend для
+host-owned lifecycle, admission, strict recall и recall checkpoints. Это не
+новый vector store и не замена async `PgVectorStore`/`PostgresProfileStore`.
+Он ставится через `protoprompt[postgres]`, создаётся только явным `setup()` и
+владеет одной выделенной PostgreSQL schema.
+
+- Поддерживается только свежая schema Ledger v6: перенос SQLite, миграция
+  старой PostgreSQL schema и destructive downgrade не предусмотрены.
+- Для сохранения точной финальной валидации при PostgreSQL MVCC записи в одной
+  Ledger schema сериализуются transaction-scoped advisory lock-ом. Это
+  осознанный выбор корректности перед throughput; host повторяет idempotent
+  команду с тем же `event_id` при `LedgerConflictError`.
+- `backup()` намеренно не копирует PostgreSQL в файл. Ownership backup, restore,
+  retention, WAL/replica и проверка восстановления остаются у оператора
+  (например, `pg_dump --schema=...` и platform policy).
+
+Подробный production recipe, требования к ролям, выделенной schema и границам
+удаления описаны в [docs/ru/postgres.md](docs/ru/postgres.md).
+
 ## 9. Observability и evaluation
 
 | Цель | Форма | Приоритет |

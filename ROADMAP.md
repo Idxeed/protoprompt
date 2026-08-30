@@ -1,7 +1,7 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.12.0` добавляет sealed strict Ledger selection checkpoints для
-> restart-safe recall без хранения task/payload/provider state;
+> Статус: `0.13.0` добавляет optional PostgreSQL-conformant Ledger v6 с тем же
+> sync host contract, fresh dedicated schema и fail-closed storage validation;
 > следующий этап — стабилизация и RC к `1.0.0`.
 > Обновлён: 2026-08-30.
 >
@@ -358,6 +358,44 @@ exactly-once delivery, workflow engine, tool replay, provider continuation ил�
 по-прежнему нужны, если модель угроз включает arbitrary in-process code или
 прямой SQLite access.
 
+## 0.13.0 — PostgreSQL Ledger v6 Conformance
+
+**Цель:** перенести уже доказуемый host-owned Ledger contract на PostgreSQL,
+не превращая storage adapter в новый agent framework или мнимый throughput
+benchmark.
+
+### Выполнено
+
+- [x] Добавлен optional experimental `PostgresMemoryLedger` через
+  `protoprompt[postgres]`. Его `MemoryWriter`-совместимая sync command surface
+  сохраняет v6 lifecycle, admission, strict recall и sealed checkpoint
+  semantics; constructor не выполняет DDL, а setup остаётся явным.
+- [x] Поддерживается только fresh v6 в иначе пустой выделенной schema: нет
+  silent SQLite import, migration старого PostgreSQL Ledger, destructive
+  downgrade или ложного file-copy `backup()`. Backup/restore/PITR остаются у
+  оператора PostgreSQL.
+- [x] Для финальной lifecycle/checkpoint validation PostgreSQL write path
+  сериализуется одним transaction-scoped advisory lock на schema; timeout 5 s
+  возвращает retryable `LedgerConflictError` для повторения целой
+  идемпотентной host-команды с тем же `event_id`.
+- [x] Setup/operation validation fail-closed проверяет tables, columns,
+  BIGSERIAL, deterministic text collation, indexes/constraints, guard
+  functions/triggers, RLS/policies, DML rewrite rules,
+  inheritance/partitioning и schema shadowing. Runtime ищет built-ins через
+  `pg_catalog` первым; hard-erase GUC выключен вне единственного controlled
+  path.
+- [x] Общая public conformance suite запускается для SQLite и PostgreSQL;
+  PostgreSQL release gate содержит пятнадцать live integration cases для
+  parity, restart/contention, tamper/recovery и checkpoint boundary.
+
+### Неподвижная граница
+
+Это sync storage conformance, а не asynchronous repository, multi-tenant
+authorization layer, PostgreSQL migration toolkit, performance claim или
+защита от database owner/роли с arbitrary DDL/DML. Private database connection
+не выдаётся plugin-коду; production роль и schema ownership остаются частью
+операционной модели хоста.
+
 ## 1.0.0 release candidates — Stabilize, don't expand
 
 После `0.9.0` начинается API freeze. Новая feature не входит в RC без
@@ -370,6 +408,8 @@ exactly-once delivery, workflow engine, tool replay, provider continuation ил�
 - Явно отделить stable API от experimental/research: old `WorkingMemory`,
   policy experiments и non-core adapters не получают гарантию 1.x молча.
 - Провести stress, concurrency и crash-recovery tests SQLite/Postgres.
+- Сохранить PostgreSQL Ledger catalog/tamper conformance как обязательный
+  release gate и подтвердить recovery на управляемом PostgreSQL deployment.
 - Добавить fuzz/property tests для scope, lifecycle transitions, deletion и
   token packing.
 - Провести security review: provenance spoofing, prompt injection, stale

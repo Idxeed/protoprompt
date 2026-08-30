@@ -9,6 +9,7 @@ memory or reference applications.
 """
 
 from protoprompt.ledger.sqlite import SqliteMemoryLedger
+from protoprompt.ledger.postgres import PostgresMemoryLedger
 from protoprompt.ledger.admission import (
     MemoryAdmissionDecision,
     MemoryAdmissionError,
@@ -62,6 +63,7 @@ __all__ = [
     "MemoryReview",
     "MemoryReviewGate",
     "MemoryWriter",
+    "PostgresMemoryLedger",
     "SqliteMemoryLedger",
     "StaleMemoryReviewError",
 ]

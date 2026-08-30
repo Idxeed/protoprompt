@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-08-30
+
+### Added
+- Experimental optional `PostgresMemoryLedger` (`protoprompt[postgres]`): a
+  synchronous, explicit-setup PostgreSQL implementation of the existing v6
+  host-owned Ledger command surface. It preserves lifecycle, admission, strict
+  recall, and sealed-checkpoint semantics in one dedicated schema.
+- Backend-neutral public Ledger conformance helpers exercised against SQLite
+  and PostgreSQL, plus fifteen live PostgreSQL integration cases for setup,
+  contention/restart, lifecycle/admission/recall/checkpoint parity, and
+  catalog tampering. The nondeterministic-collation case runs where the server
+  provides such a collation.
+
+### Changed
+- `MemoryWriter` now accepts the private nominal Ledger command-backend marker
+  rather than a concrete SQLite type, while preserving the public writer
+  surface and scope-pinning behavior.
+- PostgreSQL setup accepts only an otherwise-empty, fresh Ledger v6 schema.
+  It does not migrate old PostgreSQL layouts, import SQLite files, or offer a
+  file-copy backup abstraction. Per-schema writes use a transaction-scoped,
+  five-second advisory-lock retry boundary.
+
+### Security
+- PostgreSQL Ledger setup and operations fail closed on structural drift in
+  tables, columns, BIGSERIAL ownership/configuration, deterministic text
+  collations, indexes, constraints, guards, triggers, RLS/policies, DML rules,
+  inheritance/partitioning, and unexpected schema functions.
+- The runtime resolves built-ins from `pg_catalog` first, guards reset unsafe
+  function attributes/configuration on explicit repair, and the hard-erase
+  escape hatch is forced off for ordinary write transactions.
+
 ## [0.12.0] - 2026-08-30
 
 ### Added

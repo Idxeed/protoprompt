@@ -74,6 +74,29 @@ scope on every operation. This is an API-shaping guard inside a trusted host
 process, not a Python sandbox or authorization boundary: do not expose either
 object to untrusted code.
 
+## PostgreSQL deployment (experimental)
+
+`PostgresMemoryLedger` exposes the same trusted synchronous Ledger command
+surface as `SqliteMemoryLedger`, but it is a separately provisioned backend.
+Install `protoprompt[postgres]`, run its explicit `dry_run_setup()` and
+`setup()` from a migration job, and assign it an otherwise empty dedicated
+PostgreSQL schema. It accepts fresh schema v6 only: it does not migrate an old
+PostgreSQL Ledger or import a SQLite Ledger file.
+
+Each write in that schema takes a transaction-scoped advisory lock so that
+lifecycle, admission, strict recall, and checkpoint validation retain their
+exact semantics under PostgreSQL MVCC. This deliberately serializes writes;
+the host must handle `LedgerConflictError` by retrying an idempotent whole
+command with its stable `event_id`, not by rerunning a SQL fragment. The
+adapter is synchronous and therefore needs a worker/thread boundary in an
+async application. Use the database platform's backup policy or `pg_dump` —
+its `backup()` method intentionally does not implement a file-copy backup.
+
+The [PostgreSQL and pgvector](postgres.md) guide contains the required schema,
+privilege, backup, restore, retention, and capacity guidance. `forget()` or
+`erase()` affects live Ledger rows only; it cannot erase prior WAL, replicas,
+backups, or external projections by itself.
+
 ## Admission boundary (v0.10)
 
 `MemoryReviewGate` has one fixed scope, origin, policy, and actor. Its

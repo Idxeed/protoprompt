@@ -16,6 +16,7 @@ import threading
 from typing import Any, Iterable, Iterator
 import uuid
 
+from protoprompt.ledger._backend import _LedgerCommandBackend
 from protoprompt.ledger.types import (
     LEDGER_SCHEMA_VERSION,
     ErasureReceipt,
@@ -770,7 +771,7 @@ def _confidence(value: float) -> float:
     return normalized
 
 
-class SqliteMemoryLedger:
+class SqliteMemoryLedger(_LedgerCommandBackend):
     """An explicit-setup, SQLite-backed operational memory ledger.
 
     ``MemoryWriter`` is the preferred host-facing facade because it pins a

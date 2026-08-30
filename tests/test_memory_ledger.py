@@ -19,6 +19,7 @@ from protoprompt.ledger import (
     MemoryWriter,
     SqliteMemoryLedger,
 )
+from protoprompt.ledger._backend import _LedgerCommandBackend
 from protoprompt.ledger.types import canonical_json, command_hash, content_hash, scope_dict
 from protoprompt.scope import MemoryScope
 from protoprompt.store.sqlite import SqliteStore
@@ -592,6 +593,14 @@ def test_setup_rechecks_migration_target_schema_after_acquiring_write_lock(tmp_p
 def test_writer_requires_a_non_empty_host_scope(ledger):
     with pytest.raises(ValueError, match="non-empty"):
         MemoryWriter(ledger, scope=MemoryScope())
+
+
+def test_writer_uses_the_private_ledger_command_backend_marker(ledger, scope_a):
+    assert isinstance(ledger, _LedgerCommandBackend)
+    assert MemoryWriter(ledger, scope=scope_a).scope == scope_a
+
+    with pytest.raises(TypeError, match="Ledger command backend"):
+        MemoryWriter(object(), scope=scope_a)
 
 
 def test_candidate_requires_host_confirmation_before_default_recall(ledger, scope_a):
