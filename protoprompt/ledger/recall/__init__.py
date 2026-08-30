@@ -16,25 +16,35 @@ from protoprompt.ledger.recall.composer import (
     LedgerDataLanePolicy,
 )
 from protoprompt.ledger.recall.types import (
+    CheckpointContractMismatchError,
+    LedgerCheckpointError,
     LedgerRecallBudgetError,
+    LedgerRecallCheckpoint,
     LedgerRecallContext,
     LedgerRecallDecision,
     LedgerRecallError,
     LedgerRecallPlan,
+    LedgerRecallResume,
+    StaleMemoryCheckpointError,
     StaleMemoryPlanError,
 )
 
 __all__ = [
     "LedgerRecallBudgetError",
+    "LedgerCheckpointError",
     "LedgerComposedRequest",
+    "CheckpointContractMismatchError",
     "LedgerCompositionReceipt",
     "LedgerContextComposer",
+    "LedgerRecallCheckpoint",
     "LedgerRecallContext",
     "LedgerRecallDecision",
     "LedgerRecallError",
     "LedgerRecallPlan",
     "LedgerRecallPlanner",
     "LedgerRecallPolicy",
+    "LedgerRecallResume",
     "LedgerDataLanePolicy",
+    "StaleMemoryCheckpointError",
     "StaleMemoryPlanError",
 ]

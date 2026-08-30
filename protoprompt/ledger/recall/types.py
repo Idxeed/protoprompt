@@ -27,6 +27,18 @@ class StaleMemoryPlanError(LedgerRecallError):
     """Raised when selected memory changed before it could be rendered."""
 
 
+class LedgerCheckpointError(LedgerRecallError):
+    """Base error for a durable, strict Ledger recall checkpoint."""
+
+
+class CheckpointContractMismatchError(LedgerCheckpointError):
+    """Raised when a restart uses a different policy/counter contract."""
+
+
+class StaleMemoryCheckpointError(LedgerCheckpointError):
+    """Raised when a sealed checkpoint can no longer be resumed safely."""
+
+
 @dataclass(frozen=True, slots=True)
 class LedgerRecallDecision:
     """A content-free choice made by a :class:`LedgerRecallPlanner`.
@@ -328,4 +340,140 @@ class LedgerRecallContext:
             "remaining_tokens": self.remaining_tokens,
             "remaining_bytes": self.remaining_bytes,
             "record_count": self.record_count,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerRecallCheckpoint:
+    """Content-free receipt for one durable strict-recall checkpoint.
+
+    The host retains ``checkpoint_id`` and ``continuation_ref`` as opaque
+    identifiers.  They deliberately do not appear in :meth:`explain`, which
+    also excludes scope, task, selected record IDs/hashes, and memory payload.
+    A checkpoint is not a portable :class:`LedgerRecallPlan`: resume always
+    produces a fresh plan under the current Ledger lifecycle boundary.
+    """
+
+    schema_version: int
+    policy_id: str
+    policy_fingerprint: str
+    counter_id: str
+    token_budget: int
+    byte_budget: int
+    used_tokens: int
+    used_bytes: int
+    selected_count: int
+    created_at: datetime
+    _checkpoint_id: str = field(repr=False)
+    _continuation_ref: str = field(repr=False)
+
+    def __post_init__(self) -> None:
+        if self.schema_version != 1:
+            raise ValueError("unsupported ledger recall checkpoint schema version")
+        for field_name in ("policy_id", "counter_id"):
+            object.__setattr__(
+                self,
+                field_name,
+                validate_identifier(getattr(self, field_name), field=field_name),
+            )
+        for field_name in ("policy_fingerprint",):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or len(value) != 64:
+                raise ValueError(f"{field_name} must be a 64-character digest")
+        for field_name in (
+            "token_budget",
+            "byte_budget",
+            "used_tokens",
+            "used_bytes",
+            "selected_count",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if self.used_tokens > self.token_budget or self.used_bytes > self.byte_budget:
+            raise ValueError("checkpoint receipt exceeds its configured budget")
+        created_at = coerce_datetime(self.created_at, field="created_at")
+        assert created_at is not None
+        object.__setattr__(self, "created_at", created_at)
+        object.__setattr__(
+            self,
+            "_checkpoint_id",
+            validate_identifier(self._checkpoint_id, field="checkpoint_id"),
+        )
+        object.__setattr__(
+            self,
+            "_continuation_ref",
+            validate_identifier(self._continuation_ref, field="continuation_ref"),
+        )
+
+    @property
+    def checkpoint_id(self) -> str:
+        """Return the host-owned opaque identifier for this checkpoint."""
+
+        return self._checkpoint_id
+
+    @property
+    def continuation_ref(self) -> str:
+        """Return the opaque host reference to continuation state, if any."""
+
+        return self._continuation_ref
+
+    def explain(self) -> dict[str, object]:
+        """Return a receipt without checkpoint identity or retained payload."""
+
+        return {
+            "schema_version": self.schema_version,
+            "policy_id": self.policy_id,
+            "policy_fingerprint": self.policy_fingerprint,
+            "counter_id": self.counter_id,
+            "token_budget": self.token_budget,
+            "byte_budget": self.byte_budget,
+            "used_tokens": self.used_tokens,
+            "used_bytes": self.used_bytes,
+            "selected_count": self.selected_count,
+            "created_at": self.created_at.isoformat().replace("+00:00", "Z"),
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class LedgerRecallResume:
+    """One fresh, planner-owned revalidation of a durable checkpoint.
+
+    Only the matching :class:`LedgerRecallPlanner` may turn this result into a
+    provider request.  The private plan is intentionally not a portable resume
+    artifact; it is a normal process-local plan freshly created after loading
+    and verifying the durable checkpoint manifest.
+    """
+
+    checkpoint: LedgerRecallCheckpoint
+    _recall_plan: LedgerRecallPlan = field(repr=False, compare=False)
+    _owner_token: object | None = field(repr=False, compare=False, default=None)
+    _task_integrity_tag: str = field(repr=False, compare=False, default="")
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.checkpoint, LedgerRecallCheckpoint):
+            raise TypeError("checkpoint must be a LedgerRecallCheckpoint")
+        if not isinstance(self._recall_plan, LedgerRecallPlan):
+            raise TypeError("resume requires a fresh LedgerRecallPlan")
+        if self._owner_token is None:
+            raise ValueError("resume requires a private planner owner token")
+        if (
+            not isinstance(self._task_integrity_tag, str)
+            or len(self._task_integrity_tag) != 64
+            or any(character not in "0123456789abcdef" for character in self._task_integrity_tag)
+        ):
+            raise ValueError("resume requires a private task integrity tag")
+
+    @property
+    def continuation_ref(self) -> str:
+        """Return the detached opaque host continuation reference."""
+
+        return self.checkpoint.continuation_ref
+
+    def explain(self) -> dict[str, object]:
+        """Return content-free checkpoint and fresh-plan receipts."""
+
+        return {
+            "checkpoint": self.checkpoint.explain(),
+            "ledger_recall": self._recall_plan.explain(),
         }

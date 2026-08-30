@@ -27,6 +27,7 @@ from protoprompt.ledger import (
 )
 from protoprompt.ledger.recall import (
     LedgerContextComposer,
+    LedgerRecallBudgetError,
     LedgerRecallPlanner,
     LedgerRecallPolicy,
     StaleMemoryPlanError,
@@ -470,3 +471,76 @@ async def test_composer_snapshots_caller_messages_and_stays_read_only(ledger, sc
     assert "mutated system" not in rendered
     assert writer.events(active.record_id) == before_events
     assert writer.admission_audits(active.record_id) == before_audits
+
+
+async def test_composer_snapshots_query_before_reentrant_recall_accounting(ledger, scope):
+    """A counter callback cannot split recall selection from the request task."""
+
+    writer = _writer(ledger, scope)
+    _admitted_document(
+        writer,
+        record_id="mutated-query-distractor",
+        content="mutated query compact distractor",
+    )
+    target = _admitted_document(
+        writer,
+        record_id="original-query-target",
+        content="original query " + ("bounded-evidence " * 14),
+    )
+    original_query = "original query"
+    reference = LedgerRecallPlanner(
+        writer,
+        policy=LedgerRecallPolicy.admission_safe_default(),
+        counter=RegexTokenCounter(),
+        clock=lambda: T0,
+    )
+    byte_budget = None
+    for candidate_budget in range(80, 1_000):
+        try:
+            candidate = reference.plan(
+                task=original_query,
+                token_budget=300,
+                byte_budget=candidate_budget,
+            )
+        except LedgerRecallBudgetError:
+            # The mandatory envelope can be too large at the first candidates.
+            continue
+        if (
+            candidate.selected_count == 1
+            and candidate._selections[0].record_id == target.record_id
+        ):
+            byte_budget = candidate_budget
+            break
+    assert byte_budget is not None
+
+    inp = ContextInput(
+        query=original_query,
+        system_prompt="The host system contract remains authoritative.",
+        include_rag=False,
+        include_session=False,
+    )
+
+    class QueryMutatingCounter(RegexTokenCounter):
+        def __init__(self) -> None:
+            self._mutated = False
+
+        def count(self, text: str) -> int:
+            if not self._mutated:
+                self._mutated = True
+                inp.query = "mutated query"
+            return super().count(text)
+
+    composer, _builder, _counter = _composer(
+        writer,
+        scope,
+        counter=QueryMutatingCounter(),
+    )
+    request = await composer.plan_messages(
+        inp,
+        user_message="Use the current request.",
+        ledger_token_budget=300,
+        ledger_byte_budget=byte_budget,
+    )
+
+    assert inp.query == "mutated query"
+    assert request._recall_plan._selections[0].record_id == target.record_id

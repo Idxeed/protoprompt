@@ -93,6 +93,32 @@ per-message framing from `RegexTokenCounter`, and the same output reserve as
 the candidate. It is deliberately simpler than ContextPlan and does not claim
 its tool-dependency or explainability guarantees.
 
+## What v0.3 covers — sealed Ledger checkpoint resume
+
+`v0.3` is a separate frozen semantic suite for the experimental v0.12 sealed
+Ledger checkpoint boundary. It does not measure an agent loop, tool execution,
+latency, throughput, or retrieval quality.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_memory_benchmark.py --suite v0.3 --verify
+```
+
+The frozen fixture SHA-256 is
+`38ab32e37d7f736152710108d0df8a60e9782ef0c94e1cc6e2be7a6a1cb4b1b6`.
+Its verified reference outcome is 4/4 cases and 13/13 semantic checks passing:
+
+| Case | Contract |
+|---|---|
+| `restart_success` | A strict sealed selection re-plans and composes after a SQLite restart; raw memory returns only in the fixed user data lane. |
+| `tamper_rejected` | A direct SQLite mutation of a sealed manifest is rejected by host-held HMAC verification. |
+| `lifecycle_invalidated` | Forgetting a selected record invalidates its checkpoint, removes selection markers, and blocks resume. |
+| `resume_query_binding_and_composition_boundary` | A fresh resume cannot be composed for an unrelated query and preserves the fixed data-lane/request-receipt boundary. |
+
+The fixture, frozen expected report, and rendered reports contain no payload,
+checkpoint secret, or scope correlation ID. This is a PASS/FAIL contract for a
+narrow host-owned selection continuation, not a claim of agent-state recovery,
+lease/exactly-once behavior, or checkpointed workflow execution.
+
 ## Fixture policy
 
 `fixtures/v0.1/suite.json` is immutable. It records the schema, embedding
@@ -101,7 +127,7 @@ cases. The report carries its canonical SHA-256. `expected.json` and the
 frozen `protoprompt-0.6.1.json` reference are bound to that exact hash.
 
 Changing a case, seed, expected semantic outcome, or baseline policy creates a
-new directory such as `fixtures/v0.2/`; it does not rewrite `v0.1`. Generated
+new directory such as `fixtures/v0.3/`; it does not rewrite an earlier suite. Generated
 reports under `benchmarks/results/` remain local and are ignored by Git.
 
 ## Boundaries
@@ -141,3 +167,27 @@ injection-shaped payload только в `user` JSON lane без утечки в
 event-gated race `forget()` с fail-closed final validation. Это PASS/FAIL
 контракт, не claim о latency, качестве модели, железе, provider-е или полной
 защите от prompt injection.
+
+`v0.3` — отдельный frozen semantic suite для sealed Ledger checkpoint boundary
+из v0.12. Он не измеряет agent loop, tool execution, latency, throughput или
+качество retrieval:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_memory_benchmark.py --suite v0.3 --verify
+```
+
+SHA-256 зафиксированной fixture:
+`38ab32e37d7f736152710108d0df8a60e9782ef0c94e1cc6e2be7a6a1cb4b1b6`.
+Проверенный результат — 4/4 cases и 13/13 semantic checks:
+
+| Case | Контракт |
+|---|---|
+| `restart_success` | Strict sealed selection заново планируется и компонуется после SQLite restart; raw memory возвращается только в фиксированном user data lane. |
+| `tamper_rejected` | Прямая SQLite-мутация sealed manifest отклоняется HMAC-проверкой у host-а. |
+| `lifecycle_invalidated` | `forget()` выбранной записи инвалидирует checkpoint, очищает selection markers и блокирует resume. |
+| `resume_query_binding_and_composition_boundary` | Fresh resume нельзя скомпоновать с неродственным query; фиксированные data lane и request receipt сохраняются. |
+
+Fixture, frozen expected report и rendered reports не содержат payload,
+checkpoint secret или scope correlation ID. Это PASS/FAIL контракт для узкого
+host-owned continuation выбора, не заявление о recovery agent state,
+lease/exactly-once behavior или checkpointed workflow execution.

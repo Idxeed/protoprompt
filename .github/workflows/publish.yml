@@ -80,10 +80,11 @@ jobs:
       - name: Run deterministic Ollama reference-app tests
         run: python -m pytest -q apps/ollama-chat/tests
 
-      - name: Verify frozen semantic memory and Ledger composition baselines
+      - name: Verify frozen semantic memory, composition, and checkpoint baselines
         run: |
           python scripts/run_memory_benchmark.py --suite v0.1 --verify
           python scripts/run_memory_benchmark.py --suite v0.2 --verify
+          python scripts/run_memory_benchmark.py --suite v0.3 --verify
 
       - name: Build strict Russian and English documentation
         run: python scripts/build_docs.py --clean

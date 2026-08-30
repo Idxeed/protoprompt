@@ -26,7 +26,11 @@ from protoprompt.injector_budgeted import (
     _snapshot_context_input,
 )
 from protoprompt.ledger.recall.planner import LedgerRecallPlanner
-from protoprompt.ledger.recall.types import LedgerRecallPlan, StaleMemoryPlanError
+from protoprompt.ledger.recall.types import (
+    LedgerRecallPlan,
+    LedgerRecallResume,
+    StaleMemoryPlanError,
+)
 from protoprompt.ledger.types import command_hash, validate_identifier
 from protoprompt.scope import MemoryScope
 
@@ -250,11 +254,92 @@ class LedgerContextComposer:
         ledger_byte_budget: int = 32_768,
         output_reserve: int | None = None,
     ) -> LedgerComposedRequest:
-        """Return one fully bounded request or fail closed before returning it.
+        """Plan and compose one fully bounded, freshly selected request.
 
         ``inp.query`` is the host-provided recall task. The host must create
         the composer with the desired scope and policies; callers cannot pass
         scope, raw Ledger JSON, a role, a lifecycle action, or a placement.
+        """
+
+        if not isinstance(inp, ContextInput):
+            raise TypeError("inp must be a ContextInput")
+        if user_message is not None and final_messages is not None:
+            raise ValueError("pass either user_message or final_messages, not both")
+        input_snapshot = _snapshot_context_input(inp)
+        history_snapshot = snapshot_portable_messages(list(history or []))
+        final_snapshot = (
+            snapshot_portable_messages(list(final_messages))
+            if final_messages is not None
+            else None
+        )
+        recall_plan = self._recall_planner.plan(
+            task=input_snapshot.query,
+            token_budget=ledger_token_budget,
+            byte_budget=ledger_byte_budget,
+        )
+        return await self._compose_recall_plan(
+            recall_plan,
+            input_snapshot,
+            history_snapshot,
+            user_message,
+            final_messages=final_snapshot,
+            output_reserve=output_reserve,
+        )
+
+    async def plan_checkpoint_messages(
+        self,
+        resume: LedgerRecallResume,
+        inp: ContextInput,
+        history: list[dict] | None = None,
+        user_message: str | None = None,
+        *,
+        final_messages: list[dict] | None = None,
+        output_reserve: int | None = None,
+    ) -> LedgerComposedRequest:
+        """Compose a freshly revalidated sealed checkpoint into one request.
+
+        The resume receipt must have been created by this exact planner after
+        it loaded the durable manifest and re-planned against current Ledger
+        state. The stored checkpoint budgets remain authoritative, so this
+        API intentionally accepts no Ledger budget override.
+        """
+
+        if not isinstance(inp, ContextInput):
+            raise TypeError("inp must be a ContextInput")
+        if user_message is not None and final_messages is not None:
+            raise ValueError("pass either user_message or final_messages, not both")
+        input_snapshot = _snapshot_context_input(inp)
+        history_snapshot = snapshot_portable_messages(list(history or []))
+        final_snapshot = (
+            snapshot_portable_messages(list(final_messages))
+            if final_messages is not None
+            else None
+        )
+        recall_plan = self._recall_planner._plan_from_resume(
+            resume,
+            task=input_snapshot.query,
+        )
+        return await self._compose_recall_plan(
+            recall_plan,
+            input_snapshot,
+            history_snapshot,
+            user_message,
+            final_messages=final_snapshot,
+            output_reserve=output_reserve,
+        )
+
+    async def _compose_recall_plan(
+        self,
+        recall_plan: LedgerRecallPlan,
+        inp: ContextInput,
+        history: list[dict] | None = None,
+        user_message: str | None = None,
+        *,
+        final_messages: list[dict] | None = None,
+        output_reserve: int | None = None,
+    ) -> LedgerComposedRequest:
+        """Return one fully bounded request for a planner-owned recall plan.
+
         The Ledger selection is resolved once before asynchronous context work
         and once after all request accounting, immediately before return.
         """
@@ -271,11 +356,6 @@ class LedgerContextComposer:
             else None
         )
 
-        recall_plan = self._recall_planner.plan(
-            task=input_snapshot.query,
-            token_budget=ledger_token_budget,
-            byte_budget=ledger_byte_budget,
-        )
         initial_context = self._recall_planner.resolve(recall_plan)
         host_prefix = self._prefix_for(initial_context.render_data(), initial_context)
 

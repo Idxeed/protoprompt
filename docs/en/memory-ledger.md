@@ -7,7 +7,9 @@ experimental: it does not change `MemoryService`, profiles, session
 compression, vector recall, or `ContextPlan` until a host explicitly installs
 an adapter. In v0.11 that adapter can be the narrow experimental
 `LedgerContextComposer` for admitted Ledger recall; it does not enable Ledger
-globally or change legacy paths.
+globally or change legacy paths. v0.12 schema v6 adds an optional sealed
+recall-checkpoint manifest for that explicit lane; it still does not serialize
+agent state or wire Ledger into an application automatically.
 
 That separation is intentional. A PDF, tool result, transcript, or model
 extraction must never become a trusted system-priority fact simply because it
@@ -211,7 +213,9 @@ running them.
 2. Call `setup()` in an explicit migration job. v5 backfills only
    payload-bearing pre-v5 records as `legacy_unknown`; it never invents a
    modern origin or review audit. Pre-v5 active records remain recallable for
-   compatibility.
+   compatibility. Schema v6 adds sealed recall-checkpoint manifests and their
+   private selection sidecars; it does not backfill a checkpoint from an old
+   plan.
 3. A strict deployment must inventory those legacy active records, quarantine
    them through trusted lifecycle code, and re-ingest/review the data through
    a concrete v5 origin before enabling recall. Do not claim that a migrated
@@ -219,9 +223,15 @@ running them.
 4. Keep legacy readers authoritative while evaluating a separate opt-in
    adapter or importer.
 5. Roll back application traffic only by restoring a pre-upgrade backup into a
-   separate database and returning traffic to the old components. v0.9 code
-   rejects schema v5, so do not attempt an in-place or destructive downgrade
-   of a shared database.
+   separate database and returning traffic to the old components. Older code
+   rejects newer schemas, including v6, so do not attempt an in-place or
+   destructive downgrade of a shared database.
+
+Both `dry_run_setup()` and `setup()` validate the schema-v6 checkpoint sidecars
+and their relational shape. They cannot authenticate a manifest HMAC because
+the stable `checkpoint_secret` deliberately remains outside SQLite; a strict
+`LedgerRecallPlanner.resume_checkpoint()` holding that host secret performs
+the authenticity check.
 
 ## Restart recovery
 
@@ -239,8 +249,18 @@ candidate `record_id` returned by `submit()` and your host-minted action
   a candidate requires a new sealed review. A hard-erased record and its
   prior event IDs are terminal and must never be recreated.
 
-Profile/session/vector importers, stable request composition, and bridges for
-facts/episodes/procedures/RAG evidence remain future work. The experimental
-`LedgerContextComposer` covers only the narrow admitted Ledger JSON → one
-bounded request path; the ledger and its recall lane preserve all other public
-behavior until migration contracts are separately proven.
+A v6 recall checkpoint is separate from `MemoryReview`: resume it only through
+a fresh strict `LedgerRecallPlanner` with the same protected
+`checkpoint_secret`, compatible policy/fingerprint and `counter_id`, and a
+fresh task. The manifest contains only opaque continuation identity and
+selection metadata, never task text, plaintext memory, or provider messages.
+Changing the lifecycle of a selected record invalidates that checkpoint and
+removes its selection markers; it is not an agent/workflow recovery system.
+
+Profile/session/vector importers and bridges for facts/episodes/procedures/RAG
+evidence remain future work. The experimental `LedgerContextComposer` covers
+only the narrow admitted Ledger JSON → one bounded request path, including an
+explicit sealed-checkpoint resume when the host invokes it. There is no lease,
+exactly-once delivery, workflow engine, or automatic integration; the ledger
+and its recall lane preserve all other public behavior until migration contracts
+are separately proven.

@@ -7,6 +7,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-08-30
+
+### Added
+- Experimental durable `LedgerRecallCheckpoint` and `LedgerRecallResume`
+  contracts for a deliberately narrow restart-safe continuation boundary. A
+  checkpoint persists an opaque host checkpoint/continuation reference plus an
+  authenticated strict-selection manifest; it never persists task text, raw
+  memory payload, provider messages, tool outputs, or process-local plans.
+- `LedgerRecallPlanner.checkpoint()` / `resume_checkpoint()` and
+  `LedgerContextComposer.plan_checkpoint_messages()`. Resume re-plans with the
+  stored token/byte budgets and proceeds only when the policy, counter,
+  selected records, revisions, content hashes, and usage receipt exactly
+  match.
+- Ledger SQLite schema v6, with immutable checkpoint manifests and private
+  selection sidecars. Normal setup and dry-run setup validate their structural
+  and relational invariants.
+- Frozen offline Memory Benchmark v0.3: four sealed-checkpoint cases / thirteen
+  checks for restart, tamper rejection, lifecycle invalidation, and
+  query-bound composition. The fixture SHA-256 is
+  `38ab32e37d7f736152710108d0df8a60e9782ef0c94e1cc6e2be7a6a1cb4b1b6`.
+
+### Changed
+- Checkpoint composition shares the bounded v0.11 request path and its final
+  lifecycle validation. Caller-owned `ContextInput`, history, and final
+  messages are snapshotted before recall or counter callbacks can re-enter the
+  host.
+- A v5 → v6 migration is additive and creates no checkpoint backfill; existing
+  Ledger records retain their previous lifecycle and admission semantics.
+
+### Security
+- Durable manifests require a stable, host-owned 32–4096-byte
+  `checkpoint_secret`; an HMAC seal is verified before any fresh plan is
+  returned. The secret, scope, task, raw payload, and selection identifiers are
+  absent from public checkpoint receipts and `explain()` output.
+- Checkpointing is limited to an admission-audited strict recall policy. The
+  resume task must match the fresh plan that produced the opaque resume receipt;
+  a policy/counter mismatch, invalid seal, selection drift, or stale lifecycle
+  state fails closed.
+- Every lifecycle change to a selected record, including hard erase,
+  invalidates the active checkpoint and removes its private selection markers.
+  This feature does not provide leases, exactly-once delivery, an agent
+  workflow engine, or automatic integration with reference applications.
+
 ## [0.11.0] - 2026-08-30
 
 ### Added

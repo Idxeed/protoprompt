@@ -7,7 +7,9 @@ v0.10 превращает долговременную память из без
 сессий, vector recall и `ContextPlan`, пока хост не подключит отдельный
 адаптер. В v0.11 таким отдельным адаптером стал узкий experimental
 `LedgerContextComposer` для admitted Ledger recall; он не включает Ledger
-глобально и не меняет legacy paths.
+глобально и не меняет legacy paths. Schema v6 из v0.12 добавляет optional
+sealed recall-checkpoint manifest для этого явного lane, но не сериализует
+agent state и не подключает Ledger к приложению автоматически.
 
 Такое разделение принципиально: текст из PDF, tool result, транскрипта или
 LLM extraction не может стать доверенным фактом с system-priority лишь потому,
@@ -207,7 +209,9 @@ ledger-owned table/index definitions и отклоняют внешние indexe
 2. Вызовите `setup()` из явной migration job. v5 помечает только
    payload-bearing records до v5 как `legacy_unknown`; он не придумывает
    современный origin или review audit. Active records до v5 остаются
-   recallable ради совместимости.
+   recallable ради совместимости. Schema v6 добавляет sealed
+   recall-checkpoint manifests и private selection sidecars; он не создаёт
+   checkpoint задним числом из старого plan.
 3. В strict deployment сначала inventory этих legacy active records,
    quarantine через trusted lifecycle code и re-ingest/review через concrete
    v5 origin; нельзя заявлять, что migrated legacy record прошёл v0.10
@@ -215,8 +219,13 @@ ledger-owned table/index definitions и отклоняют внешние indexe
 4. Оставьте legacy readers authoritative, пока проверяете отдельный opt-in
    adapter/importer.
 5. Для rollback верните traffic к старым компонентам только через restore
-   backup до upgrade в отдельную БД. Код v0.9 отклоняет schema v5, поэтому не
-   делайте in-place или destructive downgrade общей БД.
+   backup до upgrade в отдельную БД. Старый код отклоняет новые schemas,
+   включая v6, поэтому не делайте in-place или destructive downgrade общей БД.
+
+`dry_run_setup()` и `setup()` проверяют schema-v6 checkpoint sidecars и их
+relational shape. Они не могут аутентифицировать HMAC manifest-а: стабильный
+`checkpoint_secret` намеренно остаётся вне SQLite; seal проверяет строгий
+`LedgerRecallPlanner.resume_checkpoint()`, у которого есть этот host secret.
 
 ## Recovery после restart
 
@@ -233,8 +242,18 @@ ledger-owned table/index definitions и отклоняют внешние indexe
   candidate, нужен новый sealed review. Hard-erased record и его прежние event
   ID terminal и не должны создаваться заново.
 
-Importer для profile/session/vector, stable request composition и bridge для
-facts/episodes/procedures/RAG evidence — будущая работа. Экспериментальный
-`LedgerContextComposer` уже покрывает только узкий путь admitted Ledger JSON →
-один bounded request; Ledger и его recall lane сохраняют остальное публичное
-поведение без изменений, пока migration contracts не будут отдельно доказаны.
+v6 recall checkpoint отделён от `MemoryReview`: resume делайте только через
+новый strict `LedgerRecallPlanner` с тем же защищённым `checkpoint_secret`,
+совместимыми policy/fingerprint и `counter_id`, а также свежим task. Manifest
+содержит лишь opaque continuation identity и selection metadata, но не task
+text, plaintext memory или provider messages. Изменение lifecycle выбранной
+записи инвалидирует checkpoint и удаляет его selection markers; это не
+agent/workflow recovery system.
+
+Importer для profile/session/vector и bridge для facts/episodes/procedures/RAG
+evidence — будущая работа. Экспериментальный `LedgerContextComposer` покрывает
+только узкий путь admitted Ledger JSON → один bounded request, включая явный
+sealed-checkpoint resume, когда его вызывает host. Здесь нет lease,
+exactly-once delivery, workflow engine или auto-wiring; Ledger и его recall
+lane сохраняют остальное публичное поведение без изменений, пока migration
+contracts не будут отдельно доказаны.

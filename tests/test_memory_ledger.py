@@ -72,8 +72,12 @@ def _candidate(
     )
 
 
-def _drop_v5_admission_objects(connection: sqlite3.Connection) -> None:
-    """Stage a genuine pre-v5 fixture from a freshly created Ledger file."""
+def _drop_v5_and_v6_objects(connection: sqlite3.Connection) -> None:
+    """Stage a genuine pre-v5 fixture from a freshly created v6 Ledger file."""
+
+    connection.execute("DROP INDEX IF EXISTS idx_memory_recall_checkpoint_selection_record")
+    connection.execute("DROP TABLE IF EXISTS memory_recall_checkpoint_selections")
+    connection.execute("DROP TABLE IF EXISTS memory_recall_checkpoints")
 
     for trigger_name in (
         "protoprompt_memory_ledger_admission_metadata_reject_update_v1",
@@ -95,7 +99,7 @@ def test_setup_is_explicit_and_dry_run_does_not_create_schema(tmp_path, scope_a)
         assert store.dry_run_setup() == {
             "component": "memory_ledger",
             "from_version": 0,
-            "to_version": 5,
+            "to_version": 6,
             "changes_required": True,
             "actions": ["create isolated memory-ledger tables"],
         }
@@ -109,7 +113,7 @@ def test_setup_is_explicit_and_dry_run_does_not_create_schema(tmp_path, scope_a)
         assert store.schema_version() == 0
 
         store.setup()
-        assert store.schema_version() == 5
+        assert store.schema_version() == 6
         assert store.dry_run_setup()["changes_required"] is False
     finally:
         store.close()
@@ -174,7 +178,7 @@ def test_setup_fails_closed_when_an_unrelated_database_uses_a_reserved_table_cas
         connection.close()
 
 
-def test_explicit_v1_to_v5_migration_adds_erasure_source_and_admission_guards(tmp_path):
+def test_explicit_v1_to_v6_migration_adds_erasure_source_admission_and_checkpoint_guards(tmp_path):
     path = tmp_path / "v1-ledger.db"
     fresh = SqliteMemoryLedger(str(path))
     fresh.setup()
@@ -182,7 +186,7 @@ def test_explicit_v1_to_v5_migration_adds_erasure_source_and_admission_guards(tm
 
     connection = sqlite3.connect(path)
     try:
-        _drop_v5_admission_objects(connection)
+        _drop_v5_and_v6_objects(connection)
         connection.execute("DROP TABLE memory_erasure_tombstones")
         connection.execute("DROP TABLE memory_erasure_receipts")
         connection.execute("DROP TABLE memory_erased_event_tombstones")
@@ -198,17 +202,18 @@ def test_explicit_v1_to_v5_migration_adds_erasure_source_and_admission_guards(tm
         assert upgraded.dry_run_setup() == {
             "component": "memory_ledger",
             "from_version": 1,
-            "to_version": 5,
+            "to_version": 6,
             "changes_required": True,
             "actions": [
                 "add v2 erasure receipts and replay tombstones",
                 "add v3 erased-command replay barriers",
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
                 "add v5 admission provenance and review audit tables",
+                "add v6 sealed recall checkpoint manifests",
             ],
         }
         upgraded.setup()
-        assert upgraded.schema_version() == 5
+        assert upgraded.schema_version() == 6
     finally:
         upgraded.close()
 
@@ -230,11 +235,23 @@ def test_explicit_v1_to_v5_migration_adds_erasure_source_and_admission_guards(tm
             "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'memory_source_revocation_tombstones'"
         ).fetchone() is not None
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'memory_recall_checkpoints'"
+        ).fetchone() is not None
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'memory_recall_checkpoint_selections'"
+        ).fetchone() is not None
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'index' "
+            "AND name = 'idx_memory_recall_checkpoint_selection_record'"
+        ).fetchone() is not None
     finally:
         connection.close()
 
 
-def test_v3_to_v5_migration_scrubs_legacy_fingerprints_through_its_old_guard(
+def test_v3_to_v6_migration_scrubs_legacy_fingerprints_through_its_old_guard(
     tmp_path,
     scope_a,
 ):
@@ -251,7 +268,7 @@ def test_v3_to_v5_migration_scrubs_legacy_fingerprints_through_its_old_guard(
 
     connection = sqlite3.connect(path)
     try:
-        _drop_v5_admission_objects(connection)
+        _drop_v5_and_v6_objects(connection)
         connection.execute("DROP TABLE memory_source_revocation_tombstones")
         connection.execute(
             "DROP TRIGGER protoprompt_memory_ledger_events_reject_update_v1"
@@ -280,9 +297,10 @@ def test_v3_to_v5_migration_scrubs_legacy_fingerprints_through_its_old_guard(
         assert upgraded.dry_run_setup()["actions"] == [
             "add v4 source-revocation barriers and scrub legacy event fingerprints",
             "add v5 admission provenance and review audit tables",
+            "add v6 sealed recall checkpoint manifests",
         ]
         upgraded.setup()
-        assert upgraded.schema_version() == 5
+        assert upgraded.schema_version() == 6
     finally:
         upgraded.close()
 
@@ -312,7 +330,7 @@ def test_migration_fails_closed_before_adopting_an_incompatible_future_table(tmp
 
     connection = sqlite3.connect(path)
     try:
-        _drop_v5_admission_objects(connection)
+        _drop_v5_and_v6_objects(connection)
         connection.execute("DROP TABLE memory_erasure_tombstones")
         connection.execute("DROP TABLE memory_erasure_receipts")
         connection.execute("DROP TABLE memory_erased_event_tombstones")
@@ -357,7 +375,7 @@ def test_migration_fails_closed_on_a_future_table_with_incompatible_constraints(
 
     connection = sqlite3.connect(path)
     try:
-        _drop_v5_admission_objects(connection)
+        _drop_v5_and_v6_objects(connection)
         connection.execute("DROP TABLE memory_erasure_tombstones")
         connection.execute("DROP TABLE memory_erasure_receipts")
         connection.execute("DROP TABLE memory_erased_event_tombstones")
@@ -406,7 +424,7 @@ def test_migration_dry_run_rejects_a_future_reserved_table_name_owned_by_a_view(
 
     connection = sqlite3.connect(path)
     try:
-        _drop_v5_admission_objects(connection)
+        _drop_v5_and_v6_objects(connection)
         connection.execute("DROP TABLE memory_erasure_tombstones")
         connection.execute("DROP TABLE memory_erasure_receipts")
         connection.execute("DROP TABLE memory_erased_event_tombstones")
@@ -533,7 +551,7 @@ def test_setup_rechecks_migration_target_schema_after_acquiring_write_lock(tmp_p
     fresh.close()
     connection = sqlite3.connect(path)
     try:
-        _drop_v5_admission_objects(connection)
+        _drop_v5_and_v6_objects(connection)
         connection.execute("DROP TABLE memory_erasure_tombstones")
         connection.execute("DROP TABLE memory_erasure_receipts")
         connection.execute("DROP TABLE memory_erased_event_tombstones")
@@ -1517,7 +1535,7 @@ def test_projection_persists_and_event_rows_cannot_be_updated(tmp_path, scope_a)
 
     second = SqliteMemoryLedger(str(path))
     try:
-        assert second.schema_version() == 5
+        assert second.schema_version() == 6
         persisted = second.get(scope_a, active.record_id)
         assert persisted is not None
         assert persisted.content == "persist sentinel"

@@ -19,6 +19,11 @@ data lane**. The standalone planner keeps it separate; v0.11 adds an explicit
 experimental `LedgerContextComposer` for a host that needs one exact provider
 request.
 
+v0.12 adds a deliberately narrow durable continuation boundary: a sealed
+recall checkpoint can survive a process restart, but it is neither an agent
+checkpoint nor an unlimited-memory mechanism. It preserves a verified recall
+selection, not a provider conversation or workflow state.
+
 For a concrete v5 ingress origin, the active reader verifies the matching
 immutable `allow` audit before a record enters this lane. Records migrated
 from pre-v5 schemas carry `legacy_unknown` and remain recallable only for
@@ -267,9 +272,11 @@ fingerprint, plus `counter_id`. The built-in counter is
 application injects a custom counter, so a saved receipt states the accounting
 contract it used.
 
-The plan itself is an in-process, planner-bound capability, not a portable
-checkpoint: persist `plan.explain()` for audit, then create a fresh plan after a
-restart or handoff.
+`LedgerRecallPlan` itself remains an in-process, planner-bound capability, not
+a portable checkpoint. It cannot be serialized, transferred to another
+planner, or revived after restart. Persist `plan.explain()` for audit; use the
+separate sealed-checkpoint API below only when the host needs its narrow,
+restart-safe selection contract.
 
 `used_tokens` is the result of the configured `TokenCounter` over the entire
 prospective JSON envelope. `used_bytes` is the strict UTF-8 length of the same
@@ -306,6 +313,83 @@ that final validation. `ContextPlan.data_lanes` contains content-free
 `ContextRequestReceipt.input_tokens` remains the only authoritative total for
 the full provider request: the lane receipt explains a part of it but does not
 replace exact whole-message accounting.
+
+## Sealed recall checkpoints (v0.12)
+
+A sealed checkpoint is an explicit, opt-in restart boundary for **one strict
+Ledger selection**. Schema v6 stores an opaque `checkpoint_id`, an opaque
+`continuation_ref`, the content-free policy/counter/budget receipt, and private
+selection markers (record ID, revision, content hash, and kind). It does not
+store task text, raw memory payload, provider messages, tool output, or raw
+host/agent state. The continuation reference is only a host-owned opaque
+handle; Ledger does not serialize what it points to.
+
+`LedgerRecallPlanner.checkpoint()` is available only when
+`require_admission_audit=True` (normally
+`LedgerRecallPolicy.admission_safe_default()`) and the planner has a stable
+host-owned `checkpoint_secret`. The 32–4096-byte secret seals the durable
+manifest with HMAC-SHA256 and is never written to SQLite or a public receipt.
+The same protected secret must be supplied to the fresh planner after restart.
+
+```python
+# writer, counter, and builder are host-owned and use one strict scope.
+# host_secret is a protected, stable 32+ byte value, never stored in SQLite.
+planner = LedgerRecallPlanner(
+    writer,
+    policy=LedgerRecallPolicy.admission_safe_default(),
+    counter=counter,
+    checkpoint_secret=host_secret,
+)
+plan = planner.plan(task="repair durable recovery", token_budget=600)
+checkpoint = planner.checkpoint(
+    plan,
+    checkpoint_id="checkpoint-42",
+    continuation_ref="continuation-42",
+)
+
+# After restart, recreate the writer/builder/planner for the same scope.
+# The rebuilt builder and planner share `counter`; the planner gets host_secret.
+resumed_planner = LedgerRecallPlanner(
+    writer,
+    policy=LedgerRecallPolicy.admission_safe_default(),
+    counter=counter,
+    checkpoint_secret=host_secret,
+)
+resume = resumed_planner.resume_checkpoint(
+    checkpoint.checkpoint_id,
+    task="repair durable recovery",
+)
+resumed_composer = LedgerContextComposer(builder, resumed_planner)
+request = await resumed_composer.plan_checkpoint_messages(
+    resume,
+    ContextInput(query="repair durable recovery", include_session=False),
+    user_message="Continue the recovery task.",
+)
+```
+
+The fresh `task` is required because no task is persisted. It must match
+`ContextInput.query` when `plan_checkpoint_messages()` is called; the private
+`LedgerRecallResume` cannot be composed into an unrelated request. Stored
+Ledger budgets remain authoritative—there is no resume-time budget override.
+
+On resume, the planner verifies the HMAC, requires the original strict policy
+ID/fingerprint and `counter_id`, makes a fresh plan using the stored budgets,
+and requires the exact selection tuple and used token/byte receipts to match.
+Policy or counter drift, a changed/expired/ineligible selection, or a bad seal
+fails closed before a provider request is built. The ordinary final composer
+validation still guards the interval between resume and send.
+
+Any lifecycle change to a selected record invalidates its active checkpoint in
+the same Ledger transaction and removes its private selection markers. A
+resume whose fresh selection has changed does the same. `dry_run_setup()` and
+`setup()` validate the v6 sidecar structure and its relational invariants, but
+cannot validate HMAC authenticity: only a host process holding
+`checkpoint_secret` can do that during resume.
+
+This feature deliberately provides no lease, exactly-once delivery, workflow
+engine, or automatic integration with `pp-agent`, `pp-ollama-chat`, legacy
+memory, or provider sessions. The host explicitly creates, resumes, and
+composes each checkpoint.
 
 ## Scope and deletion boundary
 

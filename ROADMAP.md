@@ -1,7 +1,7 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.11.0` добавляет trusted Ledger-to-request composition для admitted
-> memory;
+> Статус: `0.12.0` добавляет sealed strict Ledger selection checkpoints для
+> restart-safe recall без хранения task/payload/provider state;
 > следующий этап — стабилизация и RC к `1.0.0`.
 > Обновлён: 2026-08-30.
 >
@@ -224,11 +224,14 @@ index, summaries и framework-specific state — его projections/caches, а �
   эпизодов; не превращать неудачный model output в инструкцию.
 - Перенести полезные части экспериментального `WorkingMemory` (scoring,
   hot/cold zones, manifests, checkpoints) в ledger + planner.
-- Добавить controlled consolidation, checkpoints/resume и policy-driven
-  composition для facts, episodes, procedures, RAG evidence и current task.
-  Узкий admitted Ledger JSON → request bridge выпущен отдельно в `0.11.0`;
-  широкая composition policy и скрытая вставка в system prompt не являются
-  его следствием.
+- [x] Добавить узкий sealed checkpoint/resume только для strict Ledger
+  selection: v0.12 хранит opaque host reference и HMAC-sealed selection
+  manifest, а после restart требует fresh plan с точным policy/counter/budget
+  receipt и тем же selection. Это не checkpoint agent workflow/state.
+- Добавить controlled consolidation и policy-driven composition для facts,
+  episodes, procedures, RAG evidence и current task. Узкий admitted Ledger
+  JSON → request bridge выпущен отдельно в `0.11.0`; широкая composition
+  policy и скрытая вставка в system prompt не являются его следствием.
 - Перевести bridges к LangGraph, OpenAI Agents SDK, PydanticAI и LlamaIndex на
   единый contract там, где это не ломает public semantics.
 - Выпустить ProtoPrompt Memory Benchmark v1.0 как regression gate.
@@ -319,6 +322,42 @@ builder может делать RAG/embedding work. Он не auto-wired в Olla
 host-message API. Это не claim о prompt-injection immunity или universal
 recall quality.
 
+## 0.12.0 — Sealed Ledger selection checkpoints
+
+**Цель:** безопасно пережить restart одного строго ограниченного Ledger recall
+решения, не сериализуя контекст, agent state или чувствительные payload.
+
+### Выполнено
+
+- [x] Добавлены `LedgerRecallCheckpoint` и `LedgerRecallResume`: durable
+  manifest содержит лишь opaque checkpoint/continuation references, policy и
+  counter identity, budgets/receipt и private selection markers. Task, raw
+  memory, provider messages, tool output и process-local plan в SQLite не
+  пишутся.
+- [x] `checkpoint()` доступен только для admission-audited strict policy и
+  требует stable host-owned `checkpoint_secret`; HMAC manifest проверяется до
+  любого resume. Public receipt и `explain()` не раскрывают secret, scope,
+  task, record IDs или payload.
+- [x] После restart `resume_checkpoint()` строит fresh plan со stored token/
+  byte budgets и принимает его лишь при полном совпадении policy, counter,
+  selection, revision/content hash и used receipt. Изменение или lifecycle
+  stale state invalidates checkpoint и fail-closed.
+- [x] Schema v6 добавляет immutable manifest/selection sidecars. Любой
+  lifecycle transition выбранной записи, включая hard erase, в той же Ledger
+  transaction инвалидирует checkpoint и удаляет private selection markers.
+- [x] `plan_checkpoint_messages()` использует тот же bounded request path и
+  final resolve, что v0.11; resume task привязан к `ContextInput.query`.
+  Frozen offline v0.3 suite фиксирует restart, tamper, lifecycle и
+  query-binding/composition cases (4 сценария / 13 checks).
+
+### Неподвижная граница
+
+Это sealed selection manifest, а не durable agent state: здесь нет lease,
+exactly-once delivery, workflow engine, tool replay, provider continuation или
+автоматического подключения к CLI/Ollama app. Внешний signer/process isolation
+по-прежнему нужны, если модель угроз включает arbitrary in-process code или
+прямой SQLite access.
+
 ## 1.0.0 release candidates — Stabilize, don't expand
 
 После `0.9.0` начинается API freeze. Новая feature не входит в RC без
@@ -348,6 +387,9 @@ recall quality.
 - Composed Ledger lane проходит no-raw/legacy provenance, no-payload-in-
   `explain`, exact receipt reconciliation, tool dependency, explicit
   `ledger_data` boundary и stale lifecycle race regressions.
+- Sealed checkpoint resume проходит restart, HMAC-tamper, policy/counter
+  drift, query-binding, lifecycle invalidation и hard-erase sidecar-scrub
+  regressions; он по-прежнему не объявляется agent/workflow checkpoint.
 - Schema migrations имеют forward path и documented rollback; data loss не
   допускается как побочный эффект обычного upgrade.
 

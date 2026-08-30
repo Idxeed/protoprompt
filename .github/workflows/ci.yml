@@ -101,10 +101,11 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install .
-      - name: Verify frozen semantic memory and Ledger composition baselines
+      - name: Verify frozen semantic memory and Ledger checkpoint baselines
         run: |
           python scripts/run_memory_benchmark.py --suite v0.1 --verify
           python scripts/run_memory_benchmark.py --suite v0.2 --verify
+          python scripts/run_memory_benchmark.py --suite v0.3 --verify
 
   lint:
     name: lint
@@ -183,6 +184,9 @@ jobs:
                   "benchmarks/ledger_composition_benchmark.py",
                   "benchmarks/fixtures/v0.2/suite.json",
                   "benchmarks/fixtures/v0.2/expected.json",
+                  "benchmarks/ledger_checkpoint_benchmark.py",
+                  "benchmarks/fixtures/v0.3/suite.json",
+                  "benchmarks/fixtures/v0.3/expected.json",
                   "docs/en/migration-0.6.md",
                   "docs/ru/migration-0.6.md",
               }

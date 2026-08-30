@@ -61,6 +61,8 @@ _EVENT_UPDATE_TRIGGER_NAME = "protoprompt_memory_ledger_events_reject_update_v1"
 _LEGACY_EVENT_UPDATE_TRIGGER_NAME = "memory_events_reject_update"
 _EVENT_GUARD_SCHEMA_VERSION = 4
 _ADMISSION_GUARD_SCHEMA_VERSION = 5
+_CHECKPOINT_SCHEMA_VERSION = 6
+_RECALL_CHECKPOINT_MANIFEST_SCHEMA_VERSION = 1
 _ADMISSION_METADATA_UPDATE_TRIGGER_NAME = (
     "protoprompt_memory_ledger_admission_metadata_reject_update_v1"
 )
@@ -332,6 +334,58 @@ _SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS idx_memory_review_audits_record
     ON memory_review_audits (scope_id, scope_json, record_id, event_id)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_recall_checkpoints (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('active', 'invalidated')),
+        continuation_ref TEXT NOT NULL,
+        policy_id TEXT NOT NULL,
+        policy_fingerprint TEXT NOT NULL,
+        counter_id TEXT NOT NULL,
+        token_budget INTEGER NOT NULL CHECK (token_budget >= 0),
+        byte_budget INTEGER NOT NULL CHECK (byte_budget >= 0),
+        used_tokens INTEGER NOT NULL CHECK (used_tokens >= 0),
+        used_bytes INTEGER NOT NULL CHECK (used_bytes >= 0),
+        selected_count INTEGER NOT NULL CHECK (selected_count >= 0),
+        created_at TEXT NOT NULL,
+        invalidated_at TEXT,
+        invalidation_reason TEXT,
+        integrity_tag TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        PRIMARY KEY (scope_id, scope_json, checkpoint_id),
+        CHECK (used_tokens <= token_budget),
+        CHECK (used_bytes <= byte_budget),
+        CHECK (
+            (state = 'active' AND invalidated_at IS NULL AND invalidation_reason IS NULL)
+            OR
+            (state = 'invalidated' AND invalidated_at IS NOT NULL
+             AND invalidation_reason IS NOT NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_recall_checkpoint_selections (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        record_id TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK (revision > 0),
+        content_hash TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        PRIMARY KEY (scope_id, scope_json, checkpoint_id, ordinal),
+        UNIQUE (scope_id, scope_json, checkpoint_id, record_id),
+        FOREIGN KEY (scope_id, scope_json, checkpoint_id)
+            REFERENCES memory_recall_checkpoints(scope_id, scope_json, checkpoint_id)
+            ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_memory_recall_checkpoint_selection_record
+    ON memory_recall_checkpoint_selections (scope_id, scope_json, record_id)
+    """,
 )
 
 _V2_MIGRATION_STATEMENTS = (
@@ -436,6 +490,61 @@ _V5_MIGRATION_STATEMENTS = (
     """,
 )
 
+_V6_MIGRATION_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS memory_recall_checkpoints (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('active', 'invalidated')),
+        continuation_ref TEXT NOT NULL,
+        policy_id TEXT NOT NULL,
+        policy_fingerprint TEXT NOT NULL,
+        counter_id TEXT NOT NULL,
+        token_budget INTEGER NOT NULL CHECK (token_budget >= 0),
+        byte_budget INTEGER NOT NULL CHECK (byte_budget >= 0),
+        used_tokens INTEGER NOT NULL CHECK (used_tokens >= 0),
+        used_bytes INTEGER NOT NULL CHECK (used_bytes >= 0),
+        selected_count INTEGER NOT NULL CHECK (selected_count >= 0),
+        created_at TEXT NOT NULL,
+        invalidated_at TEXT,
+        invalidation_reason TEXT,
+        integrity_tag TEXT NOT NULL,
+        schema_version INTEGER NOT NULL,
+        PRIMARY KEY (scope_id, scope_json, checkpoint_id),
+        CHECK (used_tokens <= token_budget),
+        CHECK (used_bytes <= byte_budget),
+        CHECK (
+            (state = 'active' AND invalidated_at IS NULL AND invalidation_reason IS NULL)
+            OR
+            (state = 'invalidated' AND invalidated_at IS NOT NULL
+             AND invalidation_reason IS NOT NULL)
+        )
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_recall_checkpoint_selections (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        checkpoint_id TEXT NOT NULL,
+        ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+        record_id TEXT NOT NULL,
+        revision INTEGER NOT NULL CHECK (revision > 0),
+        content_hash TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        PRIMARY KEY (scope_id, scope_json, checkpoint_id, ordinal),
+        UNIQUE (scope_id, scope_json, checkpoint_id, record_id),
+        FOREIGN KEY (scope_id, scope_json, checkpoint_id)
+            REFERENCES memory_recall_checkpoints(scope_id, scope_json, checkpoint_id)
+            ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_memory_recall_checkpoint_selection_record
+    ON memory_recall_checkpoint_selections (scope_id, scope_json, record_id)
+    """,
+)
+
 _V1_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     "ledger_schema": frozenset({"component", "version", "applied_at"}),
     "memory_events": frozenset({
@@ -496,12 +605,26 @@ _V5_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     }),
 }
 
+_V6_TABLE_COLUMNS: dict[str, frozenset[str]] = {
+    "memory_recall_checkpoints": frozenset({
+        "scope_id", "scope_json", "checkpoint_id", "state", "continuation_ref",
+        "policy_id", "policy_fingerprint", "counter_id", "token_budget",
+        "byte_budget", "used_tokens", "used_bytes", "selected_count", "created_at",
+        "invalidated_at", "invalidation_reason", "integrity_tag", "schema_version",
+    }),
+    "memory_recall_checkpoint_selections": frozenset({
+        "scope_id", "scope_json", "checkpoint_id", "ordinal", "record_id",
+        "revision", "content_hash", "kind",
+    }),
+}
+
 _ALL_LEDGER_TABLE_COLUMNS = (
     _V1_TABLE_COLUMNS
     | _V2_TABLE_COLUMNS
     | _V3_TABLE_COLUMNS
     | _V4_TABLE_COLUMNS
     | _V5_TABLE_COLUMNS
+    | _V6_TABLE_COLUMNS
 )
 
 
@@ -557,7 +680,10 @@ def _ledger_index_signatures() -> dict[str, str]:
 
 
 _LEDGER_INDEX_SIGNATURES = _ledger_index_signatures()
-_V5_INDEX_NAMES = frozenset({"idx_memory_review_audits_record"})
+_INDEX_INTRODUCED_VERSION = {
+    "idx_memory_review_audits_record": 5,
+    "idx_memory_recall_checkpoint_selection_record": 6,
+}
 _EVENT_UPDATE_TRIGGER_SIGNATURE = _normalized_table_sql(_EVENT_UPDATE_TRIGGER_SQL)
 _ADMISSION_IMMUTABILITY_TRIGGERS = {
     _ADMISSION_METADATA_UPDATE_TRIGGER_NAME: (
@@ -599,7 +725,7 @@ def _required_index_signatures(current: int) -> dict[str, str]:
     return {
         name: signature
         for name, signature in _LEDGER_INDEX_SIGNATURES.items()
-        if current >= 5 or name not in _V5_INDEX_NAMES
+        if current >= _INDEX_INTRODUCED_VERSION.get(name, 1)
     }
 
 
@@ -656,7 +782,7 @@ class SqliteMemoryLedger:
     migration/setup job before serving traffic.
     """
 
-    MIGRATION_VERSION = 5
+    MIGRATION_VERSION = 6
 
     def __init__(self, path: str = ":memory:") -> None:
         self._conn = sqlite3.connect(path, check_same_thread=False)
@@ -679,6 +805,7 @@ class SqliteMemoryLedger:
             self._assert_schema_compatible_locked(
                 current,
                 validate_admission_data=True,
+                validate_checkpoint_data=True,
             )
             if current > self.MIGRATION_VERSION:
                 raise LedgerStateError(
@@ -703,6 +830,7 @@ class SqliteMemoryLedger:
                     allow_event_guard_repair=True,
                     allow_admission_guard_repair=True,
                     validate_admission_data=True,
+                    validate_checkpoint_data=True,
                 )
                 if current > self.MIGRATION_VERSION:
                     raise LedgerStateError(
@@ -724,6 +852,7 @@ class SqliteMemoryLedger:
                     allow_event_guard_repair=True,
                     allow_admission_guard_repair=True,
                     validate_admission_data=True,
+                    validate_checkpoint_data=True,
                 )
                 self._conn.execute(
                     "INSERT INTO ledger_schema (component, version, applied_at) "
@@ -1394,6 +1523,13 @@ class SqliteMemoryLedger:
                 if record is None:
                     raise KeyError(identity)
                 self._check_revision(record, expected_revision)
+                self._invalidate_recall_checkpoints_for_record_locked(
+                    scope_id,
+                    scope_json,
+                    identity,
+                    reason_code="selected_record_erased",
+                    occurred_at=utc_now(),
+                )
                 prior_event_ids = [
                     str(row["event_id"])
                     for row in self._conn.execute(
@@ -1561,6 +1697,354 @@ class SqliteMemoryLedger:
                     )
                     for record_id, revision, expected_hash, kind in normalized_selections
                 )
+
+    def _create_recall_checkpoint(
+        self,
+        scope: MemoryScope,
+        *,
+        checkpoint_id: str,
+        continuation_ref: str,
+        policy_id: str,
+        policy_fingerprint: str,
+        counter_id: str,
+        token_budget: int,
+        byte_budget: int,
+        used_tokens: int,
+        used_bytes: int,
+        selections: Iterable[tuple[str, int, str, MemoryKind]],
+        active_read_limit: int,
+        created_at: datetime,
+        integrity_tag: str,
+    ) -> dict[str, object]:
+        """Persist a sealed strict-recall manifest after final lifecycle validation.
+
+        This private capability accepts only opaque host identifiers and
+        selection markers.  It deliberately receives no task text, plaintext
+        memory, provider messages, or generic host state.  The caller creates
+        its HMAC seal before entering this transaction; SQLite never receives
+        the corresponding host key.
+        """
+
+        identity = validate_identifier(checkpoint_id, field="checkpoint_id")
+        continuation = validate_identifier(continuation_ref, field="continuation_ref")
+        policy_identity = validate_identifier(policy_id, field="policy_id")
+        counter_identity = validate_identifier(counter_id, field="counter_id")
+        normalized_selections = self._normalize_active_snapshot_markers(selections)
+        if len({marker[0] for marker in normalized_selections}) != len(normalized_selections):
+            raise ValueError("checkpoint selections must not contain duplicate record IDs")
+        self._validate_active_limit(active_read_limit)
+        for field_name, value in (
+            ("token_budget", token_budget),
+            ("byte_budget", byte_budget),
+            ("used_tokens", used_tokens),
+            ("used_bytes", used_bytes),
+        ):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if used_tokens > token_budget or used_bytes > byte_budget:
+            raise ValueError("checkpoint receipt exceeds its configured budget")
+        for field_name, digest in (
+            ("policy_fingerprint", policy_fingerprint),
+            ("integrity_tag", integrity_tag),
+        ):
+            if (
+                not isinstance(digest, str)
+                or len(digest) != 64
+                or any(character not in "0123456789abcdef" for character in digest)
+            ):
+                raise ValueError(f"{field_name} must be a lowercase 64-character digest")
+        instant = coerce_datetime(created_at, field="created_at")
+        assert instant is not None
+        scope_id, scope_json = _scope_storage(scope)
+        with self._lock:
+            with self._ready_write_transaction_locked():
+                existing = self._conn.execute(
+                    "SELECT 1 FROM memory_recall_checkpoints "
+                    "WHERE scope_id = ? AND scope_json = ? AND checkpoint_id = ?",
+                    (scope_id, scope_json, identity),
+                ).fetchone()
+                if existing is not None:
+                    raise LedgerConflictError("checkpoint_id was already used in this scope")
+                current_by_id = {
+                    record.record_id: record
+                    for record in self._list_active_locked(
+                        scope,
+                        instant=instant,
+                        limit=active_read_limit,
+                    )
+                }
+                if not all(
+                    (
+                        (record := current_by_id.get(record_id)) is not None
+                        and record.revision == revision
+                        and record.content_hash == expected_hash
+                        and record.kind is kind
+                    )
+                    for record_id, revision, expected_hash, kind in normalized_selections
+                ):
+                    raise LedgerStateError(
+                        "selected ledger memory changed before checkpoint creation; replan"
+                    )
+                self._conn.execute(
+                    "INSERT INTO memory_recall_checkpoints "
+                    "(scope_id, scope_json, checkpoint_id, state, continuation_ref, policy_id, "
+                    "policy_fingerprint, counter_id, token_budget, byte_budget, used_tokens, "
+                    "used_bytes, selected_count, created_at, invalidated_at, invalidation_reason, "
+                    "integrity_tag, schema_version) "
+                    "VALUES (?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?)",
+                    (
+                        scope_id,
+                        scope_json,
+                        identity,
+                        continuation,
+                        policy_identity,
+                        policy_fingerprint,
+                        counter_identity,
+                        token_budget,
+                        byte_budget,
+                        used_tokens,
+                        used_bytes,
+                        len(normalized_selections),
+                        format_timestamp(instant),
+                        integrity_tag,
+                        _RECALL_CHECKPOINT_MANIFEST_SCHEMA_VERSION,
+                    ),
+                )
+                for ordinal, (record_id, revision, expected_hash, kind) in enumerate(
+                    normalized_selections
+                ):
+                    self._conn.execute(
+                        "INSERT INTO memory_recall_checkpoint_selections "
+                        "(scope_id, scope_json, checkpoint_id, ordinal, record_id, revision, "
+                        "content_hash, kind) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            scope_id,
+                            scope_json,
+                            identity,
+                            ordinal,
+                            record_id,
+                            revision,
+                            expected_hash,
+                            kind.value,
+                        ),
+                    )
+                return self._recall_checkpoint_manifest_locked(scope, identity)
+
+    def _load_recall_checkpoint(
+        self,
+        scope: MemoryScope,
+        checkpoint_id: str,
+    ) -> dict[str, object]:
+        """Load one checkpoint manifest without resolving any memory payload."""
+
+        identity = validate_identifier(checkpoint_id, field="checkpoint_id")
+        _scope_storage(scope)
+        with self._lock:
+            self._require_ready_locked()
+            with self._read_transaction_locked():
+                return self._recall_checkpoint_manifest_locked(scope, identity)
+
+    def _invalidate_recall_checkpoint(
+        self,
+        scope: MemoryScope,
+        checkpoint_id: str,
+        *,
+        reason_code: str,
+        occurred_at: datetime,
+    ) -> bool:
+        """Invalidate one manifest and remove its derived selection metadata."""
+
+        identity = validate_identifier(checkpoint_id, field="checkpoint_id")
+        reason = validate_identifier(reason_code, field="reason_code")
+        instant = coerce_datetime(occurred_at, field="occurred_at")
+        assert instant is not None
+        with self._lock:
+            with self._ready_write_transaction_locked():
+                return self._invalidate_recall_checkpoints_locked(
+                    scope,
+                    checkpoint_ids=(identity,),
+                    reason_code=reason,
+                    occurred_at=instant,
+                ) > 0
+
+    def _invalidate_recall_checkpoints_for_record_locked(
+        self,
+        scope_id: str,
+        scope_json: str,
+        record_id: str,
+        *,
+        reason_code: str,
+        occurred_at: datetime,
+    ) -> int:
+        """Fail-close every active manifest that selected one changed record."""
+
+        rows = self._conn.execute(
+            "SELECT DISTINCT s.checkpoint_id "
+            "FROM memory_recall_checkpoint_selections AS s "
+            "JOIN memory_recall_checkpoints AS c ON c.scope_id = s.scope_id "
+            "AND c.scope_json = s.scope_json AND c.checkpoint_id = s.checkpoint_id "
+            "WHERE s.scope_id = ? AND s.scope_json = ? AND s.record_id = ? "
+            "AND c.state = 'active' ORDER BY s.checkpoint_id",
+            (scope_id, scope_json, record_id),
+        ).fetchall()
+        return self._invalidate_recall_checkpoints_locked(
+            None,
+            checkpoint_ids=tuple(str(row["checkpoint_id"]) for row in rows),
+            reason_code=reason_code,
+            occurred_at=occurred_at,
+            scope_id=scope_id,
+            scope_json=scope_json,
+        )
+
+    def _invalidate_recall_checkpoints_locked(
+        self,
+        scope: MemoryScope | None,
+        *,
+        checkpoint_ids: Iterable[str],
+        reason_code: str,
+        occurred_at: datetime,
+        scope_id: str | None = None,
+        scope_json: str | None = None,
+    ) -> int:
+        """Apply one-way checkpoint invalidation inside an open write transaction."""
+
+        if scope is not None:
+            scope_id, scope_json = _scope_storage(scope)
+        assert scope_id is not None and scope_json is not None
+        identities = tuple(
+            validate_identifier(checkpoint_id, field="checkpoint_id")
+            for checkpoint_id in checkpoint_ids
+        )
+        if not identities:
+            return 0
+        changed = 0
+        for identity in identities:
+            cursor = self._conn.execute(
+                "UPDATE memory_recall_checkpoints SET state = 'invalidated', "
+                "invalidated_at = ?, invalidation_reason = ? "
+                "WHERE scope_id = ? AND scope_json = ? AND checkpoint_id = ? "
+                "AND state = 'active'",
+                (
+                    format_timestamp(occurred_at),
+                    reason_code,
+                    scope_id,
+                    scope_json,
+                    identity,
+                ),
+            )
+            if cursor.rowcount == 1:
+                self._conn.execute(
+                    "DELETE FROM memory_recall_checkpoint_selections "
+                    "WHERE scope_id = ? AND scope_json = ? AND checkpoint_id = ?",
+                    (scope_id, scope_json, identity),
+                )
+                changed += 1
+        return changed
+
+    def _recall_checkpoint_manifest_locked(
+        self,
+        scope: MemoryScope,
+        checkpoint_id: str,
+    ) -> dict[str, object]:
+        """Decode a sealed manifest while a caller owns a stable DB snapshot."""
+
+        identity = validate_identifier(checkpoint_id, field="checkpoint_id")
+        scope_id, scope_json = _scope_storage(scope)
+        row = self._conn.execute(
+            "SELECT checkpoint_id, state, continuation_ref, policy_id, policy_fingerprint, "
+            "counter_id, token_budget, byte_budget, used_tokens, used_bytes, selected_count, "
+            "created_at, invalidated_at, invalidation_reason, integrity_tag, schema_version "
+            "FROM memory_recall_checkpoints WHERE scope_id = ? AND scope_json = ? "
+            "AND checkpoint_id = ?",
+            (scope_id, scope_json, identity),
+        ).fetchone()
+        if row is None:
+            raise KeyError(identity)
+        selection_rows = self._conn.execute(
+            "SELECT ordinal, record_id, revision, content_hash, kind "
+            "FROM memory_recall_checkpoint_selections "
+            "WHERE scope_id = ? AND scope_json = ? AND checkpoint_id = ? ORDER BY ordinal",
+            (scope_id, scope_json, identity),
+        ).fetchall()
+        try:
+            state = str(row["state"])
+            if state not in {"active", "invalidated"}:
+                raise ValueError("checkpoint state is invalid")
+            if int(row["schema_version"]) != _RECALL_CHECKPOINT_MANIFEST_SCHEMA_VERSION:
+                raise ValueError("checkpoint schema version is invalid")
+            for field_name in ("checkpoint_id", "continuation_ref", "policy_id", "counter_id"):
+                validate_identifier(str(row[field_name]), field=field_name)
+            for field_name in ("policy_fingerprint", "integrity_tag"):
+                digest = str(row[field_name])
+                if len(digest) != 64 or any(
+                    character not in "0123456789abcdef" for character in digest
+                ):
+                    raise ValueError(f"{field_name} is invalid")
+            for field_name in (
+                "token_budget",
+                "byte_budget",
+                "used_tokens",
+                "used_bytes",
+                "selected_count",
+            ):
+                value = int(row[field_name])
+                if value < 0:
+                    raise ValueError(f"{field_name} is invalid")
+            if int(row["used_tokens"]) > int(row["token_budget"]) or int(
+                row["used_bytes"]
+            ) > int(row["byte_budget"]):
+                raise ValueError("checkpoint budget receipt is invalid")
+            created_at = parse_timestamp(str(row["created_at"]), field="created_at")
+            if state == "active":
+                if row["invalidated_at"] is not None or row["invalidation_reason"] is not None:
+                    raise ValueError("active checkpoint has invalid invalidation metadata")
+                if len(selection_rows) != int(row["selected_count"]):
+                    raise ValueError("active checkpoint selection count is invalid")
+            else:
+                if row["invalidated_at"] is None or row["invalidation_reason"] is None:
+                    raise ValueError("invalidated checkpoint is missing invalidation metadata")
+                parse_timestamp(str(row["invalidated_at"]), field="invalidated_at")
+                validate_identifier(str(row["invalidation_reason"]), field="invalidation_reason")
+                if selection_rows:
+                    raise ValueError("invalidated checkpoint retains selection metadata")
+            selections: list[dict[str, object]] = []
+            for ordinal, selection in enumerate(selection_rows):
+                if int(selection["ordinal"]) != ordinal:
+                    raise ValueError("checkpoint selection ordering is invalid")
+                record_id = validate_identifier(str(selection["record_id"]), field="record_id")
+                revision = int(selection["revision"])
+                if revision < 1:
+                    raise ValueError("checkpoint selection revision is invalid")
+                content_digest = str(selection["content_hash"])
+                if len(content_digest) != 64 or any(
+                    character not in "0123456789abcdef" for character in content_digest
+                ):
+                    raise ValueError("checkpoint selection content hash is invalid")
+                kind = MemoryKind(str(selection["kind"]))
+                selections.append({
+                    "record_id": record_id,
+                    "revision": revision,
+                    "content_hash": content_digest,
+                    "kind": kind.value,
+                })
+        except (TypeError, ValueError) as exc:
+            raise LedgerStateError("sealed recall checkpoint manifest is invalid") from exc
+        return {
+            "checkpoint_id": str(row["checkpoint_id"]),
+            "state": state,
+            "continuation_ref": str(row["continuation_ref"]),
+            "policy_id": str(row["policy_id"]),
+            "policy_fingerprint": str(row["policy_fingerprint"]),
+            "counter_id": str(row["counter_id"]),
+            "token_budget": int(row["token_budget"]),
+            "byte_budget": int(row["byte_budget"]),
+            "used_tokens": int(row["used_tokens"]),
+            "used_bytes": int(row["used_bytes"]),
+            "selected_count": int(row["selected_count"]),
+            "created_at": created_at,
+            "integrity_tag": str(row["integrity_tag"]),
+            "selections": tuple(selections),
+        }
 
     @staticmethod
     def _normalize_active_snapshot_markers(
@@ -2622,6 +3106,13 @@ class SqliteMemoryLedger:
                 record.record_id,
             ),
         )
+        self._invalidate_recall_checkpoints_for_record_locked(
+            scope_id,
+            scope_json,
+            record.record_id,
+            reason_code="selected_record_changed",
+            occurred_at=occurred_at,
+        )
         updated = self._load_record_locked(scope, record.record_id)
         assert updated is not None
         return updated
@@ -3047,6 +3538,8 @@ class SqliteMemoryLedger:
             statements += _V4_MIGRATION_STATEMENTS
         if current <= 4:
             statements += _V5_MIGRATION_STATEMENTS
+        if current <= 5:
+            statements += _V6_MIGRATION_STATEMENTS
         return statements
 
     @staticmethod
@@ -3059,20 +3552,28 @@ class SqliteMemoryLedger:
                 "add v3 erased-command replay barriers",
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
                 "add v5 admission provenance and review audit tables",
+                "add v6 sealed recall checkpoint manifests",
             ]
         if current == 2:
             return [
                 "add v3 erased-command replay barriers",
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
                 "add v5 admission provenance and review audit tables",
+                "add v6 sealed recall checkpoint manifests",
             ]
         if current == 3:
             return [
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
                 "add v5 admission provenance and review audit tables",
+                "add v6 sealed recall checkpoint manifests",
             ]
         if current == 4:
-            return ["add v5 admission provenance and review audit tables"]
+            return [
+                "add v5 admission provenance and review audit tables",
+                "add v6 sealed recall checkpoint manifests",
+            ]
+        if current == 5:
+            return ["add v6 sealed recall checkpoint manifests"]
         return []
 
     def _backfill_legacy_admission_metadata_locked(self) -> None:
@@ -3227,6 +3728,7 @@ class SqliteMemoryLedger:
         allow_event_guard_repair: bool = False,
         allow_admission_guard_repair: bool = False,
         validate_admission_data: bool = False,
+        validate_checkpoint_data: bool = False,
     ) -> None:
         """Fail closed instead of adopting an unrelated generic SQLite table."""
         objects = {
@@ -3255,14 +3757,35 @@ class SqliteMemoryLedger:
             unexpected_future = sorted(
                 set(objects).intersection(
                     set(_V5_TABLE_COLUMNS)
-                    | _V5_INDEX_NAMES
+                    | set(_V6_TABLE_COLUMNS)
+                    | {
+                        name
+                        for name, introduced in _INDEX_INTRODUCED_VERSION.items()
+                        if introduced >= 5
+                    }
                     | set(_ADMISSION_IMMUTABILITY_TRIGGERS)
                 )
             )
             if unexpected_future:
                 raise LedgerStateError(
-                    f"ledger schema v{current} unexpectedly contains v5 admission objects: "
+                    f"ledger schema v{current} unexpectedly contains future Ledger objects: "
                     + ", ".join(unexpected_future)
+                )
+        elif current < 6:
+            unexpected_v6 = sorted(
+                set(objects).intersection(
+                    set(_V6_TABLE_COLUMNS)
+                    | {
+                        name
+                        for name, introduced in _INDEX_INTRODUCED_VERSION.items()
+                        if introduced == 6
+                    }
+                )
+            )
+            if unexpected_v6:
+                raise LedgerStateError(
+                    "ledger schema v5 unexpectedly contains v6 checkpoint objects: "
+                    + ", ".join(unexpected_v6)
                 )
         for table_name in _ALL_LEDGER_TABLE_COLUMNS:
             existing = objects.get(table_name)
@@ -3279,6 +3802,8 @@ class SqliteMemoryLedger:
             required.update(_V4_TABLE_COLUMNS)
         if current >= 5:
             required.update(_V5_TABLE_COLUMNS)
+        if current >= 6:
+            required.update(_V6_TABLE_COLUMNS)
         for table_name, expected_columns in _ALL_LEDGER_TABLE_COLUMNS.items():
             if table_name not in table_names:
                 continue
@@ -3409,6 +3934,8 @@ class SqliteMemoryLedger:
                 )
         if current >= 5 and validate_admission_data:
             self._validate_admission_sidecars_locked()
+        if current >= 6 and validate_checkpoint_data:
+            self._validate_recall_checkpoint_sidecars_locked()
 
     def _validate_admission_sidecars_locked(self) -> None:
         """Fail closed on corrupted or orphaned v5 admission sidecars.
@@ -3501,6 +4028,45 @@ class SqliteMemoryLedger:
             raise LedgerStateError(
                 "concrete-origin active memory record is missing an allow admission audit"
             )
+
+    def _validate_recall_checkpoint_sidecars_locked(self) -> None:
+        """Fail closed on malformed or orphaned v6 checkpoint sidecars.
+
+        The checkpoint HMAC is intentionally verified by the host-owned
+        planner, which alone possesses its secret.  Storage validation still
+        proves that rows form a well-shaped, scope-bound manifest and that an
+        invalidated manifest no longer retains derived record markers.
+        """
+
+        orphan = self._conn.execute(
+            "SELECT 1 FROM memory_recall_checkpoint_selections AS s LEFT JOIN "
+            "memory_recall_checkpoints AS c ON c.scope_id = s.scope_id "
+            "AND c.scope_json = s.scope_json AND c.checkpoint_id = s.checkpoint_id "
+            "WHERE c.checkpoint_id IS NULL LIMIT 1"
+        ).fetchone()
+        if orphan is not None:
+            raise LedgerStateError("sealed recall checkpoint selection is orphaned")
+        rows = self._conn.execute(
+            "SELECT scope_id, scope_json, checkpoint_id FROM memory_recall_checkpoints "
+            "ORDER BY scope_id, scope_json, checkpoint_id"
+        ).fetchall()
+        for row in rows:
+            try:
+                scope_data = json.loads(str(row["scope_json"]))
+                if not isinstance(scope_data, dict):
+                    raise TypeError("scope JSON must be an object")
+                scope = MemoryScope(**scope_data)
+                scope_id, scope_json = _scope_storage(scope)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise LedgerStateError("sealed recall checkpoint has an invalid scope") from exc
+            if scope_id != str(row["scope_id"]) or scope_json != str(row["scope_json"]):
+                raise LedgerStateError(
+                    "sealed recall checkpoint scope does not match its storage key"
+                )
+            try:
+                self._recall_checkpoint_manifest_locked(scope, str(row["checkpoint_id"]))
+            except (KeyError, LedgerStateError) as exc:
+                raise LedgerStateError("sealed recall checkpoint manifest is invalid") from exc
 
     def _ensure_event_immutability_locked(self) -> None:
         """Install and behaviorally verify the uniquely named update guard.

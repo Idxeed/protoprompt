@@ -83,7 +83,11 @@ def _document_candidate(
 
 
 def _stage_v4_schema(connection: sqlite3.Connection) -> None:
-    """Remove every v5-only object to model an exact pre-admission Ledger."""
+    """Remove every v5/v6-only object to model an exact pre-admission Ledger."""
+
+    connection.execute("DROP INDEX IF EXISTS idx_memory_recall_checkpoint_selection_record")
+    connection.execute("DROP TABLE IF EXISTS memory_recall_checkpoint_selections")
+    connection.execute("DROP TABLE IF EXISTS memory_recall_checkpoints")
 
     for trigger_name in (
         "protoprompt_memory_ledger_admission_metadata_reject_update_v1",
@@ -459,7 +463,7 @@ def test_hard_erase_reinstalls_append_only_sidecar_guards_across_restart(tmp_pat
         restored.close()
 
 
-def test_v4_to_v5_migration_backfills_only_live_payloads_as_legacy_unknown(tmp_path, scope):
+def test_v4_to_v6_migration_backfills_only_live_payloads_as_legacy_unknown(tmp_path, scope):
     """v5 must not invent modern provenance or a review audit for old rows."""
 
     path = tmp_path / "v4-admission-ledger.db"
@@ -488,27 +492,10 @@ def test_v4_to_v5_migration_backfills_only_live_payloads_as_legacy_unknown(tmp_p
     original.close()
 
     # Stage a database that has the exact v4 tables and schema marker.  This
-    # models a real pre-v5 ledger, rather than relying on an artificial row.
+    # models a real pre-v5/v6 ledger, rather than relying on an artificial row.
     connection = sqlite3.connect(path)
     try:
-        connection.execute(
-            "DROP TRIGGER IF EXISTS protoprompt_memory_ledger_admission_metadata_reject_update_v1"
-        )
-        connection.execute(
-            "DROP TRIGGER IF EXISTS protoprompt_memory_ledger_admission_metadata_reject_delete_v1"
-        )
-        connection.execute(
-            "DROP TRIGGER IF EXISTS protoprompt_memory_ledger_review_audits_reject_update_v1"
-        )
-        connection.execute(
-            "DROP TRIGGER IF EXISTS protoprompt_memory_ledger_review_audits_reject_delete_v1"
-        )
-        connection.execute("DROP INDEX IF EXISTS idx_memory_review_audits_record")
-        connection.execute("DROP TABLE memory_review_audits")
-        connection.execute("DROP TABLE memory_record_admission_metadata")
-        connection.execute(
-            "UPDATE ledger_schema SET version = 4 WHERE component = 'memory_ledger'"
-        )
+        _stage_v4_schema(connection)
         connection.commit()
     finally:
         connection.close()
@@ -536,9 +523,12 @@ def test_v4_to_v5_migration_backfills_only_live_payloads_as_legacy_unknown(tmp_p
         expected_dry_run = {
             "component": "memory_ledger",
             "from_version": 4,
-            "to_version": 5,
+            "to_version": 6,
             "changes_required": True,
-            "actions": ["add v5 admission provenance and review audit tables"],
+            "actions": [
+                "add v5 admission provenance and review audit tables",
+                "add v6 sealed recall checkpoint manifests",
+            ],
         }
         backup_path = tmp_path / "v4-before-admission-upgrade.backup.db"
         upgraded.backup(str(backup_path))
@@ -566,7 +556,7 @@ def test_v4_to_v5_migration_backfills_only_live_payloads_as_legacy_unknown(tmp_p
             connection.close()
 
         upgraded.setup()
-        assert upgraded.schema_version() == 5
+        assert upgraded.schema_version() == 6
         connection = sqlite3.connect(path)
         try:
             assert connection.execute(

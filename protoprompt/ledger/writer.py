@@ -379,6 +379,68 @@ class MemoryWriter:
             selections=selections,
         )
 
+    def _create_recall_checkpoint(
+        self,
+        *,
+        checkpoint_id: str,
+        continuation_ref: str,
+        policy_id: str,
+        policy_fingerprint: str,
+        counter_id: str,
+        token_budget: int,
+        byte_budget: int,
+        used_tokens: int,
+        used_bytes: int,
+        selections: Iterable[tuple[str, int, str, MemoryKind]],
+        active_read_limit: int,
+        created_at: datetime,
+        integrity_tag: str,
+    ) -> dict[str, object]:
+        """Persist one private recall snapshot under the writer's scope.
+
+        This capability is reserved for the matching strict recall planner.
+        It accepts only opaque metadata and selection markers; no plaintext
+        Ledger payload or provider request crosses this boundary.
+        """
+
+        return self._ledger._create_recall_checkpoint(
+            self._scope,
+            checkpoint_id=checkpoint_id,
+            continuation_ref=continuation_ref,
+            policy_id=policy_id,
+            policy_fingerprint=policy_fingerprint,
+            counter_id=counter_id,
+            token_budget=token_budget,
+            byte_budget=byte_budget,
+            used_tokens=used_tokens,
+            used_bytes=used_bytes,
+            selections=selections,
+            active_read_limit=active_read_limit,
+            created_at=created_at,
+            integrity_tag=integrity_tag,
+        )
+
+    def _load_recall_checkpoint(self, checkpoint_id: str) -> dict[str, object]:
+        """Load one private durable checkpoint manifest from the pinned scope."""
+
+        return self._ledger._load_recall_checkpoint(self._scope, checkpoint_id)
+
+    def _invalidate_recall_checkpoint(
+        self,
+        checkpoint_id: str,
+        *,
+        reason_code: str,
+        occurred_at: datetime,
+    ) -> bool:
+        """Fail-close one checkpoint and remove its derived selection metadata."""
+
+        return self._ledger._invalidate_recall_checkpoint(
+            self._scope,
+            checkpoint_id,
+            reason_code=reason_code,
+            occurred_at=occurred_at,
+        )
+
     def _apply_admission_review(
         self,
         *,

@@ -33,6 +33,11 @@ from benchmarks.ledger_composition_benchmark import (
     run_ledger_composition_suite,
     validate_ledger_composition_suite,
 )
+from benchmarks.ledger_checkpoint_benchmark import (
+    render_ledger_checkpoint_markdown,
+    run_ledger_checkpoint_suite,
+    validate_ledger_checkpoint_suite,
+)
 
 
 REPORT_SCHEMA_VERSION = 1
@@ -156,6 +161,9 @@ def _require_string(value: object, label: str) -> str:
 def _validate_suite(suite: Mapping[str, Any]) -> None:
     if suite.get("suite_kind") == "ledger_context_composition":
         validate_ledger_composition_suite(suite)
+        return
+    if suite.get("suite_kind") == "ledger_sealed_checkpoint":
+        validate_ledger_checkpoint_suite(suite)
         return
     if suite.get("schema_version") != 1:
         raise BenchmarkFixtureError("unsupported suite schema version")
@@ -877,6 +885,11 @@ async def run_suite(
             suite,
             fixture_sha256=fixture_sha256(suite),
         )
+    if suite.get("suite_kind") == "ledger_sealed_checkpoint":
+        return await run_ledger_checkpoint_suite(
+            suite,
+            fixture_sha256=fixture_sha256(suite),
+        )
     embedding_config = suite["embedding"]
     embeddings = SeededFeatureHashEmbeddings(
         seed=str(embedding_config["seed"]),
@@ -985,6 +998,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
     """Render a small deterministic human view; it contains no timing claims."""
     if report.get("benchmark_kind") == "ledger_context_composition":
         return render_ledger_composition_markdown(report)
+    if report.get("benchmark_kind") == "ledger_sealed_checkpoint":
+        return render_ledger_checkpoint_markdown(report)
     lines = [
         "# ProtoPrompt Memory Benchmark",
         "",
@@ -1055,7 +1070,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 report,
                 load_expected(args.suite, path=args.expected),
             )
-            if suite.get("suite_kind") != "ledger_context_composition":
+            if suite.get("suite_kind") not in {
+                "ledger_context_composition",
+                "ledger_sealed_checkpoint",
+            }:
                 assert_candidate_not_worse_than_reference(report)
         if args.json:
             _write_text(args.json, canonical_json(report) + "\n")

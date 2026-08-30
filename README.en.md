@@ -8,7 +8,7 @@
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.md) · [v0.11 launch kit](LAUNCH-v0.11.md)
+[Русская версия](README.md) · [v0.12 launch kit](LAUNCH-v0.12.md)
 
 **Reliable agent memory under a fixed context budget.** ProtoPrompt is an
 embeddable context runtime for LLM applications. The core combines **RAG over
@@ -61,6 +61,12 @@ accounting for one bounded request, requires strict admission and the same
 scope/counter, and keeps raw `unknown` / `legacy_unknown` out of a composed
 request. Neither `pp-ollama-chat` nor `pp-agent` auto-wires it yet; see
 [Bounded ledger recall](docs/en/ledger-recall.md).
+
+v0.12 adds a separate sealed checkpoint for one strict recall selection. A
+host-held HMAC protects it; it retains no task, payload, or provider messages,
+and a restart always re-plans and verifies the exact selection before explicit
+composition. It is not agent-state recovery, a workflow engine, or an
+exactly-once mechanism.
 
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of
@@ -263,6 +269,8 @@ Run the offline, network-free memory regression gate with:
 
 ```bash
 python scripts/run_memory_benchmark.py --suite v0.1 --verify
+python scripts/run_memory_benchmark.py --suite v0.2 --verify
+python scripts/run_memory_benchmark.py --suite v0.3 --verify
 ```
 
 The versioned fixtures, fixed baselines, and interpretation boundaries are in

@@ -1,0 +1,71 @@
+{
+  "report_schema_version": 1,
+  "fixture_sha256": "38ab32e37d7f736152710108d0df8a60e9782ef0c94e1cc6e2be7a6a1cb4b1b6",
+  "report": {
+    "report_schema_version": 1,
+    "suite_version": "v0.3",
+    "benchmark_kind": "ledger_sealed_checkpoint",
+    "candidate_id": "protoprompt_ledger_sealed_checkpoint_v0_12",
+    "fixture_sha256": "38ab32e37d7f736152710108d0df8a60e9782ef0c94e1cc6e2be7a6a1cb4b1b6",
+    "cases": [
+      {
+        "id": "restart_success",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "resume_succeeds_after_sqlite_restart": true,
+            "selected_payload_reappears_only_in_data_lane": true,
+            "public_receipts_are_content_free": true,
+            "request_receipt_reconciles": true
+          },
+          "passed_checks": 4,
+          "check_count": 4
+        }
+      },
+      {
+        "id": "tamper_rejected",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "manifest_row_was_mutated": true,
+            "hmac_tamper_is_rejected_on_resume": true
+          },
+          "passed_checks": 2,
+          "check_count": 2
+        }
+      },
+      {
+        "id": "lifecycle_invalidated",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "selected_lifecycle_change_invalidates_checkpoint": true,
+            "selection_markers_are_scrubbed": true,
+            "invalidated_checkpoint_cannot_resume": true
+          },
+          "passed_checks": 3,
+          "check_count": 3
+        }
+      },
+      {
+        "id": "resume_query_binding_and_composition_boundary",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "unrelated_query_is_rejected": true,
+            "matching_query_composes": true,
+            "payload_is_not_in_system_lane": true,
+            "request_receipt_reconciles": true
+          },
+          "passed_checks": 4,
+          "check_count": 4
+        }
+      }
+    ],
+    "summary": {
+      "case_count": 4,
+      "passing_case_count": 4,
+      "all_pass": true
+    }
+  }
+}

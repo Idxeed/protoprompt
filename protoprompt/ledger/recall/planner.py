@@ -14,12 +14,17 @@ from typing import Callable
 
 from protoprompt.ledger.recall.policy import LedgerRecallPolicy
 from protoprompt.ledger.recall.types import (
+    CheckpointContractMismatchError,
     _RecallSelection,
+    LedgerCheckpointError,
     LedgerRecallBudgetError,
+    LedgerRecallCheckpoint,
     LedgerRecallContext,
     LedgerRecallDecision,
     LedgerRecallPlan,
+    LedgerRecallResume,
     StaleMemoryPlanError,
+    StaleMemoryCheckpointError,
 )
 from protoprompt.ledger.types import (
     MemoryKind,
@@ -28,6 +33,7 @@ from protoprompt.ledger.types import (
     canonical_json,
     command_hash,
     coerce_datetime,
+    scope_dict,
     utc_now,
     validate_identifier,
 )
@@ -39,6 +45,8 @@ from protoprompt.tokens.regex_counter import RegexTokenCounter
 
 _TERM_RE = re.compile(r"[^\W_]+", re.UNICODE)
 _MAX_TASK_CHARS = 16_000
+_MIN_CHECKPOINT_SECRET_BYTES = 32
+_MAX_CHECKPOINT_SECRET_BYTES = 4_096
 _DATA_SCHEMA_VERSION = 1
 _DATA_TYPE = "protoprompt.ledger-recall"
 
@@ -125,6 +133,21 @@ def _counter_identity(counter: TokenCounter, explicit_id: str | None) -> str:
     )
 
 
+def _checkpoint_key(value: bytes | None) -> bytes | None:
+    """Validate an optional host-owned durable checkpoint HMAC key."""
+
+    if value is None:
+        return None
+    if not isinstance(value, bytes):
+        raise TypeError("checkpoint_secret must be bytes or None")
+    if not _MIN_CHECKPOINT_SECRET_BYTES <= len(value) <= _MAX_CHECKPOINT_SECRET_BYTES:
+        raise ValueError(
+            "checkpoint_secret must contain from "
+            f"{_MIN_CHECKPOINT_SECRET_BYTES} to {_MAX_CHECKPOINT_SECRET_BYTES} bytes"
+        )
+    return bytes(value)
+
+
 def _plan_integrity_tag(
     secret: bytes,
     *,
@@ -161,6 +184,78 @@ def _plan_integrity_tag(
     ).hexdigest()
 
 
+def _resume_task_integrity_tag(secret: bytes, task: str) -> str:
+    """Bind one in-process resume to its normalized composition task.
+
+    Durable checkpoint state never retains task text or even a task digest.
+    After a successful fresh re-plan, the private resume object still needs to
+    prevent a caller from composing that selection into an unrelated current
+    request. This keyed tag survives only in the planner-owned object and is
+    checked before the composer resolves any Ledger data.
+    """
+
+    return hashlib.blake2b(
+        task.encode("utf-8", errors="strict"),
+        key=secret,
+        digest_size=32,
+        person=b"pp-ledger-resume",
+    ).hexdigest()
+
+
+def _checkpoint_integrity_tag(
+    secret: bytes,
+    *,
+    scope: MemoryScope,
+    checkpoint_id: str,
+    continuation_ref: str,
+    policy_id: str,
+    policy_fingerprint: str,
+    counter_id: str,
+    token_budget: int,
+    byte_budget: int,
+    used_tokens: int,
+    used_bytes: int,
+    created_at: datetime,
+    selections: tuple[_RecallSelection, ...],
+) -> str:
+    """Seal durable checkpoint metadata without persisting the host key.
+
+    A plain digest would only detect accidental corruption: a writer with
+    SQLite access could recompute it.  The explicit host-owned key must remain
+    available across restart, but never enters the Ledger database or a public
+    receipt.
+    """
+
+    payload = canonical_json({
+        "schema_version": 1,
+        "scope": scope_dict(scope),
+        "checkpoint_id": checkpoint_id,
+        "continuation_ref": continuation_ref,
+        "policy_id": policy_id,
+        "policy_fingerprint": policy_fingerprint,
+        "counter_id": counter_id,
+        "token_budget": token_budget,
+        "byte_budget": byte_budget,
+        "used_tokens": used_tokens,
+        "used_bytes": used_bytes,
+        "created_at": created_at.isoformat().replace("+00:00", "Z"),
+        "selections": [
+            {
+                "record_id": selection.record_id,
+                "revision": selection.revision,
+                "content_hash": selection.content_hash,
+                "kind": selection.kind.value,
+            }
+            for selection in selections
+        ],
+    })
+    return hmac.new(
+        secret,
+        payload.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
+
+
 @dataclass(frozen=True, slots=True)
 class _ScoredCandidate:
     record: MemoryRecord
@@ -188,6 +283,7 @@ class LedgerRecallPlanner:
         policy: LedgerRecallPolicy | None = None,
         counter: TokenCounter | None = None,
         counter_id: str | None = None,
+        checkpoint_secret: bytes | None = None,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
         if not isinstance(writer, MemoryWriter):
@@ -200,6 +296,7 @@ class LedgerRecallPlanner:
         self._policy = policy or LedgerRecallPolicy.safe_default()
         self._counter = counter or RegexTokenCounter()
         self._counter_id = _counter_identity(self._counter, counter_id)
+        self._checkpoint_secret = _checkpoint_key(checkpoint_secret)
         self._clock = clock or utc_now
         self._owner_token = object()
         self._plan_secret = secrets.token_bytes(32)
@@ -512,28 +609,7 @@ class LedgerRecallPlanner:
         returned data string after a later deletion request.
         """
 
-        if not isinstance(plan, LedgerRecallPlan):
-            raise TypeError("plan must be a LedgerRecallPlan")
-        if (
-            plan.policy_id != self._policy.policy_id
-            or plan.policy_fingerprint != _policy_signature(self._policy)
-            or plan.counter_id != self._counter_id
-            or plan._scope != self._writer.scope
-            or plan._owner_token is not self._owner_token
-            or not hmac.compare_digest(
-                plan._integrity_tag,
-                _plan_integrity_tag(
-                    self._plan_secret,
-                    policy_fingerprint=plan.policy_fingerprint,
-                    counter_id=plan.counter_id,
-                    scope=plan._scope,
-                    token_budget=plan.token_budget,
-                    byte_budget=plan.byte_budget,
-                    selections=plan._selections,
-                ),
-            )
-        ):
-            raise ValueError("plan was created for a different recall planner boundary")
+        self._assert_plan_boundary(plan)
         instant = self._clock()
         assert instant is not None
         instant = coerce_datetime(instant, field="clock")
@@ -585,6 +661,247 @@ class LedgerRecallPlanner:
                 "selected ledger memory is no longer recallable at final host time; replan"
             )
         return context
+
+    def checkpoint(
+        self,
+        plan: LedgerRecallPlan,
+        *,
+        checkpoint_id: str,
+        continuation_ref: str,
+    ) -> LedgerRecallCheckpoint:
+        """Seal one strict recall selection for a later fresh re-plan.
+
+        The durable manifest stores only opaque host identifiers and private
+        selection markers.  It never serializes the process-local plan, task
+        text, provider messages, or memory payload.  Checkpointing is
+        deliberately unavailable for the compatibility recall policy because
+        a restart-safe request boundary must require admission evidence.
+        """
+
+        self._assert_plan_boundary(plan)
+        if not self._policy.require_admission_audit:
+            raise LedgerCheckpointError(
+                "checkpointing requires a recall policy with admission evidence"
+            )
+        secret = self._require_checkpoint_secret()
+        identity = validate_identifier(checkpoint_id, field="checkpoint_id")
+        continuation = validate_identifier(continuation_ref, field="continuation_ref")
+        instant = self._clock()
+        assert instant is not None
+        instant = coerce_datetime(instant, field="clock")
+        assert instant is not None
+        integrity_tag = _checkpoint_integrity_tag(
+            secret,
+            scope=self._writer.scope,
+            checkpoint_id=identity,
+            continuation_ref=continuation,
+            policy_id=plan.policy_id,
+            policy_fingerprint=plan.policy_fingerprint,
+            counter_id=plan.counter_id,
+            token_budget=plan.token_budget,
+            byte_budget=plan.byte_budget,
+            used_tokens=plan.used_tokens,
+            used_bytes=plan.used_bytes,
+            created_at=instant,
+            selections=plan._selections,
+        )
+        self._writer._create_recall_checkpoint(
+            checkpoint_id=identity,
+            continuation_ref=continuation,
+            policy_id=plan.policy_id,
+            policy_fingerprint=plan.policy_fingerprint,
+            counter_id=plan.counter_id,
+            token_budget=plan.token_budget,
+            byte_budget=plan.byte_budget,
+            used_tokens=plan.used_tokens,
+            used_bytes=plan.used_bytes,
+            selections=tuple(
+                (
+                    selection.record_id,
+                    selection.revision,
+                    selection.content_hash,
+                    selection.kind,
+                )
+                for selection in plan._selections
+            ),
+            active_read_limit=self._policy.active_read_limit,
+            created_at=instant,
+            integrity_tag=integrity_tag,
+        )
+        return LedgerRecallCheckpoint(
+            schema_version=1,
+            policy_id=plan.policy_id,
+            policy_fingerprint=plan.policy_fingerprint,
+            counter_id=plan.counter_id,
+            token_budget=plan.token_budget,
+            byte_budget=plan.byte_budget,
+            used_tokens=plan.used_tokens,
+            used_bytes=plan.used_bytes,
+            selected_count=plan.selected_count,
+            created_at=instant,
+            _checkpoint_id=identity,
+            _continuation_ref=continuation,
+        )
+
+    def resume_checkpoint(
+        self,
+        checkpoint_id: str,
+        *,
+        task: str,
+    ) -> LedgerRecallResume:
+        """Re-plan one sealed checkpoint and require the exact selection.
+
+        The caller supplies a fresh host task because task text is not retained
+        in the manifest.  The stored budgets are authoritative; callers cannot
+        silently widen a resumed memory lane.  Any policy/counter drift or
+        changed selection fails closed before a provider request exists.
+        """
+
+        normalized_task = _validate_task(task)
+        secret = self._require_checkpoint_secret()
+        identity = validate_identifier(checkpoint_id, field="checkpoint_id")
+        manifest = self._writer._load_recall_checkpoint(identity)
+        state = manifest["state"]
+        if state != "active":
+            raise StaleMemoryCheckpointError(
+                "checkpoint is no longer active; create a fresh checkpoint"
+            )
+        selections = tuple(
+            _RecallSelection(
+                record_id=str(selection["record_id"]),
+                revision=int(selection["revision"]),
+                content_hash=str(selection["content_hash"]),
+                kind=MemoryKind(str(selection["kind"])),
+            )
+            for selection in manifest["selections"]
+        )
+        created_at = manifest["created_at"]
+        assert isinstance(created_at, datetime)
+        expected_tag = _checkpoint_integrity_tag(
+            secret,
+            scope=self._writer.scope,
+            checkpoint_id=identity,
+            continuation_ref=str(manifest["continuation_ref"]),
+            policy_id=str(manifest["policy_id"]),
+            policy_fingerprint=str(manifest["policy_fingerprint"]),
+            counter_id=str(manifest["counter_id"]),
+            token_budget=int(manifest["token_budget"]),
+            byte_budget=int(manifest["byte_budget"]),
+            used_tokens=int(manifest["used_tokens"]),
+            used_bytes=int(manifest["used_bytes"]),
+            created_at=created_at,
+            selections=selections,
+        )
+        if not hmac.compare_digest(str(manifest["integrity_tag"]), expected_tag):
+            raise LedgerCheckpointError("checkpoint manifest integrity seal did not verify")
+        policy_fingerprint = _policy_signature(self._policy)
+        if (
+            not self._policy.require_admission_audit
+            or str(manifest["policy_id"]) != self._policy.policy_id
+            or str(manifest["policy_fingerprint"]) != policy_fingerprint
+            or str(manifest["counter_id"]) != self._counter_id
+        ):
+            raise CheckpointContractMismatchError(
+                "checkpoint requires the original strict recall policy and counter contract"
+            )
+        fresh_plan = self.plan(
+            task=normalized_task,
+            token_budget=int(manifest["token_budget"]),
+            byte_budget=int(manifest["byte_budget"]),
+        )
+        if (
+            fresh_plan._selections != selections
+            or fresh_plan.used_tokens != int(manifest["used_tokens"])
+            or fresh_plan.used_bytes != int(manifest["used_bytes"])
+        ):
+            instant = self._clock()
+            assert instant is not None
+            instant = coerce_datetime(instant, field="clock")
+            assert instant is not None
+            self._writer._invalidate_recall_checkpoint(
+                identity,
+                reason_code="selection_changed",
+                occurred_at=instant,
+            )
+            raise StaleMemoryCheckpointError(
+                "checkpoint selection no longer matches a fresh strict recall plan"
+            )
+        checkpoint = LedgerRecallCheckpoint(
+            schema_version=1,
+            policy_id=str(manifest["policy_id"]),
+            policy_fingerprint=str(manifest["policy_fingerprint"]),
+            counter_id=str(manifest["counter_id"]),
+            token_budget=int(manifest["token_budget"]),
+            byte_budget=int(manifest["byte_budget"]),
+            used_tokens=int(manifest["used_tokens"]),
+            used_bytes=int(manifest["used_bytes"]),
+            selected_count=len(selections),
+            created_at=created_at,
+            _checkpoint_id=identity,
+            _continuation_ref=str(manifest["continuation_ref"]),
+        )
+        return LedgerRecallResume(
+            checkpoint=checkpoint,
+            _recall_plan=fresh_plan,
+            _owner_token=self._owner_token,
+            _task_integrity_tag=_resume_task_integrity_tag(
+                self._plan_secret,
+                normalized_task,
+            ),
+        )
+
+    def _plan_from_resume(self, resume: LedgerRecallResume, *, task: str) -> LedgerRecallPlan:
+        """Return a fresh checkpoint plan only for this exact planner instance."""
+
+        if not isinstance(resume, LedgerRecallResume):
+            raise TypeError("resume must be a LedgerRecallResume")
+        if resume._owner_token is not self._owner_token:
+            raise ValueError("resume was created for a different recall planner boundary")
+        normalized_task = _validate_task(task)
+        if not hmac.compare_digest(
+            resume._task_integrity_tag,
+            _resume_task_integrity_tag(self._plan_secret, normalized_task),
+        ):
+            raise LedgerCheckpointError(
+                "resume task does not match its freshly revalidated checkpoint plan"
+            )
+        self._assert_plan_boundary(resume._recall_plan)
+        return resume._recall_plan
+
+    def _require_checkpoint_secret(self) -> bytes:
+        """Return the stable host HMAC key required for durable checkpoints."""
+
+        if self._checkpoint_secret is None:
+            raise LedgerCheckpointError(
+                "checkpoint_secret is required for durable checkpoint integrity"
+            )
+        return self._checkpoint_secret
+
+    def _assert_plan_boundary(self, plan: LedgerRecallPlan) -> None:
+        """Reject a plan not sealed by this process-local planner boundary."""
+
+        if not isinstance(plan, LedgerRecallPlan):
+            raise TypeError("plan must be a LedgerRecallPlan")
+        if (
+            plan.policy_id != self._policy.policy_id
+            or plan.policy_fingerprint != _policy_signature(self._policy)
+            or plan.counter_id != self._counter_id
+            or plan._scope != self._writer.scope
+            or plan._owner_token is not self._owner_token
+            or not hmac.compare_digest(
+                plan._integrity_tag,
+                _plan_integrity_tag(
+                    self._plan_secret,
+                    policy_fingerprint=plan.policy_fingerprint,
+                    counter_id=plan.counter_id,
+                    scope=plan._scope,
+                    token_budget=plan.token_budget,
+                    byte_budget=plan.byte_budget,
+                    selections=plan._selections,
+                ),
+            )
+        ):
+            raise ValueError("plan was created for a different recall planner boundary")
 
     def _resolve_records(
         self,

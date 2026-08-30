@@ -30,8 +30,8 @@ pp-ollama-chat
 совместимой версии `protoprompt`:
 
 ```bash
-python -m pip install "protoprompt[documents,fastapi,ollama]==0.11.0"
-python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.11.0#subdirectory=apps/ollama-chat"
+python -m pip install "protoprompt[documents,fastapi,ollama]==0.12.0"
+python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.12.0#subdirectory=apps/ollama-chat"
 ```
 
 Приложение проверяется вместе с релизом `protoprompt`, но пока поставляется

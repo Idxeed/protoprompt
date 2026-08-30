@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "suite_version": "v0.3",
+  "suite_kind": "ledger_sealed_checkpoint",
+  "suite_id": "offline-ledger-sealed-checkpoint-regression",
+  "candidate_id": "protoprompt_ledger_sealed_checkpoint_v0_12",
+  "contracts": [
+    {
+      "id": "restart_success",
+      "kind": "restart_success"
+    },
+    {
+      "id": "tamper_rejected",
+      "kind": "tamper_rejected"
+    },
+    {
+      "id": "lifecycle_invalidated",
+      "kind": "lifecycle_invalidated"
+    },
+    {
+      "id": "resume_query_binding_and_composition_boundary",
+      "kind": "resume_query_binding_and_composition_boundary"
+    }
+  ]
+}
