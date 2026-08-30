@@ -28,5 +28,16 @@ venv/
 *.log
 .DS_Store
 *.db
+*.db-shm
+*.db-wal
+*.pid
+*.key
+*.token
+node_modules/
 examples/knowledge.db
 /benchmark/
+
+# Local reference-app state must never become a source artifact.  PDFs,
+# vector indexes, runtime credentials and process files live here locally.
+/apps/ollama-chat/data/
+/apps/rosseti-assistant/backend/data/
