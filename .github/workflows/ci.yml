@@ -205,6 +205,35 @@ jobs:
       - run: python -m pip install ".[dev]" "./apps/agent-cli"
       - run: pytest -q apps/agent-cli/tests -m "not integration"
 
+  ollama-chat:
+    name: Ollama reference app
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: python -m pip install --upgrade pip build twine
+      - run: python -m pip install ".[documents,fastapi,ollama,dev]" "./apps/ollama-chat[dev]"
+      - name: Run offline reference-app tests
+        run: pytest -q apps/ollama-chat/tests
+      - name: Build the source-only reference distribution
+        run: |
+          python -m build --wheel --outdir dist-ollama-chat apps/ollama-chat
+          python -m twine check dist-ollama-chat/*
+      - name: Import the built reference app outside the checkout
+        run: |
+          python -m venv /tmp/protoprompt-ollama-chat-smoke
+          /tmp/protoprompt-ollama-chat-smoke/bin/python -m pip install \
+            ".[documents,fastapi,ollama]"
+          /tmp/protoprompt-ollama-chat-smoke/bin/python -m pip install \
+            dist-ollama-chat/*.whl
+          cd /tmp
+          /tmp/protoprompt-ollama-chat-smoke/bin/python -I -c \
+            "from protoprompt_ollama_chat.app import create_app; assert create_app"
+
   docs:
     name: build docs
     runs-on: ubuntu-latest

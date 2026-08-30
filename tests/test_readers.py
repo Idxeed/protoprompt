@@ -135,6 +135,57 @@ def test_pdf_reader_handles_blank_and_rejects_encrypted_without_password(tmp_pat
     assert read_document(encrypted, password="correct").metadata["reader"] == "pdf"
 
 
+def test_pdf_reader_caps_compressed_stream_before_expansion(tmp_path, monkeypatch):
+    pypdf = pytest.importorskip("pypdf")
+    from pypdf import filters
+    from pypdf.generic import EncodedStreamObject, NameObject
+
+    path = tmp_path / "compressed.pdf"
+    writer = pypdf.PdfWriter()
+    page = writer.add_blank_page(width=100, height=100)
+    stream = EncodedStreamObject()
+    stream[NameObject("/Filter")] = NameObject("/FlateDecode")
+    # pypdf's writer needs an initial encoded payload before ``set_data`` can
+    # create its decoded representation. The resulting on-disk stream is tiny
+    # but would expand well past this test reader's 128-byte ceiling.
+    stream._data = b""  # type: ignore[attr-defined]
+    stream.set_data(b"q 1 0 0 1 0 0 cm Q\n" * 200)
+    page[NameObject("/Contents")] = writer._add_object(stream)
+    with path.open("wb") as output:
+        writer.write(output)
+
+    observed_limits: list[int] = []
+    original_decompress = filters._decompress_with_limit
+
+    def observe_limit(data: bytes) -> bytes:
+        observed_limits.append(filters.ZLIB_MAX_OUTPUT_LENGTH)
+        return original_decompress(data)
+
+    monkeypatch.setattr(filters, "_decompress_with_limit", observe_limit)
+    # pypdf documents zero as an opt-out for its global ceiling. A bounded
+    # LocalDocumentReader must still impose its own configured limit.
+    monkeypatch.setattr(filters, "ZLIB_MAX_OUTPUT_LENGTH", 0)
+    original_limit = filters.ZLIB_MAX_OUTPUT_LENGTH
+    reader = LocalDocumentReader(
+        limits=ReaderLimits(max_pdf_stream_bytes=128),
+    )
+
+    with pytest.raises(DocumentReadError, match="content streams"):
+        reader.read(path)
+
+    assert observed_limits
+    assert all(limit == 128 for limit in observed_limits)
+    assert filters.ZLIB_MAX_OUTPUT_LENGTH == original_limit
+
+
+def test_pdf_reader_rejects_malformed_pdf_as_document_read_error(tmp_path):
+    path = tmp_path / "malformed.pdf"
+    path.write_bytes(b"%PDF-1.7\ntruncated")
+
+    with pytest.raises(DocumentReadError, match="malformed"):
+        read_document(path)
+
+
 def test_framework_converters_preserve_ids_text_and_metadata():
     class LlamaDocument:
         doc_id = "llama-1"

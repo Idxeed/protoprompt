@@ -1,38 +1,29 @@
-# protoprompt 0.6.1
+# protoprompt 0.7.0
 
-The reliability and isolation patch for the context runtime.
-
-## Why this release
-
-Context limits are a correctness boundary, not a best-effort hint. This patch
-makes the final model-facing request safer when it contains a recent turn,
-tool calls, structured content, recall, and an output reservation at the same
-time. It also closes a profile-isolation edge case during migration from
-unscoped to scoped storage.
+This release turns the project’s core claim into a testable contract:
+long-lived memory may be retained indefinitely, but every model request is a
+fresh, explainable, bounded decision.
 
 ## Highlights
 
-- **Full request budgeting** — `build_messages()` accounts for rendered system
-  context, retained history, the final user message, provider framing, and an
-  optional output reserve before it retrieves or admits context blocks.
-- **No hidden tool-call bypass** — built-in token counters now include
-  structured content and tool-call payloads in their deterministic estimate.
-- **Agents SDK parity** — the OpenAI Agents session callback applies the same
-  ceiling to the complete model-facing item list, including the newest input.
-- **Protocol-safe history** — retained Chat Completions and Agents/Responses
-  call-output graphs, including hosted MCP approvals, interleaved
-  program-owned children, streamed shell/tool-search outputs, anonymous
-  server-side tool searches, and linked reasoning, are admitted or dropped
-  together. Input-only Responses controls
-  never enter optional recall; a final output reserves its required history
-  graph or raises.
-- **Scope-safe profiles** — `InMemoryProfileStore`, `SqliteProfileStore`, and
-  their async variants keep logical user ids in the profile while deriving an
-  isolated physical key from `MemoryScope`. A legacy literal key that happens
-  to resemble a scoped key is never returned, overwritten, or deleted through
-  a scoped operation.
-- **Bound service/profile scopes** — `MemoryService` now rejects a configured
-  `ProfileManager` unless both use the exact same host-owned `MemoryScope`.
+- **Explainable context plans** — `ContextPlan`, `ContextBlockDecision`, and
+  `ContextRequestReceipt` expose which context was selected, omitted, or
+  truncated without serializing source prompt/document content into telemetry.
+  `TokenBudgetedContextBuilder.plan_messages()` returns an immutable provider
+  request and exact final-request accounting.
+- **Agent parity** — `pp-agent` now uses that same final-request planner for
+  normal turns, planning, and compaction. Completion reserve, model-window
+  budget, and action/result protocol groups stay explicit and safe.
+- **Offline memory benchmark** — a versioned deterministic suite compares
+  tail-window, rolling-summary, vector-recall, and frozen 0.6.1 reference
+  behavior without a network, model, or API key.
+- **Local Ollama reference app** — `pp-ollama-chat` combines PDF RAG, an
+  append-only durable conversation archive, visible request receipts, and
+  precise deletion of transcript/vector/file projections. It is source-only
+  for this release and is installed from `apps/ollama-chat`.
+- **Hardened local ingestion** — PDF parsing applies compressed-stream limits
+  before expansion; raw multipart and chat bodies are bounded before framework
+  parsing; default storage is loopback-local with owner-only POSIX paths.
 
 ## Upgrade
 
@@ -40,30 +31,38 @@ unscoped to scoped storage.
 pip install --upgrade protoprompt
 ```
 
-`output_reserve` is optional and defaults to zero, preserving the existing
-constructor behavior. Use it when the host wants to leave a fixed response
-allowance inside a model context window:
+Existing `build()` and `build_messages()` call patterns remain supported.
+Hosts that need an audit-safe model request can move to the additive planning
+surface:
 
 ```python
-builder = TokenBudgetedContextBuilder(
-    store,
-    embeddings,
-    max_tokens=8_192,
+plan = await builder.plan_messages(
+    request,
+    history=history,
+    final_messages=[{"role": "user", "content": question}],
     output_reserve=1_024,
 )
+messages = plan.render_messages()
+receipt = plan.receipt
 ```
 
-When adopting profile scopes, treat existing unscoped profiles as a separate
-namespace. Copy only records that your host explicitly authorizes into the
-target `MemoryScope`; implicit adoption is deliberately forbidden.
+For the local Ollama reference app, install compatible local sources and keep
+the server on loopback unless you add an authentication boundary:
 
-A non-empty profile scope now requires native `supports_profile_scopes=True`.
-Custom, Redis, and Postgres profile stores must implement that capability before
-they can serve scoped profiles; `ProfileManager` fails closed before reading
-from a store that does not declare it.
+```bash
+pip install "protoprompt[documents,fastapi,ollama]==0.7.0"
+pip install "git+https://github.com/Idxeed/protoprompt.git@v0.7.0#subdirectory=apps/ollama-chat"
+pp-ollama-chat
+```
+
+The full transcript remains local, while the active request is bounded. The
+app therefore provides durable recall, not a promise of perfect recall or an
+unbounded model context window.
 
 ## Release gate
 
-The tag workflow verifies the version/tag match, deterministic tests, strict
-RU and EN documentation builds, wheel and sdist metadata, then publishes to
-PyPI and creates the GitHub release from these notes.
+The tag workflow checks the tag/version pair, deterministic library, agent,
+benchmark, and Ollama-app tests; builds Russian and English docs; validates
+library and reference-app wheels; imports the wheels from a clean environment;
+then publishes the library artifacts and creates the GitHub release from these
+notes.

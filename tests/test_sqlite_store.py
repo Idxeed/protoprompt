@@ -31,6 +31,13 @@ def test_where_equality_and_in():
     assert [h["document"] for h in hits] == ["gamma"]
 
 
+def test_list_doc_ids_supports_metadata_maintenance_filter():
+    store = SqliteStore()
+    _populate(store)
+    assert store.list_doc_ids() == ["doc-1", "doc-2"]
+    assert store.list_doc_ids({"kind": "fact"}) == ["doc-1"]
+
+
 def test_score_threshold_filters():
     store = SqliteStore()
     _populate(store)

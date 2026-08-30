@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ProtoPrompt · Local Ollama</title>
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <aside>
+      <div class="brand"><span class="mark">P</span><span>ProtoPrompt</span></div>
+      <button id="new-chat" class="new-chat" type="button">+ Новый чат</button>
+
+      <section class="conversation-section">
+        <p class="label">ДИАЛОГИ</p>
+        <nav id="conversations" aria-label="Диалоги"></nav>
+      </section>
+
+      <section class="documents">
+        <p class="label">БАЗА ЗНАНИЙ</p>
+        <label class="upload" for="pdf-input">↑ Загрузить PDF</label>
+        <input id="pdf-input" type="file" accept="application/pdf,.pdf" hidden />
+        <p id="upload-note" class="side-note" aria-live="polite"></p>
+        <div id="documents"></div>
+      </section>
+
+      <footer><span id="status" class="status"></span><span id="status-text">Проверяем Ollama…</span></footer>
+    </aside>
+
+    <main>
+      <header>
+        <div>
+          <h1 id="chat-title">Новый диалог</h1>
+          <p id="context-subtitle">PDF‑RAG и память с ограниченным контекстом</p>
+        </div>
+        <label class="model-picker">Модель <select id="model"><option value="">По умолчанию</option></select></label>
+      </header>
+
+      <div id="messages" aria-live="polite">
+        <div class="empty">
+          <div class="orb"></div>
+          <h2>О чём поговорим?</h2>
+          <p>Загрузите PDF — ответ будет опираться на найденные фрагменты.</p>
+        </div>
+      </div>
+      <div id="sources" class="sources" aria-live="polite"></div>
+      <p id="context-status" class="context-status">Контекст будет рассчитан перед первым ответом.</p>
+
+      <form id="composer">
+        <textarea id="message" rows="1" maxlength="20000" placeholder="Напишите сообщение…" autofocus></textarea>
+        <button id="send" type="submit" aria-label="Отправить">↑</button>
+      </form>
+      <p id="privacy-note" class="hint">Проверяем режим подключения…</p>
+    </main>
+
+    <template id="message-template">
+      <article class="message"><div class="avatar"></div><div class="bubble"></div></article>
+    </template>
+    <script src="/static/app.js"></script>
+  </body>
+</html>

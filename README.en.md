@@ -194,6 +194,24 @@ pip install "protoprompt[dev]"
 python scripts/build_docs.py --serve  # both versions on different ports
 ```
 
+## Local Ollama web chat
+
+The repository includes a local Ollama reference UI: chat, PDF RAG, and a
+durable conversation archive. It keeps the full transcript locally, but each
+model call is a fresh `ContextPlan` constrained to the configured budget.
+
+```bash
+ollama pull llama3.1
+ollama pull nomic-embed-text
+pip install -e ".[documents,fastapi,ollama]"
+pip install -e "apps/ollama-chat"
+pp-ollama-chat
+```
+
+The UI binds to `127.0.0.1` by default. See the
+[`ollama-chat` README](apps/ollama-chat/README.md) for storage/deletion,
+remote-Ollama opt-in, and token-estimate boundaries.
+
 ## Experimental coding agent
 
 The repository also contains a CLI built on `protoprompt.agent.WorkingMemory`:

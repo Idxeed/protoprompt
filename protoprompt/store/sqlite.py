@@ -147,6 +147,25 @@ class SqliteStore:
             row = self._conn.execute("SELECT COUNT(*) FROM chunks").fetchone()
         return int(row[0])
 
+    def list_doc_ids(self, where: dict | None = None) -> list[str]:
+        """Return distinct document ids, optionally filtered by metadata.
+
+        This is intentionally a small SQLite-specific maintenance API rather
+        than a retrieval primitive. It lets a local host reconcile orphaned
+        projections without exposing raw chunk content.
+        """
+        with self._lock:
+            rows = self._conn.execute(
+                "SELECT DISTINCT doc_id, metadata FROM chunks ORDER BY doc_id"
+            ).fetchall()
+        doc_ids: set[str] = set()
+        for doc_id, meta_json in rows:
+            metadata = json.loads(meta_json)
+            if where and not _matches_where(metadata, where):
+                continue
+            doc_ids.add(str(doc_id))
+        return sorted(doc_ids)
+
     def close(self) -> None:
         with self._lock:
             self._conn.close()

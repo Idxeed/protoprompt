@@ -185,6 +185,24 @@ from protoprompt.integrations import OpenAIClient, OllamaClient, QdrantStore
 - [секреты](https://idxeed.github.io/protoprompt/ru/secrets/);
 - [интеграции](https://idxeed.github.io/protoprompt/ru/integrations/).
 
+## Локальный Ollama web chat
+
+В репозитории есть reference-интерфейс для локальной Ollama: чат, PDF RAG и
+долговременный архив диалогов. Он хранит полный transcript локально, но перед
+каждым ответом передаёт модели только новый `ContextPlan` в заданном бюджете.
+
+```bash
+ollama pull llama3.1
+ollama pull nomic-embed-text
+pip install -e ".[documents,fastapi,ollama]"
+pip install -e "apps/ollama-chat"
+pp-ollama-chat
+```
+
+По умолчанию UI слушает только `127.0.0.1`. Подробности о хранении, удалении,
+remote-Ollama opt-in и пределах token estimate — в
+[`apps/ollama-chat/README.md`](apps/ollama-chat/README.md).
+
 ## Экспериментальный coding-agent
 
 В монорепозитории есть CLI поверх `protoprompt.agent.WorkingMemory`:

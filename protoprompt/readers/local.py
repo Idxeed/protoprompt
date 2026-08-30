@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
+from contextlib import contextmanager
 from dataclasses import dataclass
 import hashlib
 import mimetypes
 from pathlib import Path
+import threading
 from typing import Any
 from zipfile import BadZipFile, ZipFile
 
@@ -44,6 +47,51 @@ _TEXT_SUFFIXES = {
     ".csv", ".tsv", ".dockerfile",
 }
 _HTML_SUFFIXES = {".html", ".htm"}
+
+
+# pypdf 6.16 exposes decoder ceilings as module-level knobs rather than
+# per-reader options. Keep changes serialized and restore the prior values so
+# one bounded local read cannot relax another caller's limits.
+_PDF_DECODE_LIMIT_LOCK = threading.RLock()
+_PYPDF_OUTPUT_LIMITS = (
+    "MAX_DECLARED_STREAM_LENGTH",
+    "ZLIB_MAX_OUTPUT_LENGTH",
+    "LZW_MAX_OUTPUT_LENGTH",
+    "RUN_LENGTH_MAX_OUTPUT_LENGTH",
+    "JBIG2_MAX_OUTPUT_LENGTH",
+    "MAX_ARRAY_BASED_STREAM_OUTPUT_LENGTH",
+)
+
+
+@contextmanager
+def _bounded_pypdf_decode(max_output_bytes: int) -> Iterator[None]:
+    """Temporarily cap pypdf's compressed-stream expansion.
+
+    ``PdfReader`` expands a page's content stream before this reader can count
+    it. pypdf documents these module-level limits as its supported guard for
+    that operation; use the reader's configured stream ceiling rather than its
+    much larger library default.
+    """
+    from pypdf import filters as pypdf_filters
+
+    with _PDF_DECODE_LIMIT_LOCK:
+        previous = {
+            name: getattr(pypdf_filters, name)
+            for name in _PYPDF_OUTPUT_LIMITS
+        }
+        try:
+            for name, value in previous.items():
+                configured = int(value)
+                # pypdf treats zero as "unlimited" for its decoder limits;
+                # a bounded reader must never inherit that opt-out.
+                bounded = max_output_bytes if configured <= 0 else min(
+                    configured, max_output_bytes
+                )
+                setattr(pypdf_filters, name, bounded)
+            yield
+        finally:
+            for name, value in previous.items():
+                setattr(pypdf_filters, name, value)
 
 
 class LocalDocumentReader:
@@ -153,30 +201,40 @@ class LocalDocumentReader:
     def _read_pdf(self, path: Path, *, password: str | None) -> str:
         try:
             from pypdf import PdfReader
+            from pypdf.errors import LimitReachedError, PdfReadError
         except ImportError as exc:
             raise ImportError(
                 "PDF reading requires pypdf. "
                 "Install with: pip install 'protoprompt[documents]'"
             ) from exc
-        reader = PdfReader(path, strict=True)
-        if reader.is_encrypted:
-            if password is None or not reader.decrypt(password):
-                raise DocumentReadError("PDF is encrypted; a valid password is required")
-        if len(reader.pages) > self.limits.max_pages:
-            raise DocumentReadError(
-                f"PDF has {len(reader.pages)} pages; limit is {self.limits.max_pages}"
-            )
-        parts: list[str] = []
-        stream_total = 0
-        for page in reader.pages:
-            contents = page.get_contents()
-            if contents is not None:
-                stream_total += len(contents.get_data())
-                if stream_total > self.limits.max_pdf_stream_bytes:
-                    raise DocumentReadError("PDF content streams exceed the configured limit")
-            parts.append(page.extract_text() or "")
-            self._check_chars("\n\n".join(parts))
-        return "\n\n".join(parts)
+        try:
+            # ``page.get_contents()`` performs decompression itself. Apply the
+            # limit before it (and ``extract_text()``) touch a stream, rather
+            # than only checking the already-expanded byte string.
+            with _bounded_pypdf_decode(self.limits.max_pdf_stream_bytes):
+                reader = PdfReader(path, strict=True)
+                if reader.is_encrypted:
+                    if password is None or not reader.decrypt(password):
+                        raise DocumentReadError("PDF is encrypted; a valid password is required")
+                if len(reader.pages) > self.limits.max_pages:
+                    raise DocumentReadError(
+                        f"PDF has {len(reader.pages)} pages; limit is {self.limits.max_pages}"
+                    )
+                parts: list[str] = []
+                stream_total = 0
+                for page in reader.pages:
+                    contents = page.get_contents()
+                    if contents is not None:
+                        stream_total += len(contents.get_data())
+                        if stream_total > self.limits.max_pdf_stream_bytes:
+                            raise DocumentReadError("PDF content streams exceed the configured limit")
+                    parts.append(page.extract_text() or "")
+                    self._check_chars("\n\n".join(parts))
+                return "\n\n".join(parts)
+        except LimitReachedError as exc:
+            raise DocumentReadError("PDF content streams exceed the configured limit") from exc
+        except PdfReadError as exc:
+            raise DocumentReadError("PDF is malformed or cannot be read") from exc
 
     def _read_docx(self, path: Path) -> str:
         self._check_docx_archive(path)

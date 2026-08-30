@@ -21,6 +21,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `TokenBudgetedContextBuilder.plan_messages()`. It has separate request and
   memory budgets, forwards the completion reserve to the provider, and keeps
   text-action/tool-result continuations together as mandatory final input.
+- Local-only `pp-ollama-chat` reference integration: PDF RAG, append-only
+  conversation archive with a crash-safe pending ledger, explicit deletion of
+  transcript/vector/file projections, SSE streaming, and a visible
+  `ContextPlan` receipt. Each generated Ollama request receives matching
+  `num_ctx` and `num_predict` controls.
 
 ### Changed
 - `TokenBudgetedContextBuilder.build()` now attaches its context-only plan as
@@ -30,6 +35,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   memory under a fixed, explainable context budget.
 - `pp-agent` falls back to non-streaming chat when a cached client wraps a
   backend without a real streaming capability instead of failing at runtime.
+- The web reference app states the difference between durable retention and
+  bounded active context; its deterministic token counter is documented as a
+  planner estimate rather than a universal provider tokenizer.
 
 ### Security
 - Ignore local reference-app data, runtime key/token/pid files, SQLite WAL
@@ -39,6 +47,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   an in-flight caller cannot replace a validated prompt, document filter, or
   session identifier mid-request. Opaque RAG provenance also handles every
   Python string identifier without crashing on an unpaired surrogate.
+- Ollama web UI defaults to loopback and refuses a remote Ollama endpoint
+  unless `OLLAMA_CHAT_ALLOW_REMOTE=1` is set; remote mode explicitly warns that
+  messages and PDF content leave the machine.
+- Local PDF ingestion now constrains pypdf compressed-stream expansion before
+  extraction; raw PDF/chat bodies are rejected before framework parsing; and
+  the POSIX reference-app data directory, SQLite files, and new uploads are
+  created with owner-only permissions.
 
 ## [0.6.1] - 2026-08-30
 

@@ -1,0 +1,32 @@
+[project]
+name = "protoprompt-ollama-chat"
+version = "0.7.0"
+description = "Local-only Ollama chat with PDF RAG and bounded durable memory"
+requires-python = ">=3.11"
+license = "MIT"
+readme = "README.md"
+dependencies = [
+    "protoprompt[documents,fastapi,ollama]>=0.7.0,<0.8.0",
+    "python-multipart>=0.0.20",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "httpx>=0.27"]
+
+[project.scripts]
+pp-ollama-chat = "protoprompt_ollama_chat.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["protoprompt_ollama_chat*"]
+
+[tool.setuptools.package-data]
+protoprompt_ollama_chat = ["static/*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]

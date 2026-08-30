@@ -134,8 +134,9 @@ index, summaries и framework-specific state — его projections/caches, а �
 - [x] Выпустить ProtoPrompt Memory Benchmark v0.1: versioned offline fixtures,
   fixed baselines (sliding window, rolling summary, vector recall, `0.6`
   pipeline) и machine-readable report.
-- [ ] Подключить local Ollama/PDF app как hardened reference integration:
-  final budgeting, provenance UI, scoped deletion и loopback-safe defaults.
+- [x] Подключить local Ollama/PDF app как hardened reference integration:
+  final budgeting/receipt, provenance UI, append-only conversation archive с
+  crash-safe ledger, scoped deletion и loopback-safe defaults.
 
 ### Release gate
 
