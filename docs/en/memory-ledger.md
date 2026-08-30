@@ -10,6 +10,8 @@ That separation is intentional. A PDF, tool result, transcript, or model
 extraction must never become a trusted system-priority fact simply because it
 was persisted.
 
+![Memory Ledger lifecycle: candidate, trusted confirmation, active recall, lifecycle exit](assets/memory-ledger-lifecycle.svg)
+
 ## Quick start
 
 Schema setup is an operator action, never an import-time side effect:
@@ -150,5 +152,6 @@ running them.
 4. Roll back by stopping writes to the ledger and returning traffic to the
    old components; do not destructively downgrade a shared database.
 
-The planned profile/session/vector importers remain later v0.8 work. This
-foundation intentionally preserves all existing public behavior.
+Profile/session/vector importers and stable request composition remain future
+work. The ledger and its experimental recall lane intentionally preserve all
+existing public behavior until those migration contracts are separately proven.

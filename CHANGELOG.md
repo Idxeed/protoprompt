@@ -7,6 +7,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-08-30
+
+### Added
+- Experimental bounded Ledger Recall: `LedgerRecallPlanner` reads only active,
+  host-confirmed, still-valid payloads from one scope-pinned `MemoryWriter`;
+  ranks locally with deterministic lexical relevance, confidence and recency;
+  and packs whole records into a canonical JSON data lane with exact token and
+  UTF-8-byte receipts. It performs no LLM, embedding, vector, network, or
+  legacy-memory call and does not silently compose data into `ContextPlan` or
+  a system prompt.
+- Content-free `LedgerRecallPlan.explain()` receipts record the immutable
+  policy configuration/fingerprint, token-counter identity, candidate and
+  active-read bounds, budget decisions, and selected count without exposing
+  task text, record IDs, scope, provenance, or memory content.
+- Planner-bound authenticated selection snapshots and a host-controlled clock.
+  A plan cannot be replayed through another planner, scope, counter or policy;
+  a model/tool caller cannot supply a backdated per-call timestamp.
+- Repo-owned launch material and bilingual docs for the new recall data lane,
+  including an illustrated Ledger lifecycle asset.
+
+### Changed
+- Recall resolution now renders and performs injectable token accounting outside
+  SQLite's writer lock, then takes a short final `BEGIN IMMEDIATE` lifecycle
+  validation boundary. A concurrent forget/retract that wins makes resolution
+  fail closed with `StaleMemoryPlanError` instead of returning stale data.
+
+### Security
+- The final recall validation re-checks selected record identity, revision,
+  content hash, kind, active lifecycle status and time validity before context
+  returns. `TokenCounter` implementations cannot hold or re-enter the Ledger
+  write transaction.
+- SQLite read and write transaction helpers now roll back on `BaseException`,
+  preventing an interrupted internal operation from leaving a connection in an
+  open transaction.
+
 ## [0.8.0] - 2026-08-30
 
 ### Added

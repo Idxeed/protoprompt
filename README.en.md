@@ -19,6 +19,8 @@ coupling those dependencies to the core package.
 
 ![Telegram bot recalls an old fact and shows provenance](docs/assets/telegram-memory.gif)
 
+![Memory Ledger lifecycle](docs/assets/memory-ledger-lifecycle.svg)
+
 The reference [Telegram bot](docs/en/telegram.md) persists long-term memory in
 SQLite, works with OpenAI or Ollama, and explains each recall through `/why`.
 
@@ -47,6 +49,13 @@ The experimental `MemoryWriter` / SQLite Memory Ledger adds a separate,
 host-confirmed lifecycle for durable facts, decisions, preferences, and agent
 episodes. It is intentionally opt-in while adapters to legacy vector/profile
 memory are built; see the [Memory Ledger guide](docs/en/memory-ledger.md).
+
+Its experimental `LedgerRecallPlanner` is the first safe read lane for an
+agent's current task: it selects only active, host-confirmed records into a
+fresh, bounded JSON data envelope, provides a content-free receipt, and fails
+closed if selected memory changes before send. It does not silently modify a
+system prompt or replace final request accounting; see [Bounded ledger
+recall](docs/en/ledger-recall.md).
 
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of

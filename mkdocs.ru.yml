@@ -1,5 +1,5 @@
 site_name: protoprompt
-site_description: Слоистый сборщик контекста для LLM-промптов
+site_description: Надёжная память агента и объяснимый ограниченный контекст для LLM-приложений
 site_url: https://idxeed.github.io/protoprompt/
 repo_url: https://github.com/Idxeed/protoprompt
 repo_name: Idxeed/protoprompt
@@ -58,6 +58,7 @@ nav:
       - Токен-бюджет: concepts/budget.md
   - Память:
       - Экспериментальный memory ledger: memory-ledger.md
+      - Bounded recall из ledger: ledger-recall.md
       - Память чат-бота: memory.md
       - RAG по документам: rag.md
       - Профиль пользователя: profile.md

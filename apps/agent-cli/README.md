@@ -24,7 +24,7 @@ pp-agent C:\path\to\project
 ```
 
 При установке из checkout сначала ставьте корневой пакет: агент требует
-ProtoPrompt `>=0.8.0,<0.9.0`, потому что использует `ContextPlan` и exact
+ProtoPrompt `>=0.9.0,<1.0.0`, потому что использует `ContextPlan` и exact
 request receipt.
 
 Ollama должна иметь модели `llama3.1:8b` и `nomic-embed-text`.

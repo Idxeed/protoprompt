@@ -10,6 +10,8 @@
 LLM extraction не может стать доверенным фактом с system-priority лишь потому,
 что его сохранили.
 
+![Жизненный цикл Memory Ledger: candidate, trusted confirmation, active recall, lifecycle exit](assets/memory-ledger-lifecycle.svg)
+
 ## Быстрый старт
 
 Инициализация схемы — действие оператора, а не побочный эффект импорта:
@@ -148,5 +150,7 @@ ledger-owned table/index definitions и отклоняют внешние indexe
 4. Для rollback остановите записи в ledger и верните traffic к старым
    компонентам; не делайте destructive downgrade общей БД.
 
-Importer для profile/session/vector — следующая работа v0.8. Эта основа
-специально сохраняет всё текущее публичное поведение без изменений.
+Importer для profile/session/vector и stable request composition — будущая
+работа. Ledger и его experimental recall lane специально сохраняют всё
+текущее публичное поведение без изменений, пока эти migration contracts не
+будут отдельно доказаны.

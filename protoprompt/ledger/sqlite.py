@@ -13,7 +13,7 @@ import json
 import re
 import sqlite3
 import threading
-from typing import Any, Iterator
+from typing import Any, Iterable, Iterator
 import uuid
 
 from protoprompt.ledger.types import (
@@ -1208,39 +1208,112 @@ class SqliteMemoryLedger:
         limit: int = 100,
     ) -> list[MemoryRecord]:
         """Return only currently valid, content-present, active memories."""
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
-            raise ValueError("limit must be an integer from 1 to 1000")
+        self._validate_active_limit(limit)
         instant = self._timestamp(now)
-        scope_id, scope_json = _scope_storage(scope)
+        _scope_storage(scope)
         with self._lock:
             self._require_ready_locked()
             with self._read_transaction_locked():
-                rows = self._conn.execute(
-                    "SELECT r.record_id FROM memory_records AS r "
-                    "JOIN memory_payloads AS p ON "
-                    "p.scope_id = r.scope_id AND p.scope_json = r.scope_json "
-                    "AND p.record_id = r.record_id "
-                    "WHERE r.scope_id = ? AND r.scope_json = ? AND r.state = ? "
-                    "AND r.trust = ? "
-                    "AND (r.valid_from IS NULL OR r.valid_from <= ?) "
-                    "AND (r.valid_until IS NULL OR r.valid_until > ?) "
-                    "ORDER BY r.updated_at DESC, r.record_id ASC LIMIT ?",
+                return self._list_active_locked(scope, instant=instant, limit=limit)
+
+    def _validate_active_snapshot(
+        self,
+        scope: MemoryScope,
+        *,
+        now: datetime | str | None,
+        limit: int,
+        selections: Iterable[tuple[str, int, str, MemoryKind]],
+    ) -> bool:
+        """Check private recall markers under a short ledger write lock.
+
+        The caller must do plaintext rendering and arbitrary token accounting
+        before this method. ``BEGIN IMMEDIATE`` is only a final, short
+        lifecycle linearization point: it re-reads the active snapshot and
+        verifies that each selected record still has the planned revision,
+        content hash and kind.  No caller-supplied callback executes inside
+        the transaction. This method is intentionally private; public readers
+        should use :meth:`list_active`.
+        """
+
+        self._validate_active_limit(limit)
+        normalized_selections = self._normalize_active_snapshot_markers(selections)
+        instant = self._timestamp(now)
+        _scope_storage(scope)
+        with self._lock:
+            with self._ready_write_transaction_locked():
+                records = self._list_active_locked(scope, instant=instant, limit=limit)
+                current_by_id = {record.record_id: record for record in records}
+                return all(
                     (
-                        scope_id,
-                        scope_json,
-                        MemoryState.ACTIVE.value,
-                        MemoryTrust.HOST_CONFIRMED.value,
-                        format_timestamp(instant),
-                        format_timestamp(instant),
-                        limit,
-                    ),
-                ).fetchall()
-                records = [
-                    record
-                    for row in rows
-                    if (record := self._load_record_locked(scope, str(row["record_id"])))
-                    is not None
-                ]
+                        (record := current_by_id.get(record_id)) is not None
+                        and record.revision == revision
+                        and record.content_hash == expected_hash
+                        and record.kind is kind
+                    )
+                    for record_id, revision, expected_hash, kind in normalized_selections
+                )
+
+    @staticmethod
+    def _normalize_active_snapshot_markers(
+        selections: Iterable[tuple[str, int, str, MemoryKind]],
+    ) -> tuple[tuple[str, int, str, MemoryKind], ...]:
+        """Copy and validate private recall markers before opening a transaction."""
+
+        if isinstance(selections, (str, bytes)):
+            raise TypeError("selections must be an iterable of recall markers")
+        normalized: list[tuple[str, int, str, MemoryKind]] = []
+        for selection in selections:
+            if not isinstance(selection, tuple) or len(selection) != 4:
+                raise TypeError("each recall marker must be a four-item tuple")
+            record_id, revision, expected_hash, kind = selection
+            identity = validate_identifier(record_id, field="record_id")
+            if isinstance(revision, bool) or not isinstance(revision, int) or revision < 1:
+                raise ValueError("revision must be a positive integer")
+            if not isinstance(expected_hash, str) or len(expected_hash) != 64:
+                raise ValueError("content_hash must be a 64-character operational marker")
+            normalized.append((identity, revision, expected_hash, MemoryKind(kind)))
+        return tuple(normalized)
+
+    @staticmethod
+    def _validate_active_limit(limit: int) -> None:
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ValueError("limit must be an integer from 1 to 1000")
+
+    def _list_active_locked(
+        self,
+        scope: MemoryScope,
+        *,
+        instant: datetime,
+        limit: int,
+    ) -> list[MemoryRecord]:
+        """Load one active-memory snapshot while the caller owns a transaction."""
+
+        scope_id, scope_json = _scope_storage(scope)
+        rows = self._conn.execute(
+            "SELECT r.record_id FROM memory_records AS r "
+            "JOIN memory_payloads AS p ON "
+            "p.scope_id = r.scope_id AND p.scope_json = r.scope_json "
+            "AND p.record_id = r.record_id "
+            "WHERE r.scope_id = ? AND r.scope_json = ? AND r.state = ? "
+            "AND r.trust = ? "
+            "AND (r.valid_from IS NULL OR r.valid_from <= ?) "
+            "AND (r.valid_until IS NULL OR r.valid_until > ?) "
+            "ORDER BY r.updated_at DESC, r.record_id ASC LIMIT ?",
+            (
+                scope_id,
+                scope_json,
+                MemoryState.ACTIVE.value,
+                MemoryTrust.HOST_CONFIRMED.value,
+                format_timestamp(instant),
+                format_timestamp(instant),
+                limit,
+            ),
+        ).fetchall()
+        records = [
+            record
+            for row in rows
+            if (record := self._load_record_locked(scope, str(row["record_id"]))) is not None
+        ]
         return [record for record in records if record.is_recallable(now=instant)]
 
     def events(self, scope: MemoryScope, record_id: str) -> list[MemoryEvent]:
@@ -2253,7 +2326,7 @@ class SqliteMemoryLedger:
         self._conn.execute("BEGIN IMMEDIATE")
         try:
             yield
-        except Exception:
+        except BaseException:
             self._conn.rollback()
             raise
         else:
@@ -2279,7 +2352,7 @@ class SqliteMemoryLedger:
         self._conn.execute("BEGIN")
         try:
             yield
-        except Exception:
+        except BaseException:
             self._conn.rollback()
             raise
         else:

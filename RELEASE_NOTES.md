@@ -1,29 +1,40 @@
-# protoprompt 0.8.0
+# protoprompt 0.9.0
 
-This release adds a durable-memory foundation with an explicit lifecycle:
-facts may persist locally, but they do not become recallable until a trusted
-host confirms them, and every later lifecycle decision is scope-bound,
-revision-checked, and explainable.
+ProtoPrompt 0.9 adds the first safe, bounded read path from durable Memory
+Ledger records to an agent's current task. It is deliberately narrow:
+experimental Ledger Recall is an opt-in JSON **data lane**, not a promise of
+unlimited context, automatic memory admission, or a hidden system-prompt
+insertion.
 
 ## Highlights
 
-- **Experimental Memory Ledger** — the new opt-in SQLite ledger provides a
-  host-pinned `MemoryWriter`, typed candidate/active/superseded/retracted/
-  expired/quarantined lifecycle, optimistic revisions, retry-safe event IDs,
-  provenance, and explicit confirmation before default recall.
-- **Deletion semantics that say exactly what they do** — `forget()` removes
-  plaintext and local provenance payloads, `forget_by_source()` atomically
-  revokes an opaque source inside one scope, and `erase()` supplies a narrow
-  local hard-erase path with replay barriers. These are live-ledger guarantees;
-  they do not claim deletion from an external vector store, SQLite backups,
-  WAL/journals, or storage media.
-- **Fail-closed SQLite boundary** — exact table/index definitions, reserved
-  schema object names, rejection of unowned triggers on ledger tables,
-  case-insensitive identifier handling, and post-lock validation prevent a
-  shared database from silently changing memory lifecycle or copying payloads.
-- **No surprise migration** — the ledger remains separate from legacy vector,
-  profile, and session components. It has explicit setup, dry-run, backup, and
-  export APIs, so hosts can evaluate it before connecting a later adapter.
+- **Bounded Ledger Recall** — `LedgerRecallPlanner` reads only `active`,
+  host-confirmed, still-valid payloads through one scope-pinned
+  `MemoryWriter`. It ranks locally with deterministic lexical relevance,
+  confidence, and recency; it calls no LLM, embedding, vector, or network
+  service. Whole records either fit into the canonical JSON data envelope's
+  exact token and UTF-8-byte budgets or stay out.
+- **Fresh lifecycle check before use** — a plan is bound to its planner,
+  scope, policy, token-counter identity, selected record revision, kind, and
+  content hash. `resolve()` renders and accounts for data outside SQLite's writer
+  lock, then takes a short final lifecycle boundary and rechecks the active
+  snapshot. If a record was forgotten, retracted, superseded, erased, expired,
+  changed, or displaced outside the bounded reader, resolution fails closed
+  with `StaleMemoryPlanError`; callers replan before sending a provider
+  request.
+- **Explainable and host-controlled** — `plan.explain()` is content-free while
+  retaining policy, budget, active-read/candidate bounds, selection decisions,
+  and counter identity for audits and developer UIs. The planner owns time via
+  its injected host clock, so a model or tool cannot backdate a per-call read
+  to bypass expiry.
+- **No SQLite lock inversion** — custom token counters run outside the Ledger
+  write transaction. A slow or re-entrant counter cannot stall `forget()` or
+  leave the connection in a nested transaction. Internal SQLite transaction
+  helpers now roll back even after a `BaseException` interruption.
+- **Clear boundary for the next milestone** — v0.9 does not yet introduce an
+  automatic admission policy, episode/checkpoint runtime, legacy
+  `WorkingMemory` migration, or automatic `ContextPlan` composition. Those
+  need their own contracts and measurements before they can become defaults.
 
 ## Upgrade
 
@@ -31,12 +42,12 @@ revision-checked, and explainable.
 pip install --upgrade protoprompt
 ```
 
-Existing public context, RAG, profile, and session APIs remain supported. To
-evaluate the ledger, set it up explicitly and keep its writer inside trusted
-host code:
+Create and explicitly confirm records through trusted host code, then plan and
+resolve a data lane immediately before composing the provider request:
 
 ```python
 from protoprompt.ledger import MemoryWriter, SqliteMemoryLedger
+from protoprompt.ledger.recall import LedgerRecallPlanner, StaleMemoryPlanError
 from protoprompt.scope import MemoryScope
 
 ledger = SqliteMemoryLedger("memory-ledger.db")
@@ -51,25 +62,36 @@ candidate = writer.propose(
     source_ref="turn:42",
 )
 writer.confirm(candidate.record_id, expected_revision=candidate.revision)
+
+planner = LedgerRecallPlanner(writer)
+try:
+    memory_data = planner.resolve(
+        planner.plan(task="answer the user", token_budget=600, byte_budget=32_768)
+    ).render_data()
+except StaleMemoryPlanError:
+    # A lifecycle write won; plan once more before the provider send.
+    memory_data = planner.resolve(
+        planner.plan(task="answer the user", token_budget=600, byte_budget=32_768)
+    ).render_data()
 ```
 
-For the local Ollama reference app, install compatible local sources and keep
-the server on loopback unless you add an authentication boundary:
+Treat `memory_data` as untrusted data in your own request composition. Do not
+give model/tool code a `MemoryWriter` or interpret durable record content as
+system instructions.
+
+For the local Ollama reference app, install compatible sources and keep the
+server on loopback unless you add an authentication boundary:
 
 ```bash
-pip install "protoprompt[documents,fastapi,ollama]==0.8.0"
-pip install "git+https://github.com/Idxeed/protoprompt.git@v0.8.0#subdirectory=apps/ollama-chat"
+pip install "protoprompt[documents,fastapi,ollama]==0.9.0"
+pip install "git+https://github.com/Idxeed/protoprompt.git@v0.9.0#subdirectory=apps/ollama-chat"
 pp-ollama-chat
 ```
 
-The full transcript remains local, while the active request is bounded. The
-app therefore provides durable recall, not a promise of perfect recall or an
-unbounded model context window.
-
 ## Release gate
 
-The tag workflow checks the tag/version pair, deterministic library, agent,
-benchmark, and Ollama-app tests; builds Russian and English docs; validates
-library and reference-app wheels; imports the wheels from a clean environment;
-then publishes the library artifacts and creates the GitHub release from these
-notes.
+The tag workflow checks tag/version alignment; deterministic library, agent,
+and Ollama-app tests; Russian and English documentation; library
+and reference-app distributions; and a clean-environment wheel import. It
+publishes verified library artifacts to PyPI and creates the GitHub release
+only after the checks pass.

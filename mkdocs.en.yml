@@ -1,5 +1,5 @@
 site_name: protoprompt
-site_description: Layered context builder for LLM prompts
+site_description: Reliable agent memory and explainable bounded context for LLM applications
 site_url: https://idxeed.github.io/protoprompt/
 repo_url: https://github.com/Idxeed/protoprompt
 repo_name: Idxeed/protoprompt
@@ -58,6 +58,7 @@ nav:
       - Token budget: concepts/budget.md
   - Memory:
       - Experimental memory ledger: memory-ledger.md
+      - Bounded ledger recall: ledger-recall.md
       - RAG retrieval: rag.md
       - User profile: profile.md
       - Secrets: secrets.md

@@ -283,6 +283,28 @@ class MemoryWriter:
             limit=limit,
         )
 
+    def _validate_active_snapshot(
+        self,
+        *,
+        now: datetime | str | None,
+        limit: int,
+        selections: Iterable[tuple[str, int, str, MemoryKind]],
+    ) -> bool:
+        """Validate private recall markers under one short ledger boundary.
+
+        This is reserved for ledger-owned read paths that need a final
+        lifecycle linearization point after rendering outside the SQLite write
+        lock. Model/plugin code should receive neither this helper nor the
+        underlying writer.
+        """
+
+        return self._ledger._validate_active_snapshot(
+            self._scope,
+            now=self._clock() if now is None else now,
+            limit=limit,
+            selections=selections,
+        )
+
     def events(self, record_id: str):
         """Return content-free lifecycle receipts for one record."""
         return self._ledger.events(self._scope, record_id)

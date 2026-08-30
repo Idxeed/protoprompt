@@ -1,12 +1,12 @@
 [project]
 name = "protoprompt-ollama-chat"
-version = "0.8.0"
+version = "0.9.0"
 description = "Local-only Ollama chat with PDF RAG and bounded durable memory"
 requires-python = ">=3.11"
 license = "MIT"
 readme = "README.md"
 dependencies = [
-    "protoprompt[documents,fastapi,ollama]>=0.8.0,<0.9.0",
+    "protoprompt[documents,fastapi,ollama]>=0.9.0,<1.0.0",
     "python-multipart>=0.0.20",
 ]
 

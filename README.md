@@ -22,6 +22,8 @@ embeddable context runtime: RAG, память диалога, профиль п�
 
 ![Telegram-бот вспоминает старый факт и показывает provenance](docs/assets/telegram-memory.gif)
 
+![Жизненный цикл Memory Ledger](docs/assets/memory-ledger-lifecycle.svg)
+
 Эталонный [Telegram-бот](docs/ru/telegram.md) сохраняет длинную память в
 SQLite, работает с OpenAI или Ollama и объясняет каждый recall через `/why`.
 
@@ -43,6 +45,7 @@ LLM обычно нужна не просто история чата, а нес
 | Память сессии | эвристическое или LLM-сжатие длинных диалогов |
 | Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
 | Memory Ledger *(experimental)* | scoped lifecycle, host confirmation, provenance, atomic source revocation и проверяемая очистка live rows |
+| Bounded ledger recall *(experimental)* | локальный deterministic selection active memory в JSON data lane с token/byte budget, receipt и pre-send stale check |
 | Токен-бюджет | жёсткий лимит, приоритеты слоёв, `ContextPlan`/receipt и объяснение обрезки |
 | Хранилища | in-memory, SQLite, ChromaDB, Qdrant, pgvector, Elasticsearch/OpenSearch и Redis services |
 | LLM и embeddings | OpenAI, Anthropic, Google GenAI, Bedrock, Ollama и локальные модели |
@@ -52,6 +55,12 @@ LLM обычно нужна не просто история чата, а нес
 
 Ядро не имеет обязательных сторонних зависимостей. Интеграции подключаются
 через extras и не импортируются, пока не понадобятся.
+
+Экспериментальный `LedgerRecallPlanner` — первый безопасный read-path для
+текущей задачи агента: он выбирает только active, host-confirmed записи,
+создаёт свежий ограниченный JSON data lane и fail-closed при изменении памяти
+до отправки. Он не подмешивает записи в system prompt и не заменяет финальный
+request accounting; см. [Bounded recall из ledger](docs/ru/ledger-recall.md).
 
 ## Установка
 

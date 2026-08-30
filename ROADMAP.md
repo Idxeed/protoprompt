@@ -1,6 +1,7 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: путь от опубликованного `0.6.1` к `1.0.0`.
+> Статус: опубликован `0.8.0`; `0.9.0` с первым безопасным recall-slice
+> проходит release gate на пути к `1.0.0`.
 > Обновлён: 2026-08-30.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
@@ -207,6 +208,13 @@ index, summaries и framework-specific state — его projections/caches, а �
 
 ### Работа
 
+- [x] В `0.9.0` добавить первый experimental read-path:
+  `LedgerRecallPlanner` читает только active, host-confirmed records из
+  pinned `MemoryWriter`, детерминированно ранжирует их локально и упаковывает
+  целиком в отдельный JSON data lane с token/byte receipt. Перед возвратом
+  context он заново проверяет record/revision и fail-closed после
+  forget/retract/expiry/erase; не вызывает LLM/embeddings/vector API и не меняет legacy
+  `WorkingMemory`/`ContextPlan`.
 - Использовать `MemoryEvent` для goal, observation, tool result, artifact
   change, outcome и human feedback.
 - Добавить `Episode`: цель → действия → результат → вывод, с evidence на
@@ -215,8 +223,10 @@ index, summaries и framework-specific state — его projections/caches, а �
   эпизодов; не превращать неудачный model output в инструкцию.
 - Перенести полезные части экспериментального `WorkingMemory` (scoring,
   hot/cold zones, manifests, checkpoints) в ledger + planner.
-- Добавить controlled consolidation, checkpoints/resume и policy-driven recall
-  facts, episodes, procedures, RAG evidence и current task через ContextPlan.
+- Добавить controlled consolidation, checkpoints/resume и следующий
+  policy-driven composition step для facts, episodes, procedures, RAG evidence
+  и current task через ContextPlan. До него Ledger recall остаётся отдельным
+  data lane, а не скрытой вставкой в system prompt.
 - Перевести bridges к LangGraph, OpenAI Agents SDK, PydanticAI и LlamaIndex на
   единый contract там, где это не ломает public semantics.
 - Выпустить ProtoPrompt Memory Benchmark v1.0 как regression gate.

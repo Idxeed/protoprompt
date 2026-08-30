@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" viewBox="0 0 1200 330" role="img" aria-labelledby="title desc">
+  <title id="title">ProtoPrompt Memory Ledger lifecycle</title>
+  <desc id="desc">A candidate becomes recallable only after trusted host confirmation, then may be superseded, retracted, expired, quarantined, or forgotten.</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#10182d"/>
+      <stop offset="1" stop-color="#1b2750"/>
+    </linearGradient>
+    <filter id="shadow" x="-10%" y="-20%" width="120%" height="150%">
+      <feDropShadow dx="0" dy="7" stdDeviation="8" flood-color="#070b18" flood-opacity=".32"/>
+    </filter>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#9fb4e9"/>
+    </marker>
+  </defs>
+  <rect width="1200" height="330" rx="26" fill="url(#bg)"/>
+  <text x="60" y="68" fill="#f7f9ff" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="29" font-weight="700">ProtoPrompt Memory Ledger</text>
+  <text x="60" y="99" fill="#b9c6eb" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="17">Durable retention is separate from bounded, trusted recall.</text>
+  <g font-family="Inter,Segoe UI,Arial,sans-serif" text-anchor="middle" filter="url(#shadow)">
+    <rect x="58" y="158" width="190" height="86" rx="17" fill="#27375f" stroke="#6982bd"/>
+    <text x="153" y="194" fill="#f7f9ff" font-size="21" font-weight="700">Candidate</text>
+    <text x="153" y="220" fill="#bed0ff" font-size="14">untrusted input</text>
+
+    <rect x="355" y="158" width="220" height="86" rx="17" fill="#0d635d" stroke="#5be0c2"/>
+    <text x="465" y="194" fill="#effffb" font-size="21" font-weight="700">Host confirmation</text>
+    <text x="465" y="220" fill="#a9f5e2" font-size="14">explicit review</text>
+
+    <rect x="682" y="158" width="190" height="86" rx="17" fill="#176c48" stroke="#69df9d"/>
+    <text x="777" y="194" fill="#f0fff7" font-size="22" font-weight="700">Active</text>
+    <text x="777" y="220" fill="#b0f2cb" font-size="14">eligible for recall</text>
+
+    <rect x="978" y="142" width="165" height="118" rx="17" fill="#3a315b" stroke="#b4a7ff"/>
+    <text x="1060" y="176" fill="#fbf9ff" font-size="18" font-weight="700">Lifecycle exit</text>
+    <text x="1060" y="202" fill="#d8d1ff" font-size="13">superseded · retracted</text>
+    <text x="1060" y="222" fill="#d8d1ff" font-size="13">expired · quarantined</text>
+    <text x="1060" y="242" fill="#d8d1ff" font-size="13">forgotten / erased</text>
+  </g>
+  <g fill="none" stroke="#9fb4e9" stroke-width="4" marker-end="url(#arrow)">
+    <path d="M248 201 H335"/>
+    <path d="M575 201 H662"/>
+    <path d="M872 201 H958"/>
+  </g>
+  <text x="292" y="184" fill="#8de8d2" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="13" text-anchor="middle">trusted host only</text>
+  <text x="777" y="292" fill="#90a2d3" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="15" text-anchor="middle">Ledger recall reads only active, confirmed, valid records — then applies a fixed context budget.</text>
+</svg>

@@ -1,6 +1,6 @@
 # protoprompt
 
-> Layered context builder for LLM prompts: RAG + compressed session memory + user profile.
+> Reliable agent memory and explainable bounded context for LLM applications.
 
 Production LLM apps hit the same wall: the model needs context, but the
 context window is finite. Hand-rolled prompt assembly gets messy:
@@ -45,6 +45,8 @@ Three composable layers, three pluggable contracts:
 - **Session memory** that compresses old turns into a vector-friendly summary.
 - **User profile** auto-derived from prior messages.
 - **Token budget** that protects the model's context window.
+- **Host-confirmed Memory Ledger** with lifecycle, provenance, and bounded
+  ledger recall as a separate data lane.
 - **Pluggable everything**: stores, strategies, token counters, even the
   LLM client (anything implementing `LLMClientProtocol` works).
 - **Zero hard dependencies** — only `chromadb` / `tiktoken` are optional.
@@ -64,4 +66,6 @@ pip install "protoprompt[chroma,dev]" # everything for development
 - [Concepts: context layers](concepts/context.md) — when to use what.
 - [Concepts: token budget](concepts/budget.md) — protect your context window.
 - [Concepts: compression](concepts/compression.md) — heuristic vs LLM-driven.
+- [Bounded ledger recall](ledger-recall.md) — select durable agent memory without
+  silently widening the request.
 - [API Reference](api/context.md) — every public symbol.
