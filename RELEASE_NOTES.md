@@ -1,131 +1,119 @@
-# protoprompt 0.10.0
+# protoprompt 0.11.0
 
-ProtoPrompt 0.10 adds the admission boundary that turns the experimental
-Memory Ledger from “host-confirmed storage” into a safer, evidence-backed
-memory ingress. It is intentionally focused: no hidden prompt injection, no
-new framework dependency, and no automatic migration of old memories into
-trusted facts.
+ProtoPrompt 0.11 adds one narrow, host-owned bridge from admitted durable
+Ledger memory to a fully budgeted provider request. The release does not turn
+memory into a hidden system prompt, does not auto-wire reference applications,
+and does not claim an unlimited context window or universal retrieval quality.
 
 ## Highlights
 
-- **Host-owned admission** — `MemoryReviewGate` binds one Ledger writer to a
-  fixed scope, origin, policy, and actor. A narrow ingress accepts only text;
-  scope, origin, kind, confidence, source/evidence IDs, lifecycle state, and
-  idempotency keys remain host-owned.
-- **A conservative default** — `MemoryAdmissionPolicy()` quarantines every
-  origin. `safe_default()` allows only high-confidence `host_assertion`
-  records. Hosts opt into document, user, tool, or model origins explicitly.
-- **Durable, content-free evidence** — each gate decision stores an immutable
-  `MemoryAdmissionAudit` paired with the lifecycle event. Concrete-origin
-  active records are revalidated against their audit before bounded Ledger
-  Recall can return them.
-- **Lifecycle-safe decisions** — `review()` is pure and produces a sealed
-  in-process capability. `allow` activates, `quarantine` isolates, and
-  `reject` forgets the local payload. Stale, forged, cross-gate, revoked,
-  expired, and post-hard-erase reviews fail closed.
-- **Schema v5 migration** — explicit `dry_run_setup()` / `setup()` adds
-  provenance and review sidecars without rewriting existing events. Live v4
-  payload rows become `legacy_unknown`; no origin or audit is invented.
-- **Hardening at the storage boundary** — sidecars are write-once in SQLite.
-  Hard erase is the single controlled cascade that removes their rows and
-  restores the guards before commit. Mismatched, orphaned, or event-forged
-  audit rows fail closed.
+- **Explicit Ledger-to-request composition** — experimental
+  `LedgerContextComposer` connects `LedgerRecallPlanner` to
+  `TokenBudgetedContextBuilder` only when both share one non-empty
+  `MemoryScope` and the exact same `TokenCounter` instance.
+- **Admission-only request data** — composition requires
+  `LedgerRecallPolicy.admission_safe_default()` (or an explicit policy with
+  `require_admission_audit=True`). Confirmed raw `unknown` records and
+  migrated `legacy_unknown` records remain standalone compatibility data, but
+  do not enter a composed request.
+- **A fixed data boundary** — selected Ledger JSON is rendered only in a
+  `user` message, preceded by a static content-free system guard. Raw memory
+  never enters generated system context or `explain()` output. The pair is
+  inserted before history and tool dependencies, so a call/output graph stays
+  intact.
+- **Exact end-to-end budget evidence** — the complete guard + JSON transport
+  lane is reserved before optional RAG, session, and history. It has a
+  content-free `ContextDataLaneReceipt`; the complete
+  `ContextRequestReceipt.input_tokens` remains authoritative. A lane that is
+  what makes an otherwise valid request overflow raises
+  `TokenBudgetExceededError(..., "ledger_data")`.
+- **Final lifecycle validation** — after any asynchronous context/RAG work and
+  exact message accounting, the same Ledger selection is resolved again. A
+  winning forget/retract/expiry/revision change fails closed with
+  `StaleMemoryPlanError`.
+- **Frozen v0.2 benchmark evidence** — a dependency-free semantic suite adds
+  five contract cases / seventeen checks for strict raw exclusion, exact lane
+  budget, tool adjacency, content-free injection-shaped data, and an
+  event-gated forget race. Its fixture SHA-256 is
+  `9bc849dd1d441b2c53d0bad558666b1dd22ad4cf4c8302d5ef5c005102f271c1`.
 
 ## Safe host flow
 
 ```python
-from protoprompt.ledger import (
-    MemoryAdmissionAction,
-    MemoryAdmissionPolicy,
-    MemoryKind,
-    MemoryOrigin,
-    MemoryReviewGate,
-    MemoryWriter,
-    SqliteMemoryLedger,
+from protoprompt import ContextInput, InMemStore, TokenBudgetedContextBuilder
+from protoprompt.ledger.recall import (
+    LedgerContextComposer,
+    LedgerRecallPlanner,
+    LedgerRecallPolicy,
 )
-from protoprompt.scope import MemoryScope
+from protoprompt.tokens import RegexTokenCounter
 
-ledger = SqliteMemoryLedger("memory-ledger.db")
-ledger.setup()
-writer = MemoryWriter(
-    ledger,
-    scope=MemoryScope(tenant="local", user="alice", thread="chat-42"),
+# `writer` is a scope-pinned MemoryWriter. Admit concrete-origin records via
+# MemoryReviewGate before this point.
+counter = RegexTokenCounter()
+builder = TokenBudgetedContextBuilder(
+    InMemStore(),
+    embedding_client,
+    counter=counter,
+    max_tokens=4_096,
+    scope=writer.scope,
 )
-gate = MemoryReviewGate(
+planner = LedgerRecallPlanner(
     writer,
-    origin=MemoryOrigin.DOCUMENT,
-    policy=MemoryAdmissionPolicy(
-        policy_id="document-facts-v1",
-        policy_version="1",
-        allowed_origins=(MemoryOrigin.DOCUMENT,),
-        minimum_confidence=0.8,
+    policy=LedgerRecallPolicy.admission_safe_default(),
+    counter=counter,
+)
+composer = LedgerContextComposer(builder, planner)
+
+request = await composer.plan_messages(
+    ContextInput(
+        query="repair checkpoint recovery",
+        system_prompt="Follow the host contract.",
+        include_session=False,
     ),
+    user_message="What should happen next?",
+    ledger_token_budget=600,
 )
 
-ingress = gate.ingress(
-    kind=MemoryKind.FACT,
-    source_ref="pdf:handbook:page-4",
-    confidence=0.9,
-)
-candidate = ingress.submit("Support requests are answered in Russian.")
-review = gate.review(candidate.record_id)
-assert review.action is MemoryAdmissionAction.ALLOW
-active = gate.confirm(review, event_id="admission:handbook-p4:allow")
+# Send immediately through the host's provider client.
+messages = request.render_messages()
+receipt = request.receipt
+audit = request.explain()  # content-free metadata only
 ```
 
-The model-facing transport is only a JSON/RPC schema equivalent to
-`{"content": "..."}`. Do not pass a gate, writer, Ledger, review, or ingress
-object to arbitrary in-process code. Those objects are host capabilities, not
-a Python authorization sandbox.
+If `StaleMemoryPlanError` is raised, create a fresh request before sending.
+`LedgerComposedRequest` is transient: a later deletion cannot revoke data the
+host has already sent to a provider.
 
 ## Upgrade notes
 
 ```bash
-pip install --upgrade "protoprompt==0.10.0"
+pip install --upgrade "protoprompt==0.11.0"
 ```
 
-Run `ledger.dry_run_setup()`, make a backup, then run `ledger.setup()` in an
-explicit migration job. The forward-only v5 migration retains existing events
-unchanged. Pre-v5 active records remain recallable as `legacy_unknown` for
-compatibility, but were never reviewed by v0.10; a strict deployment must
-quarantine and re-ingest/review them before enabling recall.
+There is no new Ledger schema migration in 0.11.0. Existing standalone
+`LedgerRecallPlanner.safe_default()` behavior remains compatible. To use the
+new composer, deliberately choose `admission_safe_default()` and re-admit any
+raw/legacy records that should qualify for this stricter request boundary.
 
-Older v0.9 code rejects schema v5. Roll back traffic only by restoring a
-pre-upgrade backup into a separate database; never destructively downgrade a
-shared Ledger file in place. `erase()` removes live Ledger rows and audit
-sidecars but cannot erase historical backups, WAL/journal files, text already
-sent to a model, or external projections without their own deletion contract.
-
-`writer.propose()` / `writer.assert_candidate()` and raw lifecycle cleanup
-remain available only as trusted-host compatibility APIs. They produce
-`unknown` provenance and no admission audit. In particular,
-`writer.confirm()` now rejects a candidate created with a concrete v5 origin;
-apply the matching gate review instead.
-
-`MemoryReview` is process-local. Persist the candidate `record_id` and your
-action `event_id`; after a restart, use `writer.events(record_id)` and
-`writer.admission_audits(record_id)` to resolve a completed decision rather
-than trying to replay an old review. A concrete-origin admission lifecycle
-event without its matching audit is a corruption/atomicity alarm: stop rather
-than retrying. A hard-erased record and its old event IDs remain terminal.
-
-## Reference Ollama app
-
-The local PDF-RAG Ollama app remains loopback-only by default and is released
-from this repository alongside the core package:
+The local Ollama PDF-RAG app is released in lockstep and remains a separate,
+local reference app:
 
 ```bash
-pip install "protoprompt[documents,fastapi,ollama]==0.10.0"
-pip install "git+https://github.com/Idxeed/protoprompt.git@v0.10.0#subdirectory=apps/ollama-chat"
+pip install "protoprompt[documents,fastapi,ollama]==0.11.0"
+pip install "git+https://github.com/Idxeed/protoprompt.git@v0.11.0#subdirectory=apps/ollama-chat"
 pp-ollama-chat
 ```
 
+It does **not** auto-enable `LedgerContextComposer`; neither does `pp-agent`.
+Hosts opt in explicitly, retain control of provider send/retention, and keep
+their existing RAG/session/profile behavior unchanged.
+
 ## Release gate
 
-The release workflow verifies tag/version alignment, deterministic core and
-reference-app tests, migration fixtures, the supported Python 3.11–3.13
-compatibility range (with the release build on Python 3.12), Russian and
-English documentation, wheel imports, and publication order. The
-storage admission contract is additionally covered by forged-audit,
-cross-scope, stale-review, write-lock expiry, restart, hard-erase, and v4
-migration regression tests.
+The release workflow verifies version alignment, deterministic core and
+reference-app tests, both frozen memory benchmark suites, strict RU/EN docs,
+sdist/wheel metadata, and clean wheel import. The composition boundary is
+additionally regression-tested for scope/counter identity, admission filtering,
+payload-free explanations, exact budget accounting, tool-call/output
+preservation, caller mutation, and a concurrent `forget()` race.

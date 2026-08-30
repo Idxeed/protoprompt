@@ -14,8 +14,9 @@
   изменённая запись делает resolution fail-closed: нужен новый план.
 
 Это не обещание бесконечного контекстного окна. Это ограниченный **memory data
-lane**; итоговый запрос к провайдеру по-прежнему собирает и проверяет trusted
-request planner приложения.
+lane**. Standalone planner оставляет его отдельными данными; для host-а, которому
+нужен точный provider request, v0.11 добавляет явный experimental
+`LedgerContextComposer`.
 
 Для concrete v5 ingress origin active reader проверяет парный immutable
 `allow` audit до попадания record в этот lane. Записи, мигрированные из схемы
@@ -108,20 +109,83 @@ evidence reference. Модель получает справочные данн�
 
 ## Граница trusted composition
 
-Recall planner **не** изменяет `WorkingMemory`, `MemoryService`, legacy
-`ContextPlan` или system prompt модели и не вызывает провайдера.
+Сам `LedgerRecallPlanner` **не** изменяет `WorkingMemory`, `MemoryService`,
+legacy `ContextPlan` или system prompt модели и не вызывает провайдера. Это
+по-прежнему корректный выбор, когда host сам владеет placement данных и
+окончательным accounting.
 
-Держите JSON в data lane, которым владеет приложение. Если интеграция умеет
-посылать только текст, приложение должно добавить trusted outer instruction,
-обозначающий границу данных, а затем заново посчитать полный запрос через
-`TokenBudgetedContextBuilder.plan_messages()` / `ContextRequestReceipt`.
-Содержимое durable record нельзя считать system instructions, а модели нельзя
-выдавать writer или lifecycle methods как tools.
+Для узкого случая «admitted Ledger JSON → один готовый provider request» есть
+`LedgerContextComposer`. Это host-owned, явный opt-in bridge — не автоматическое
+поведение Ledger, `pp-agent` или `pp-ollama-chat`. Он требует у
+`TokenBudgetedContextBuilder` и `LedgerRecallPlanner` один и тот же непустой
+`MemoryScope` и **тот же экземпляр** `TokenCounter`; planner обязан использовать
+`LedgerRecallPolicy.admission_safe_default()` или policy с
+`require_admission_audit=True`.
+
+Composer помещает payload памяти только в один `user` JSON message. Перед ним
+стоит фиксированный system guard без текста памяти; generated system context
+не содержит raw Ledger payload. Пара guard+JSON располагается после generated
+system context (если он есть) и до history/tool graph, поэтому не разрывает
+tool call/result. Полный lane обязателен: он резервируется до optional
+RAG/session/history и не обрезается молча. Нехватка места вызывает
+`TokenBudgetExceededError(..., "ledger_data")`.
+
+```python
+from protoprompt import ContextInput, InMemStore, TokenBudgetedContextBuilder
+from protoprompt.ledger.recall import (
+    LedgerContextComposer,
+    LedgerRecallPlanner,
+    LedgerRecallPolicy,
+    StaleMemoryPlanError,
+)
+from protoprompt.tokens import RegexTokenCounter
+
+# async host handler
+counter = RegexTokenCounter()
+builder = TokenBudgetedContextBuilder(
+    InMemStore(),
+    embedding_client,
+    counter=counter,
+    max_tokens=4_096,
+    scope=writer.scope,
+)
+planner = LedgerRecallPlanner(
+    writer,
+    policy=LedgerRecallPolicy.admission_safe_default(),
+    counter=counter,
+)
+composer = LedgerContextComposer(builder, planner)
+
+try:
+    request = await composer.plan_messages(
+        ContextInput(
+            query="починить восстановление checkpoint",
+            system_prompt="Следуй контракту хоста.",
+            include_session=False,
+        ),
+        user_message="Что делать дальше?",
+        ledger_token_budget=600,
+    )
+except StaleMemoryPlanError:
+    # Lifecycle memory изменился во время async context/RAG work. Планируем заново.
+    raise
+
+messages = request.render_messages()  # немедленно отправьте своему provider client
+receipt = request.receipt              # точный budget всего сообщения
+audit = request.explain()              # content-free metadata
+```
+
+Composer сам не пишет Ledger и не отправляет chat request. Однако переданный
+`TokenBudgetedContextBuilder` может асинхронно выполнять RAG/embedding work;
+после этой работы composer ещё раз вызывает `resolve()` и fail-closed при
+stale record/revision/expiry.
 
 При сериализации `<`, `>` и `&` в memory content экранируются, чтобы запись не
 могла видимо закрыть внешний XML/HTML-подобный wrapper. Это лишь defense in
 depth, а не замена trusted data boundary: текст памяти может содержать
-недоверенные инструкции и должен оставаться данными.
+недоверенные инструкции и должен оставаться данными. Содержимое durable record
+нельзя считать system instructions, а модели нельзя выдавать writer или
+lifecycle methods как tools.
 
 ## Политика выбора
 
@@ -129,6 +193,12 @@ depth, а не замена trusted data boundary: текст памяти мо�
 `preference` с confidence не ниже `0.5`. `episode` и `procedure` по умолчанию
 исключены. Приложение может opt-in только через явную host policy с evidence
 и risk contract, подходящими для этих более богатых memory kinds.
+
+Это compatibility-policy standalone planner: она всё ещё может читать legacy
+`unknown` и `legacy_unknown` records. Для composed provider request используйте
+`LedgerRecallPolicy.admission_safe_default()`. Она включает
+`require_admission_audit=True`, поэтому оба provenance без review-а исключаются;
+concrete origins дополнительно проходят audited active-reader invariant Ledger.
 
 ```python
 from protoprompt.ledger import MemoryKind
@@ -222,6 +292,18 @@ writer lock. Затем он берёт короткую exclusive Ledger lifecy
 возвращается устаревший текст. Перед каждым model send нужно заново
 спланировать и разрешить данные.
 
+У composed request есть ещё один короткий final boundary: после асинхронного
+context planning и точной проверки отрендеренных messages composer повторно
+`resolve()`-ит исходный plan. Изменение выбранной памяти превращается в
+`StaleMemoryPlanError`, а не в отправку старого JSON.
+
+`LedgerCompositionReceipt` связывает policy/fingerprint/counter и факт этой
+final validation. `ContextPlan.data_lanes` содержит content-free
+`ContextDataLaneReceipt` (количество records, bytes и transport tokens).
+`ContextRequestReceipt.input_tokens` остаётся единственным authoritative total
+всего provider request: lane receipt объясняет его часть, но не заменяет exact
+count для полного message list.
+
 ## Scope и граница удаления
 
 Planner получает `MemoryWriter`, а не параметр scope, поэтому не может
@@ -236,3 +318,7 @@ boundary. `forget()` и `erase()` по-прежнему удаляют live Ledg
 пределах, описанных в [Memory Ledger guide](memory-ledger.md), но не могут
 ретроспективно стереть context string, уже возвращённую или отправленную
 куда-либо приложением.
+
+То же относится к `LedgerComposedRequest`: он transient и должен быть отправлен
+сразу. Его final validation действует до возврата из `plan_messages()`; поздний
+`forget()` не может отозвать JSON, который host уже передал provider-у.

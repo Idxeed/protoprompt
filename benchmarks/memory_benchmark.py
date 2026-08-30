@@ -28,6 +28,11 @@ from protoprompt import (
 from protoprompt.connectivity import MemoryService
 from protoprompt.rag.retriever import Retriever
 from protoprompt.scope import scoped_doc_id
+from benchmarks.ledger_composition_benchmark import (
+    render_ledger_composition_markdown,
+    run_ledger_composition_suite,
+    validate_ledger_composition_suite,
+)
 
 
 REPORT_SCHEMA_VERSION = 1
@@ -149,6 +154,9 @@ def _require_string(value: object, label: str) -> str:
 
 
 def _validate_suite(suite: Mapping[str, Any]) -> None:
+    if suite.get("suite_kind") == "ledger_context_composition":
+        validate_ledger_composition_suite(suite)
+        return
     if suite.get("schema_version") != 1:
         raise BenchmarkFixtureError("unsupported suite schema version")
     if not _SUITE_RE.fullmatch(str(suite.get("suite_version", ""))):
@@ -864,6 +872,11 @@ async def run_suite(
 ) -> dict[str, Any]:
     """Run an already-loaded suite and return only deterministic semantics."""
     _validate_suite(suite)
+    if suite.get("suite_kind") == "ledger_context_composition":
+        return await run_ledger_composition_suite(
+            suite,
+            fixture_sha256=fixture_sha256(suite),
+        )
     embedding_config = suite["embedding"]
     embeddings = SeededFeatureHashEmbeddings(
         seed=str(embedding_config["seed"]),
@@ -970,6 +983,8 @@ def assert_candidate_not_worse_than_reference(report: Mapping[str, Any]) -> None
 
 def render_markdown(report: Mapping[str, Any]) -> str:
     """Render a small deterministic human view; it contains no timing claims."""
+    if report.get("benchmark_kind") == "ledger_context_composition":
+        return render_ledger_composition_markdown(report)
     lines = [
         "# ProtoPrompt Memory Benchmark",
         "",
@@ -1040,7 +1055,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 report,
                 load_expected(args.suite, path=args.expected),
             )
-            assert_candidate_not_worse_than_reference(report)
+            if suite.get("suite_kind") != "ledger_context_composition":
+                assert_candidate_not_worse_than_reference(report)
         if args.json:
             _write_text(args.json, canonical_json(report) + "\n")
         if args.markdown:

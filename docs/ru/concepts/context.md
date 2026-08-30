@@ -17,6 +17,11 @@ UI мог показать, откуда что пришло, а модель �
 Он применяется и к RAG, и к session memory; менять tenant через
 `ContextInput` намеренно нельзя.
 
+Experimental `LedgerContextComposer` не является пятым обычным слоем
+`ContextOutput`. Это отдельный host-owned request prefix: admitted Ledger JSON
+входит в фиксированное `user` data message после generated system context и до
+history. Подробнее: [bounded Ledger recall](../ledger-recall.md).
+
 ## Что когда включать
 
 | Сценарий                                          | RAG | Session | Profile |

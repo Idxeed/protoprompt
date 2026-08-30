@@ -11,6 +11,7 @@ from time import perf_counter
 from protoprompt.context import ContextInput, ContextOutput
 from protoprompt.context_plan import (
     ContextBlockDecision,
+    ContextDataLaneReceipt,
     ContextPlan,
     ContextRequestReceipt,
     snapshot_portable_messages,
@@ -102,6 +103,45 @@ class BudgetReport:
     # ``build()``, this includes provider message overhead for the final
     # caller-supplied turn(s).
     user_message_tokens: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class _HostRequestPrefix:
+    """One immutable, internally constructed mandatory request data lane.
+
+    The type intentionally has no arbitrary-message constructor. It renders a
+    fixed system guard followed by one user-role data message so a host bridge
+    cannot accidentally inject a tool item, a custom provider item, or raw
+    payload into the generated system context. It is private because ordinary
+    callers should use the stable ``plan_messages`` API without any prefix.
+    """
+
+    lane_id: str
+    origin: str
+    media_type: str
+    guard: str = field(repr=False)
+    data: str = field(repr=False)
+    data_tokens: int = 0
+    data_bytes: int = 0
+    record_count: int = 0
+
+    def __post_init__(self) -> None:
+        for field_name in ("lane_id", "origin", "media_type", "guard", "data"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{field_name} must be a non-empty string")
+        for field_name in ("data_tokens", "data_bytes", "record_count"):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+
+    def render_messages(self) -> list[dict]:
+        """Return fresh fixed-shape messages for the provider request."""
+
+        return [
+            {"role": "system", "content": self.guard},
+            {"role": "user", "content": self.data},
+        ]
 
 
 @dataclass
@@ -867,6 +907,16 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         ).hexdigest()
         return f"source:{digest}"
 
+    @property
+    def counter(self) -> TokenCounter:
+        """Return the host-configured counter used for request receipts.
+
+        The returned object is not copied: composition code can require the
+        same counter instance across separately budgeted host-owned lanes.
+        """
+
+        return self._counter
+
     async def build(self, inp: ContextInput) -> ContextOutput:
         """Assemble context under this builder's default output reserve.
 
@@ -1303,10 +1353,40 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         The returned plan owns a frozen copy of the rendered messages and a
         request-scoped receipt; it is safe to keep after later builder calls.
         """
+        return await self._plan_messages_with_host_prefix(
+            inp,
+            history,
+            user_message,
+            final_messages=final_messages,
+            output_reserve=output_reserve,
+            counter=counter,
+            host_prefix=None,
+        )
+
+    async def _plan_messages_with_host_prefix(
+        self,
+        inp: ContextInput,
+        history: list[dict] | None = None,
+        user_message: str | None = None,
+        *,
+        final_messages: list[dict] | None = None,
+        output_reserve: int | None = None,
+        counter: TokenCounter | None = None,
+        host_prefix: _HostRequestPrefix | None,
+    ) -> ContextPlan:
+        """Plan one request with an internally constructed mandatory prefix.
+
+        This is intentionally private. The normal public API always passes
+        ``None`` and therefore preserves its existing message shape. A
+        host-owned experimental bridge may supply the fixed-shape prefix type
+        above; raw provider messages are not accepted here.
+        """
         if user_message is not None and final_messages is not None:
             raise ValueError("pass either user_message or final_messages, not both")
         reserve = self._output_reserve if output_reserve is None else output_reserve
         active_counter = self._counter if counter is None else counter
+        if host_prefix is not None and not isinstance(host_prefix, _HostRequestPrefix):
+            raise TypeError("host_prefix must be a _HostRequestPrefix or None")
         if reserve < 0:
             raise ValueError("output_reserve must be non-negative")
         if reserve > self._max_tokens:
@@ -1329,15 +1409,27 @@ class TokenBudgetedContextBuilder(ContextBuilder):
                 "a leading final tool output requires its matching trailing "
                 "history call"
             )
+        prefix_messages = host_prefix.render_messages() if host_prefix is not None else []
+        prefix_tokens = active_counter.count_messages(prefix_messages)
         tail_tokens = active_counter.count_messages(tail_messages)
         dependency_tokens = active_counter.count_messages(dependency_history)
         tail_section = "user" if user_message is not None else "new_input"
-        required_tokens = tail_tokens + dependency_tokens + reserve
+        required_without_prefix = tail_tokens + dependency_tokens + reserve
+        required_tokens = prefix_tokens + required_without_prefix
         if required_tokens > self._max_tokens:
+            # Report the lane only when it is what turns otherwise mandatory
+            # input into an overflow. An oversized caller turn/tool dependency
+            # must preserve the established actionable section even when a
+            # host data lane is also present.
+            required_section = (
+                "ledger_data"
+                if host_prefix is not None and required_without_prefix <= self._max_tokens
+                else "history_dependency" if dependency_history else tail_section
+            )
             raise TokenBudgetExceededError(
                 required_tokens,
                 self._max_tokens,
-                "history_dependency" if dependency_history else tail_section,
+                required_section,
             )
 
         # Reserve the exact system-message framing cost before allocating the
@@ -1351,6 +1443,7 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             0,
             self._max_tokens
             - reserve
+            - prefix_tokens
             - tail_tokens
             - dependency_tokens
             - system_overhead,
@@ -1368,6 +1461,29 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         assert base_plan is not None
         context_tokens = report.used_tokens
         request_decisions = list(base_plan.decisions)
+        data_lanes: tuple[ContextDataLaneReceipt, ...] = ()
+        if host_prefix is not None:
+            report.section_tokens["ledger_data"] = prefix_tokens
+            request_decisions.append(ContextBlockDecision(
+                block_id=f"data_lane[{host_prefix.lane_id}]",
+                origin=host_prefix.origin,
+                decision="included",
+                reason="host_required",
+                token_cost=prefix_tokens,
+                candidate_tokens=prefix_tokens,
+            ))
+            data_lanes = (
+                ContextDataLaneReceipt(
+                    lane_id=host_prefix.lane_id,
+                    origin=host_prefix.origin,
+                    media_type=host_prefix.media_type,
+                    message_count=len(prefix_messages),
+                    input_tokens=prefix_tokens,
+                    data_tokens=host_prefix.data_tokens,
+                    data_bytes=host_prefix.data_bytes,
+                    record_count=host_prefix.record_count,
+                ),
+            )
         request_decisions.append(ContextBlockDecision(
             block_id="output_reserve",
             origin="output_reserve",
@@ -1396,9 +1512,16 @@ class TokenBudgetedContextBuilder(ContextBuilder):
         messages: list[dict] = []
         if out.system_prompt:
             messages.append({"role": "system", "content": out.system_prompt})
+        # A host prefix is inserted before every history/dependency item so no
+        # tool call/output pair can be split. Its data payload never enters
+        # ``out.system_prompt`` or legacy RAG/session context blocks.
+        messages.extend(prefix_messages)
         rendered_context_tokens = active_counter.count_messages(messages)
         if messages:
-            framing_tokens = max(0, rendered_context_tokens - context_tokens)
+            framing_tokens = max(
+                0,
+                rendered_context_tokens - context_tokens - prefix_tokens,
+            )
             if framing_tokens:
                 request_decisions.append(ContextBlockDecision(
                     block_id="system_message_framing",
@@ -1418,10 +1541,26 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             # A conforming counter makes this unreachable because
             # ``system_overhead`` was reserved above.  Keep the invariant hard
             # even for a custom counter with role-specific framing costs.
+            system_messages = (
+                [{"role": "system", "content": out.system_prompt}]
+                if out.system_prompt
+                else []
+            )
+            fixed_without_prefix = (
+                active_counter.count_messages(system_messages)
+                + dependency_tokens
+                + tail_tokens
+            )
+            overflow_section = (
+                "ledger_data"
+                if host_prefix is not None
+                and fixed_without_prefix + reserve <= self._max_tokens
+                else "system"
+            )
             raise TokenBudgetExceededError(
                 fixed_tokens + reserve,
                 self._max_tokens,
-                "system",
+                overflow_section,
             )
 
         kept_history: list[dict] = []
@@ -1506,6 +1645,7 @@ class TokenBudgetedContextBuilder(ContextBuilder):
             messages,
             receipt,
             tuple(request_decisions),
+            data_lanes=data_lanes,
         )
         self._last_report = report
         self._last_receipt = receipt

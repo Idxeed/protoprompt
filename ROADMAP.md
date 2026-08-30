@@ -1,6 +1,7 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.10.0` добавляет проверяемую admission-boundary для Memory Ledger;
+> Статус: `0.11.0` добавляет trusted Ledger-to-request composition для admitted
+> memory;
 > следующий этап — стабилизация и RC к `1.0.0`.
 > Обновлён: 2026-08-30.
 >
@@ -90,15 +91,15 @@ budget, provider-aware token counting, scoped profile identity и безопас
 ```text
 documents ───────────────┐
 conversation/session ───┤
-agent events/artifacts ─┼─> Memory Ledger ─┐
-profile/confirmed facts ┘                  │
-                                           ├─> ContextPolicy
-current task + model budget ───────────────┘          │
-                                                      v
-                                             immutable ContextPlan
-                                                      │
-                                                      v
-                                       messages + explanation + receipt
+agent events/artifacts ─┼─> Memory Ledger → LedgerRecallPlanner
+profile/confirmed facts ┘                         │
+                                                  ├─> explicit LedgerContextComposer
+current task + model budget ──────────────────────┘                 │
+                                                                  v
+                                                       immutable ContextPlan
+                                                                  │
+                                                                  v
+                                                   messages + explanation + receipt
 ```
 
 `Memory Ledger` — единственный durable source of truth. Working set, vector
@@ -223,10 +224,11 @@ index, summaries и framework-specific state — его projections/caches, а �
   эпизодов; не превращать неудачный model output в инструкцию.
 - Перенести полезные части экспериментального `WorkingMemory` (scoring,
   hot/cold zones, manifests, checkpoints) в ledger + planner.
-- Добавить controlled consolidation, checkpoints/resume и следующий
-  policy-driven composition step для facts, episodes, procedures, RAG evidence
-  и current task через ContextPlan. До него Ledger recall остаётся отдельным
-  data lane, а не скрытой вставкой в system prompt.
+- Добавить controlled consolidation, checkpoints/resume и policy-driven
+  composition для facts, episodes, procedures, RAG evidence и current task.
+  Узкий admitted Ledger JSON → request bridge выпущен отдельно в `0.11.0`;
+  широкая composition policy и скрытая вставка в system prompt не являются
+  его следствием.
 - Перевести bridges к LangGraph, OpenAI Agents SDK, PydanticAI и LlamaIndex на
   единый contract там, где это не ломает public semantics.
 - Выпустить ProtoPrompt Memory Benchmark v1.0 как regression gate.
@@ -286,6 +288,37 @@ concrete-origin запись станет active и попадёт в bounded re
 модельный input, должен оставаться JSON/RPC boundary; для более сильной
 tamper-evidence понадобится внешний ключ/signing или process isolation.
 
+## 0.11.0 — Trusted Ledger-to-request composition
+
+**Цель:** дать host-у единственный узкий, проверяемый путь от admitted Ledger
+recall к точному provider request, не превращая память в system instructions.
+
+### Выполнено
+
+- [x] Добавлен experimental `LedgerContextComposer`: builder и planner должны
+  совпадать по непустому `MemoryScope` и экземпляру `TokenCounter`; composer
+  принимает только strict `require_admission_audit=True` recall policy.
+- [x] Raw `unknown` и мигрированный `legacy_unknown` исключаются из composed
+  request. Concrete origins остаются за immutable admission audit Ledger.
+- [x] Выбранный JSON попадает лишь в фиксированный `user` data message; перед
+  ним находится content-free static system guard. Lane располагается после
+  generated system context и до history/tool graph, без разрыва call/output.
+- [x] Весь lane резервируется раньше optional RAG/session/history. Добавлены
+  `ContextDataLaneReceipt`, content-free composition receipt и точный
+  `ContextRequestReceipt`; shortage lane сообщает `ledger_data`, не маскируя
+  independently oversized final turn/tool dependency.
+- [x] После async context work выполняется финальный `resolve()` того же
+  Ledger snapshot: forget/retract/expiry/revision race даёт
+  `StaleMemoryPlanError`, а не устаревший provider payload.
+
+### Неподвижная граница
+
+Composer не пишет Ledger и не отправляет модельный request сам; переданный
+builder может делать RAG/embedding work. Он не auto-wired в Ollama app, CLI,
+`MemoryService`, profile/session/vector paths и не создаёт general-purpose
+host-message API. Это не claim о prompt-injection immunity или universal
+recall quality.
+
 ## 1.0.0 release candidates — Stabilize, don't expand
 
 После `0.9.0` начинается API freeze. Новая feature не входит в RC без
@@ -312,6 +345,9 @@ tamper-evidence понадобится внешний ключ/signing или pr
 - Нет unresolved P0/P1 в lifecycle, scope, deletion или budget.
 - Migration guide от `0.6` проверен на fixtures/reference apps.
 - Все benchmark/security regression gates зелёные два релизных цикла подряд.
+- Composed Ledger lane проходит no-raw/legacy provenance, no-payload-in-
+  `explain`, exact receipt reconciliation, tool dependency, explicit
+  `ledger_data` boundary и stale lifecycle race regressions.
 - Schema migrations имеют forward path и documented rollback; data loss не
   допускается как побочный эффект обычного upgrade.
 

@@ -5,7 +5,9 @@ v0.10 превращает долговременную память из без
 и host-owned admission-решением. Это намеренно **opt-in** и пока
 экспериментально: новый ledger не меняет `MemoryService`, профиль, сжатие
 сессий, vector recall и `ContextPlan`, пока хост не подключит отдельный
-адаптер.
+адаптер. В v0.11 таким отдельным адаптером стал узкий experimental
+`LedgerContextComposer` для admitted Ledger recall; он не включает Ledger
+глобально и не меняет legacy paths.
 
 Такое разделение принципиально: текст из PDF, tool result, транскрипта или
 LLM extraction не может стать доверенным фактом с system-priority лишь потому,
@@ -231,7 +233,8 @@ ledger-owned table/index definitions и отклоняют внешние indexe
   candidate, нужен новый sealed review. Hard-erased record и его прежние event
   ID terminal и не должны создаваться заново.
 
-Importer для profile/session/vector и stable request composition — будущая
-работа. Ledger и его experimental recall lane специально сохраняют всё
-текущее публичное поведение без изменений, пока эти migration contracts не
-будут отдельно доказаны.
+Importer для profile/session/vector, stable request composition и bridge для
+facts/episodes/procedures/RAG evidence — будущая работа. Экспериментальный
+`LedgerContextComposer` уже покрывает только узкий путь admitted Ledger JSON →
+один bounded request; Ledger и его recall lane сохраняют остальное публичное
+поведение без изменений, пока migration contracts не будут отдельно доказаны.

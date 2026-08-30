@@ -46,7 +46,7 @@ LLM обычно нужна не просто история чата, а нес
 | Память сессии | эвристическое или LLM-сжатие длинных диалогов |
 | Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
 | Memory Ledger *(experimental)* | scoped lifecycle, host admission, immutable provenance/audit, atomic source revocation и проверяемая очистка live rows |
-| Bounded ledger recall *(experimental)* | локальный deterministic selection active memory в JSON data lane с token/byte budget, receipt и pre-send stale check |
+| Bounded ledger recall *(experimental)* | local deterministic selection active memory в JSON data lane; opt-in admitted-only composition в exact request с token/byte receipt и final stale check |
 | Токен-бюджет | жёсткий лимит, приоритеты слоёв, `ContextPlan`/receipt и объяснение обрезки |
 | Хранилища | in-memory, SQLite, ChromaDB, Qdrant, pgvector, Elasticsearch/OpenSearch и Redis services |
 | LLM и embeddings | OpenAI, Anthropic, Google GenAI, Bedrock, Ollama и локальные модели |
@@ -59,10 +59,14 @@ LLM обычно нужна не просто история чата, а нес
 
 Экспериментальный `LedgerRecallPlanner` — первый безопасный read-path для
 текущей задачи агента: для concrete v5 origin он выбирает только active,
-host-admitted записи с проверенным audit,
-создаёт свежий ограниченный JSON data lane и fail-closed при изменении памяти
-до отправки. Он не подмешивает записи в system prompt и не заменяет финальный
-request accounting; см. [Bounded recall из ledger](docs/ru/ledger-recall.md).
+host-admitted записи с проверенным audit, создаёт свежий ограниченный JSON data
+lane и fail-closed при изменении памяти до отправки. Standalone planner не
+подмешивает записи в system prompt и не заменяет финальный request accounting.
+Явный `LedgerContextComposer` использует этот accounting для одного bounded
+request, требует strict admission policy и того же scope/counter; raw `unknown`
+и `legacy_unknown` в composed request не попадают. Ни `pp-ollama-chat`, ни
+`pp-agent` пока не подключают composer автоматически. См. [Bounded recall из
+ledger](docs/ru/ledger-recall.md).
 
 ## Установка
 

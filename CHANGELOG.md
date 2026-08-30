@@ -7,6 +7,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-08-30
+
+### Added
+- Experimental `LedgerContextComposer` in `protoprompt.ledger.recall`: one
+  host-owned opt-in bridge from a scope-pinned, admitted Ledger recall plan to
+  an immutable, exactly budgeted provider request. It emits a transient
+  `LedgerComposedRequest` plus a content-free `LedgerCompositionReceipt`.
+- Additive `ContextDataLaneReceipt` / `ContextPlan.data_lanes` metadata for
+  mandatory host request lanes. The exact whole-request
+  `ContextRequestReceipt.input_tokens` remains authoritative.
+- `LedgerRecallPolicy.admission_safe_default()` and the explicit
+  `require_admission_audit` policy flag. The composed path excludes raw
+  `unknown` and migrated `legacy_unknown` records while preserving standalone
+  v0.9 recall compatibility.
+- Frozen offline Memory Benchmark v0.2 for Ledger request composition: strict
+  provenance exclusion, complete lane budget, tool dependency ordering,
+  payload-free explanation, and an event-gated stale-forget race.
+
+### Changed
+- `TokenBudgetedContextBuilder` internally reserves an immutable host data
+  prefix before optional context/history allocation. The ordinary public
+  `plan_messages()` API keeps its existing message shape.
+- A composed lane is rendered as a fixed content-free system guard followed by
+  a user-role JSON data message after generated system context and before
+  history. It never contributes raw Ledger text to the generated system prompt.
+- Budget diagnostics now report `ledger_data` only when the mandatory lane is
+  what makes an otherwise valid request overflow; independently oversized
+  final input and tool dependencies retain their actionable sections.
+
+### Security
+- Composer construction binds exact `MemoryScope` and `TokenCounter` identity
+  and rejects recall policies without admission evidence. Raw Ledger payload is
+  absent from public receipts and `explain()` output.
+- Final Ledger lifecycle validation runs after asynchronous context work and
+  exact provider-message accounting. A selected record that is forgotten,
+  retracted, expired, erased, or changed before that boundary fails closed with
+  `StaleMemoryPlanError`.
+- The composer is not auto-wired into `pp-agent`, `pp-ollama-chat`, legacy
+  `MemoryService`, profile/session/vector paths, or a general arbitrary-host-
+  message API.
+
 ## [0.10.0] - 2026-08-30
 
 ### Added

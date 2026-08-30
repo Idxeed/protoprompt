@@ -45,8 +45,8 @@ flowchart TB
 - **Память сессии**, сжимающая старые ходы в vector-friendly выжимку.
 - **Профиль пользователя**, автоматически извлекаемый из прошлых сообщений.
 - **Токен-бюджет**, защищающий контекстное окно модели.
-- **Host-confirmed Memory Ledger** с lifecycle, provenance и bounded recall как
-  отдельным data lane.
+- **Host-confirmed Memory Ledger** с lifecycle, provenance, bounded recall и
+  явной opt-in сборкой admitted data lane в точный provider request.
 - **Подключаемость всего**: хранилищ, стратегий, счётчиков токенов,
   даже LLM-клиента (подойдёт всё, что реализует `LLMClientProtocol`).
 - **Нулевые жёсткие зависимости** — опционально только `chromadb` и `tiktoken`.
@@ -69,6 +69,6 @@ pip install "protoprompt[chroma,dev]" # всё для разработки
 - [Концепции: слои контекста](concepts/context.md) — что и когда включать.
 - [Концепции: токен-бюджет](concepts/budget.md) — защита контекстного окна.
 - [Концепции: сжатие сессии](concepts/compression.md) — эвристика против LLM-стратегии.
-- [Bounded recall из ledger](ledger-recall.md) — выбор долговременной памяти без
-  скрытого расширения запроса.
+- [Bounded recall из ledger](ledger-recall.md) — выбор долговременной памяти и
+  явная bounded composition без скрытого расширения запроса.
 - [API Reference](api/context.md) — все публичные символы.

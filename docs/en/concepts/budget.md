@@ -77,6 +77,23 @@ final output. Anonymous **server-side** tool-search outputs are paired with
 history calls by SDK order across that boundary; client-side searches require a
 `call_id`.
 
+## Ledger data lane *(experimental)*
+
+The ordinary `TokenBudgetedContextBuilder` intentionally accepts no arbitrary
+host messages: that keeps the public request API from silently changing a role
+or placement. The explicit `LedgerContextComposer` is the built-in bridge for
+admitted Ledger recall. It reserves its fixed system guard + `user` JSON data
+pair before optional RAG/session/history. Insufficient room for an otherwise
+valid mandatory lane raises `TokenBudgetExceededError` with section
+`ledger_data`; an independently oversized final turn or tool dependency keeps
+its ordinary actionable section.
+
+For a request plan, `ContextPlan.data_lanes` stores a content-free
+`ContextDataLaneReceipt`, while `BudgetReport.section_tokens["ledger_data"]`
+shows the transport cost. Raw payload exists only in `plan.render_messages()`,
+never in `plan.explain()`. `ContextRequestReceipt.input_tokens` remains the
+exact total rather than a sum of explanatory lane costs.
+
 ## Explainable plans and request receipts
 
 For a developer UI, an audit record, or concurrent requests, use the additive

@@ -5,7 +5,9 @@ a scope-pinned record with an explicit lifecycle, immutable ingress provenance,
 and a host-owned admission decision. It is deliberately **opt-in** and
 experimental: it does not change `MemoryService`, profiles, session
 compression, vector recall, or `ContextPlan` until a host explicitly installs
-an adapter.
+an adapter. In v0.11 that adapter can be the narrow experimental
+`LedgerContextComposer` for admitted Ledger recall; it does not enable Ledger
+globally or change legacy paths.
 
 That separation is intentional. A PDF, tool result, transcript, or model
 extraction must never become a trusted system-priority fact simply because it
@@ -237,6 +239,8 @@ candidate `record_id` returned by `submit()` and your host-minted action
   a candidate requires a new sealed review. A hard-erased record and its
   prior event IDs are terminal and must never be recreated.
 
-Profile/session/vector importers and stable request composition remain future
-work. The ledger and its experimental recall lane intentionally preserve all
-existing public behavior until those migration contracts are separately proven.
+Profile/session/vector importers, stable request composition, and bridges for
+facts/episodes/procedures/RAG evidence remain future work. The experimental
+`LedgerContextComposer` covers only the narrow admitted Ledger JSON → one
+bounded request path; the ledger and its recall lane preserve all other public
+behavior until migration contracts are separately proven.

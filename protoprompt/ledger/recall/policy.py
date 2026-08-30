@@ -52,6 +52,7 @@ class LedgerRecallPolicy:
     relevance_weight: float = 100.0
     confidence_weight: float = 10.0
     recency_weight: float = 1.0
+    require_admission_audit: bool = False
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
@@ -106,6 +107,8 @@ class LedgerRecallPolicy:
             and self.recency_weight == 0
         ):
             raise ValueError("at least one recall ranking weight must be non-zero")
+        if not isinstance(self.require_admission_audit, bool):
+            raise TypeError("require_admission_audit must be a bool")
 
     @classmethod
     def safe_default(cls) -> "LedgerRecallPolicy":
@@ -116,6 +119,23 @@ class LedgerRecallPolicy:
         """
 
         return cls()
+
+    @classmethod
+    def admission_safe_default(cls) -> "LedgerRecallPolicy":
+        """Return the composition-safe policy for explicitly admitted memory.
+
+        This leaves the v0.9 compatibility default unchanged: raw trusted-host
+        and migrated legacy records can still use the standalone experimental
+        recall lane. A request-composition host must opt into this stricter
+        policy, which excludes ``unknown`` and ``legacy_unknown`` origins.
+        Concrete origins are then checked by the Ledger's audited active-read
+        invariant before a record reaches this planner.
+        """
+
+        return cls(
+            policy_id="ledger-recall-admission-safe-v1",
+            require_admission_audit=True,
+        )
 
     def explain(self) -> dict[str, object]:
         """Return the public, content-free policy shape."""
@@ -131,4 +151,5 @@ class LedgerRecallPolicy:
             "relevance_weight": self.relevance_weight,
             "confidence_weight": self.confidence_weight,
             "recency_weight": self.recency_weight,
+            "require_admission_audit": self.require_admission_audit,
         }

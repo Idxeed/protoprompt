@@ -76,6 +76,23 @@ orphaned final output. Анонимный **server-side** tool-search output
 сопоставляется с history call по порядку SDK через эту границу; для client-side
 tool search обязателен `call_id`.
 
+## Ledger data lane *(experimental)*
+
+Обычный `TokenBudgetedContextBuilder` намеренно не принимает произвольные
+host messages: это защищает public request API от скрытой смены role или
+placement. Явный `LedgerContextComposer` — единственный встроенный bridge для
+admitted Ledger recall — резервирует фиксированную пару system guard + `user`
+JSON data до optional RAG/session/history. Недостаток места для otherwise
+допустимого обязательного lane сообщает `TokenBudgetExceededError` с section
+`ledger_data`; independently oversized final turn или tool dependency сохраняет
+свой обычный section.
+
+В request-plan `ContextPlan.data_lanes` хранит content-free
+`ContextDataLaneReceipt`, а `BudgetReport.section_tokens["ledger_data"]`
+показывает transport cost. Raw payload существует только в
+`plan.render_messages()`, никогда в `plan.explain()`. Точным total остаётся
+`ContextRequestReceipt.input_tokens`, а не сумма объяснительных lane costs.
+
 ## Объяснимый план и receipt запроса
 
 Для developer UI, audit record или конкурентных запросов используйте новый

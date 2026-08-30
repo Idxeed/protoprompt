@@ -2,9 +2,10 @@
 
 The ledger is intentionally opt-in and does not alter the legacy vector store,
 profiles, sessions, or :class:`protoprompt.MemoryService`. Import it directly
-from ``protoprompt.ledger``; experimental read paths such as
-``protoprompt.ledger.recall`` remain deliberately separate until a later
-stable composition/migration contract is earned.
+from ``protoprompt.ledger``. The experimental ``protoprompt.ledger.recall``
+package remains separate by default; its explicit host-owned composer can form
+one admitted Ledger data lane in a bounded request without auto-wiring legacy
+memory or reference applications.
 """
 
 from protoprompt.ledger.sqlite import SqliteMemoryLedger

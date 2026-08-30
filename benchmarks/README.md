@@ -62,6 +62,31 @@ their contract (for example, a bare tail window cannot demonstrate enforced
 scope isolation or final-request accounting). This avoids presenting a missing
 capability as either a pass or a failure.
 
+## What v0.2 covers — Ledger request composition
+
+`v0.2` is a separate frozen semantic suite for the experimental
+`LedgerContextComposer`; it does not rewrite or compare itself to `v0.1`
+baselines because prior releases did not have this narrow capability.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_memory_benchmark.py --suite v0.2 --verify
+```
+
+The frozen fixture SHA-256 is
+`9bc849dd1d441b2c53d0bad558666b1dd22ad4cf4c8302d5ef5c005102f271c1`. Its
+verified reference outcome is 5/5 cases and 17/17 semantic checks passing:
+
+| Case | Contract |
+|---|---|
+| `strict_raw_exclusion` | An admitted document record enters the strict lane; a confirmed raw `unknown` record does not reach messages or `explain()`. |
+| `ledger_lane_budget` | Exact request boundary fits, while a one-token-short mandatory lane fails as `ledger_data`; receipts reconcile. |
+| `tool_dependency` | The fixed Ledger prefix precedes and does not split an assistant tool-call / tool-output pair. |
+| `content_free_explain` | Injection-shaped memory decodes only from the `user` JSON lane, never a system message or content-free explanation. |
+| `stale_forget_race` | An event-gated concurrent `forget()` that wins during asynchronous context work causes fail-closed final validation. |
+
+`v0.2` reports PASS/FAIL contract checks only. It deliberately contains no
+latency, model-quality, hardware, provider, or prompt-injection-immunity claim.
+
 The packer is explicitly versioned as `greedy-final-request-packer-v1`. It
 accounts for system text, optional evidence, optional history, final input,
 per-message framing from `RegexTokenCounter`, and the same output reserve as
@@ -99,3 +124,20 @@ or retraction—those belong to the versioned Memory Ledger work in v0.8.
 tool-pair и output reserve. Фикстуры версионированы и неизменяемы; изменение
 сценария создаёт `v0.2`, а не переписывает baseline. `not_supported` честно
 обозначает отсутствие контракта у baseline, а не успешный/неуспешный результат.
+
+`v0.2` — отдельный frozen semantic suite для experimental
+`LedgerContextComposer`; он не переписывает `v0.1` и не делает искусственного
+сравнения с прежними релизами, где этого узкого API не было. Запуск:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_memory_benchmark.py --suite v0.2 --verify
+```
+
+Зафиксированный SHA-256 fixture:
+`9bc849dd1d441b2c53d0bad558666b1dd22ad4cf4c8302d5ef5c005102f271c1`.
+Проверенный результат — 5/5 cases и 17/17 semantic checks: strict exclusion
+raw `unknown`, точная `ledger_data` boundary, сохранение tool-pair,
+injection-shaped payload только в `user` JSON lane без утечки в `explain()`, и
+event-gated race `forget()` с fail-closed final validation. Это PASS/FAIL
+контракт, не claim о latency, качестве модели, железе, provider-е или полной
+защите от prompt injection.

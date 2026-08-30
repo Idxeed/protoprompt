@@ -1,0 +1,85 @@
+{
+  "fixture_sha256": "9bc849dd1d441b2c53d0bad558666b1dd22ad4cf4c8302d5ef5c005102f271c1",
+  "report": {
+    "benchmark_kind": "ledger_context_composition",
+    "candidate_id": "protoprompt_ledger_context_composer_v0_11",
+    "cases": [
+      {
+        "id": "strict_raw_exclusion",
+        "result": {
+          "check_count": 4,
+          "checks": {
+            "admitted_record_present": true,
+            "explain_is_content_free": true,
+            "raw_unknown_excluded": true,
+            "receipt_reconciles": true
+          },
+          "passed_checks": 4,
+          "status": "ok"
+        }
+      },
+      {
+        "id": "ledger_lane_budget",
+        "result": {
+          "check_count": 4,
+          "checks": {
+            "data_lane_receipt_present": true,
+            "exact_boundary_fits": true,
+            "lane_budget_enforced": true,
+            "receipt_reconciles": true
+          },
+          "passed_checks": 4,
+          "status": "ok"
+        }
+      },
+      {
+        "id": "tool_dependency",
+        "result": {
+          "check_count": 3,
+          "checks": {
+            "data_precedes_tool_graph": true,
+            "receipt_reconciles": true,
+            "tool_call_output_contiguous": true
+          },
+          "passed_checks": 3,
+          "status": "ok"
+        }
+      },
+      {
+        "id": "content_free_explain",
+        "result": {
+          "check_count": 4,
+          "checks": {
+            "explain_is_content_free": true,
+            "payload_absent_from_system_messages": true,
+            "payload_decodes_from_user_data": true,
+            "receipt_reconciles": true
+          },
+          "passed_checks": 4,
+          "status": "ok"
+        }
+      },
+      {
+        "id": "stale_forget_race",
+        "result": {
+          "check_count": 2,
+          "checks": {
+            "forget_wins_before_final_validation": true,
+            "payload_is_removed_from_live_ledger": true
+          },
+          "passed_checks": 2,
+          "status": "ok"
+        }
+      }
+    ],
+    "fixture_sha256": "9bc849dd1d441b2c53d0bad558666b1dd22ad4cf4c8302d5ef5c005102f271c1",
+    "report_schema_version": 1,
+    "suite_version": "v0.2",
+    "summary": {
+      "all_pass": true,
+      "case_count": 5,
+      "passing_case_count": 5
+    }
+  },
+  "report_schema_version": 1
+}

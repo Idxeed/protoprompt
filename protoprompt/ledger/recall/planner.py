@@ -23,6 +23,7 @@ from protoprompt.ledger.recall.types import (
 )
 from protoprompt.ledger.types import (
     MemoryKind,
+    MemoryOrigin,
     MemoryRecord,
     canonical_json,
     command_hash,
@@ -210,6 +211,18 @@ class LedgerRecallPlanner:
         return self._policy
 
     @property
+    def scope(self) -> MemoryScope:
+        """Return the immutable host scope pinned through the Ledger writer."""
+
+        return self._writer.scope
+
+    @property
+    def counter(self) -> TokenCounter:
+        """Return the counter used for lane accounting and plan validation."""
+
+        return self._counter
+
+    @property
     def counter_id(self) -> str:
         """Return the versioned token-counter label carried into each receipt."""
 
@@ -264,6 +277,17 @@ class LedgerRecallPlanner:
                         kind=record.kind,
                         decision="excluded",
                         reason="missing_content",
+                    )
+                )
+            elif (
+                self._policy.require_admission_audit
+                and record.origin in {MemoryOrigin.UNKNOWN, MemoryOrigin.LEGACY_UNKNOWN}
+            ):
+                decisions.append(
+                    LedgerRecallDecision(
+                        kind=record.kind,
+                        decision="excluded",
+                        reason="admission_required",
                     )
                 )
             elif record.kind not in self._policy.allowed_kinds:

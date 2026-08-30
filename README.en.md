@@ -54,9 +54,13 @@ see the [Memory Ledger guide](docs/en/memory-ledger.md).
 Its experimental `LedgerRecallPlanner` is the first safe read lane for an
 agent's current task: concrete v5-origin records require matching admission
 evidence before entering a fresh, bounded JSON data envelope. It provides a
-content-free receipt and fails closed if selected memory changes before send. It does not silently modify a
-system prompt or replace final request accounting; see [Bounded ledger
-recall](docs/en/ledger-recall.md).
+content-free receipt and fails closed if selected memory changes before send.
+The standalone planner does not silently modify a system prompt or replace
+final request accounting. The explicit `LedgerContextComposer` uses that exact
+accounting for one bounded request, requires strict admission and the same
+scope/counter, and keeps raw `unknown` / `legacy_unknown` out of a composed
+request. Neither `pp-ollama-chat` nor `pp-agent` auto-wires it yet; see
+[Bounded ledger recall](docs/en/ledger-recall.md).
 
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of
@@ -184,6 +188,7 @@ asyncio.run(main())
 | `protoprompt.session`    | `Session`, `CompressedBlock`, `HeuristicStrategy`, `LLMSummaryStrategy` |
 | `protoprompt.profile`    | `UserProfile`, `ProfileBuilder`                                   |
 | `protoprompt.ledger` *(experimental)* | `MemoryReviewGate`, `MemoryWriter`, `SqliteMemoryLedger`, typed lifecycle and admission receipts |
+| `protoprompt.ledger.recall` *(experimental)* | `LedgerRecallPlanner`, `LedgerContextComposer`, strict recall policy and content-free receipts |
 | `protoprompt.tokens`     | `TokenCounter`, `RegexTokenCounter`, `TiktokenCounter`            |
 | `protoprompt.llm`        | `LLMClientProtocol`                                               |
 | `protoprompt.cache`      | `CachedLLMClient`, `InMemoryEmbeddingCache`                       |

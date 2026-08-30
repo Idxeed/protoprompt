@@ -16,6 +16,7 @@ from protoprompt.cache import (
 from protoprompt.context import ContextInput, ContextOutput
 from protoprompt.context_plan import (
     ContextBlockDecision,
+    ContextDataLaneReceipt,
     ContextPlan,
     ContextRequestReceipt,
 )
@@ -92,7 +93,7 @@ from protoprompt.store.sqlite import SqliteStore
 from protoprompt.tokens.protocol import TokenCounter
 from protoprompt.tokens.regex_counter import RegexTokenCounter
 
-__version__ = "0.10.0"
+__version__ = "0.11.0"
 
 __all__ = [
     "ContextBuilder",
@@ -100,6 +101,7 @@ __all__ = [
     "ContextInput",
     "ContextOutput",
     "ContextBlockDecision",
+    "ContextDataLaneReceipt",
     "ContextPlan",
     "ContextRequestReceipt",
     "MemoryService",

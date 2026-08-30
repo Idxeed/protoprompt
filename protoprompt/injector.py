@@ -84,6 +84,16 @@ class ContextBuilder:
         """
         return self._last_receipt
 
+    @property
+    def scope(self) -> MemoryScope | None:
+        """Return the host-configured retrieval scope, if one is pinned.
+
+        This exposes only the immutable scope identity already used by the
+        builder and its retriever. It never accepts a per-request override.
+        """
+
+        return self._scope
+
     async def build(self, inp: ContextInput) -> ContextOutput:
         started_at = perf_counter()
         trace_id = new_trace_id()

@@ -15,8 +15,9 @@ to an agent's current task. It is intentionally a small, local component:
   record makes resolution fail closed and requires a new plan.
 
 This is not a claim of an unlimited context window. It is a bounded **memory
-data lane**. The final provider request must still be composed and checked by
-the application's trusted request planner.
+data lane**. The standalone planner keeps it separate; v0.11 adds an explicit
+experimental `LedgerContextComposer` for a host that needs one exact provider
+request.
 
 For a concrete v5 ingress origin, the active reader verifies the matching
 immutable `allow` audit before a record enters this lane. Records migrated
@@ -109,20 +110,83 @@ tool for mutating the Ledger.
 
 ## Trusted composition boundary
 
-The recall planner does **not** alter `WorkingMemory`, `MemoryService`, legacy
-`ContextPlan`, or a model's system prompt. It also does not call a provider.
+The standalone recall planner does **not** alter `WorkingMemory`,
+`MemoryService`, legacy `ContextPlan`, or a model's system prompt, and it does
+not call a provider. It remains the right choice when the host owns data
+placement and final accounting itself.
 
-Keep the JSON in a caller-owned data lane. If an integration must serialize it
-into a text-only request, the application needs a trusted outer instruction
-that describes the data boundary, and it must re-run final request accounting
-with `TokenBudgetedContextBuilder.plan_messages()` / `ContextRequestReceipt`.
-Do not treat contents of a durable record as system instructions, and do not
-give a model the writer or lifecycle methods as tools.
+For the narrow `admitted Ledger JSON → one provider request` case,
+`LedgerContextComposer` is the host-owned explicit opt-in bridge. It is not
+automatic Ledger, `pp-agent`, or `pp-ollama-chat` behaviour. Its
+`TokenBudgetedContextBuilder` and `LedgerRecallPlanner` must share one non-empty
+`MemoryScope` and the **same `TokenCounter` instance**. The planner must use
+`LedgerRecallPolicy.admission_safe_default()` or a policy with
+`require_admission_audit=True`.
+
+The composer puts memory payload only in one `user` JSON message. A fixed
+system guard without memory text precedes it; generated system context never
+contains raw Ledger payload. The guard+JSON pair sits after generated system
+context, when present, and before history/tool graph, so it never splits a
+tool call/result dependency. The complete lane is mandatory, reserved before
+optional RAG/session/history, and never silently truncated. Insufficient room
+raises `TokenBudgetExceededError(..., "ledger_data")`.
+
+```python
+from protoprompt import ContextInput, InMemStore, TokenBudgetedContextBuilder
+from protoprompt.ledger.recall import (
+    LedgerContextComposer,
+    LedgerRecallPlanner,
+    LedgerRecallPolicy,
+    StaleMemoryPlanError,
+)
+from protoprompt.tokens import RegexTokenCounter
+
+# inside an async host handler
+counter = RegexTokenCounter()
+builder = TokenBudgetedContextBuilder(
+    InMemStore(),
+    embedding_client,
+    counter=counter,
+    max_tokens=4_096,
+    scope=writer.scope,
+)
+planner = LedgerRecallPlanner(
+    writer,
+    policy=LedgerRecallPolicy.admission_safe_default(),
+    counter=counter,
+)
+composer = LedgerContextComposer(builder, planner)
+
+try:
+    request = await composer.plan_messages(
+        ContextInput(
+            query="repair checkpoint recovery",
+            system_prompt="Follow the host contract.",
+            include_session=False,
+        ),
+        user_message="What should happen next?",
+        ledger_token_budget=600,
+    )
+except StaleMemoryPlanError:
+    # Memory lifecycle changed during async context/RAG work. Replan before send.
+    raise
+
+messages = request.render_messages()  # send immediately through your provider client
+receipt = request.receipt              # exact full-message budget
+audit = request.explain()              # content-free metadata
+```
+
+The composer itself does not write the Ledger or send a chat request. Its
+supplied `TokenBudgetedContextBuilder` may perform asynchronous RAG/embedding
+work, however; after that work the composer resolves the original selection
+again and fails closed on a stale record, revision, or expiry.
 
 The JSON serializer escapes `<`, `>`, and `&` in rendered content to avoid
 visibly closing a downstream XML/HTML-like wrapper. That is defense in depth,
 not a replacement for a trusted data boundary: memory text can still contain
-untrusted instructions and must remain data.
+untrusted instructions and must remain data. Do not treat contents of a durable
+record as system instructions, and do not give a model the writer or lifecycle
+methods as tools.
 
 ## Selection policy
 
@@ -131,6 +195,12 @@ untrusted instructions and must remain data.
 are excluded by default. An application may opt in only through an explicit
 host policy with an evidence and risk contract appropriate to those richer
 memory kinds.
+
+This is the compatibility policy for standalone planning: it may still read
+legacy `unknown` and `legacy_unknown` records. A composed provider request must
+use `LedgerRecallPolicy.admission_safe_default()`. It enables
+`require_admission_audit=True`, excluding both unreviewed provenances; concrete
+origins also pass the Ledger's audited active-reader invariant.
 
 ```python
 from protoprompt.ledger import MemoryKind
@@ -225,6 +295,18 @@ changes revision, or has a changed content hash, it raises
 `StaleMemoryPlanError` rather than returning stale text. Replan and resolve
 again before each model send.
 
+A composed request adds one short final boundary: after asynchronous context
+planning and exact rendered-message accounting, the composer resolves the
+original plan again. A changed selected memory becomes `StaleMemoryPlanError`,
+not an old JSON payload sent to the provider.
+
+`LedgerCompositionReceipt` binds the policy/fingerprint/counter and records
+that final validation. `ContextPlan.data_lanes` contains content-free
+`ContextDataLaneReceipt` metadata (record count, bytes, and transport tokens).
+`ContextRequestReceipt.input_tokens` remains the only authoritative total for
+the full provider request: the lane receipt explains a part of it but does not
+replace exact whole-message accounting.
+
 ## Scope and deletion boundary
 
 The planner receives a `MemoryWriter`, not a scope parameter, so it cannot
@@ -238,3 +320,7 @@ string is responsible for its own process/provider retention boundary. Ledger
 `forget()` and `erase()` still remove the live Ledger payload as documented in
 the [Memory Ledger guide](memory-ledger.md); they cannot retroactively erase a
 context string already returned or sent elsewhere.
+
+The same is true of `LedgerComposedRequest`: it is transient and should be sent
+immediately. Its final validation applies only until `plan_messages()` returns;
+a later `forget()` cannot retract JSON the host has already given a provider.

@@ -130,6 +130,59 @@ class ContextRequestReceipt:
         }
 
 
+@dataclass(frozen=True, slots=True)
+class ContextDataLaneReceipt:
+    """Content-free accounting for one host-owned request data lane.
+
+    A lane is a mandatory, separately rendered provider-message group such as
+    experimental Ledger reference data. Its standalone token measurement is
+    explanatory only: :class:`ContextRequestReceipt` remains authoritative
+    for the whole provider request, including any non-additive counter
+    behaviour across message boundaries.
+    """
+
+    lane_id: str
+    origin: str
+    media_type: str
+    message_count: int
+    input_tokens: int
+    data_tokens: int
+    data_bytes: int
+    record_count: int
+
+    def __post_init__(self) -> None:
+        for field_name in ("lane_id", "origin", "media_type"):
+            value = getattr(self, field_name)
+            if not isinstance(value, str) or not value:
+                raise ValueError(f"{field_name} must be a non-empty string")
+        for field_name in (
+            "message_count",
+            "input_tokens",
+            "data_tokens",
+            "data_bytes",
+            "record_count",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if self.message_count < 1:
+            raise ValueError("message_count must be at least one")
+
+    def explain(self) -> dict[str, object]:
+        """Return JSON-safe lane metadata without payload, scope, or IDs."""
+
+        return {
+            "lane_id": self.lane_id,
+            "origin": self.origin,
+            "media_type": self.media_type,
+            "message_count": self.message_count,
+            "input_tokens": self.input_tokens,
+            "data_tokens": self.data_tokens,
+            "data_bytes": self.data_bytes,
+            "record_count": self.record_count,
+        }
+
+
 def _freeze_messages(messages: list[dict[str, Any]]) -> tuple[str, ...]:
     """Capture JSON-compatible messages independently of caller mutation."""
     frozen: list[str] = []
@@ -175,6 +228,10 @@ class ContextPlan:
         repr=False,
         compare=False,
     )
+    # Appended after the legacy private rendered-message slot so existing
+    # positional construction remains compatible. A plan is still not a
+    # portable wire format; this is content-free explanatory metadata only.
+    data_lanes: tuple[ContextDataLaneReceipt, ...] = ()
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
@@ -188,15 +245,19 @@ class ContextPlan:
         rag_blocks = tuple(self.rag_blocks)
         session_blocks = tuple(self.session_blocks)
         decisions = tuple(self.decisions)
+        data_lanes = tuple(self.data_lanes)
         if not all(isinstance(block, str) for block in rag_blocks):
             raise TypeError("rag_blocks must contain strings")
         if not all(isinstance(block, str) for block in session_blocks):
             raise TypeError("session_blocks must contain strings")
         if not all(isinstance(decision, ContextBlockDecision) for decision in decisions):
             raise TypeError("decisions must contain ContextBlockDecision values")
+        if not all(isinstance(lane, ContextDataLaneReceipt) for lane in data_lanes):
+            raise TypeError("data_lanes must contain ContextDataLaneReceipt values")
         object.__setattr__(self, "rag_blocks", rag_blocks)
         object.__setattr__(self, "session_blocks", session_blocks)
         object.__setattr__(self, "decisions", decisions)
+        object.__setattr__(self, "data_lanes", data_lanes)
         if self._rendered_messages is not None:
             rendered_messages = tuple(self._rendered_messages)
             if not all(isinstance(message, str) for message in rendered_messages):
@@ -226,6 +287,7 @@ class ContextPlan:
         messages: list[dict[str, Any]],
         receipt: ContextRequestReceipt,
         decisions: tuple[ContextBlockDecision, ...],
+        data_lanes: tuple[ContextDataLaneReceipt, ...] = (),
     ) -> "ContextPlan":
         """Return a request plan whose payload is isolated from caller data."""
         if receipt.trace_id != plan.trace_id:
@@ -240,6 +302,7 @@ class ContextPlan:
             profile_used=plan.profile_used,
             decisions=decisions,
             receipt=receipt,
+            data_lanes=data_lanes,
             _rendered_messages=_freeze_messages(messages),
         )
 
@@ -253,6 +316,7 @@ class ContextPlan:
             "rag_block_count": len(self.rag_blocks),
             "session_block_count": len(self.session_blocks),
             "decisions": [decision.explain() for decision in self.decisions],
+            "data_lanes": [lane.explain() for lane in self.data_lanes],
         }
         if self.receipt is not None:
             result["receipt"] = self.receipt.explain()

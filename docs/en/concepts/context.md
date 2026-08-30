@@ -18,6 +18,11 @@ In a multi-tenant application, the host pins one `MemoryScope` to the builder.
 It applies to both RAG and session memory; switching tenants through
 `ContextInput` is deliberately unsupported.
 
+The experimental `LedgerContextComposer` is not a fifth ordinary
+`ContextOutput` layer. It is a separate host-owned request prefix: admitted
+Ledger JSON goes in a fixed `user` data message after generated system context
+and before history. See [bounded Ledger recall](../ledger-recall.md).
+
 ## When to enable what
 
 | Scenario                                     | RAG | Session | Profile |
