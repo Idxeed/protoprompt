@@ -1,53 +1,48 @@
-# protoprompt 0.9.0
+# protoprompt 0.10.0
 
-ProtoPrompt 0.9 adds the first safe, bounded read path from durable Memory
-Ledger records to an agent's current task. It is deliberately narrow:
-experimental Ledger Recall is an opt-in JSON **data lane**, not a promise of
-unlimited context, automatic memory admission, or a hidden system-prompt
-insertion.
+ProtoPrompt 0.10 adds the admission boundary that turns the experimental
+Memory Ledger from “host-confirmed storage” into a safer, evidence-backed
+memory ingress. It is intentionally focused: no hidden prompt injection, no
+new framework dependency, and no automatic migration of old memories into
+trusted facts.
 
 ## Highlights
 
-- **Bounded Ledger Recall** — `LedgerRecallPlanner` reads only `active`,
-  host-confirmed, still-valid payloads through one scope-pinned
-  `MemoryWriter`. It ranks locally with deterministic lexical relevance,
-  confidence, and recency; it calls no LLM, embedding, vector, or network
-  service. Whole records either fit into the canonical JSON data envelope's
-  exact token and UTF-8-byte budgets or stay out.
-- **Fresh lifecycle check before use** — a plan is bound to its planner,
-  scope, policy, token-counter identity, selected record revision, kind, and
-  content hash. `resolve()` renders and accounts for data outside SQLite's writer
-  lock, then takes a short final lifecycle boundary and rechecks the active
-  snapshot. If a record was forgotten, retracted, superseded, erased, expired,
-  changed, or displaced outside the bounded reader, resolution fails closed
-  with `StaleMemoryPlanError`; callers replan before sending a provider
-  request.
-- **Explainable and host-controlled** — `plan.explain()` is content-free while
-  retaining policy, budget, active-read/candidate bounds, selection decisions,
-  and counter identity for audits and developer UIs. The planner owns time via
-  its injected host clock, so a model or tool cannot backdate a per-call read
-  to bypass expiry.
-- **No SQLite lock inversion** — custom token counters run outside the Ledger
-  write transaction. A slow or re-entrant counter cannot stall `forget()` or
-  leave the connection in a nested transaction. Internal SQLite transaction
-  helpers now roll back even after a `BaseException` interruption.
-- **Clear boundary for the next milestone** — v0.9 does not yet introduce an
-  automatic admission policy, episode/checkpoint runtime, legacy
-  `WorkingMemory` migration, or automatic `ContextPlan` composition. Those
-  need their own contracts and measurements before they can become defaults.
+- **Host-owned admission** — `MemoryReviewGate` binds one Ledger writer to a
+  fixed scope, origin, policy, and actor. A narrow ingress accepts only text;
+  scope, origin, kind, confidence, source/evidence IDs, lifecycle state, and
+  idempotency keys remain host-owned.
+- **A conservative default** — `MemoryAdmissionPolicy()` quarantines every
+  origin. `safe_default()` allows only high-confidence `host_assertion`
+  records. Hosts opt into document, user, tool, or model origins explicitly.
+- **Durable, content-free evidence** — each gate decision stores an immutable
+  `MemoryAdmissionAudit` paired with the lifecycle event. Concrete-origin
+  active records are revalidated against their audit before bounded Ledger
+  Recall can return them.
+- **Lifecycle-safe decisions** — `review()` is pure and produces a sealed
+  in-process capability. `allow` activates, `quarantine` isolates, and
+  `reject` forgets the local payload. Stale, forged, cross-gate, revoked,
+  expired, and post-hard-erase reviews fail closed.
+- **Schema v5 migration** — explicit `dry_run_setup()` / `setup()` adds
+  provenance and review sidecars without rewriting existing events. Live v4
+  payload rows become `legacy_unknown`; no origin or audit is invented.
+- **Hardening at the storage boundary** — sidecars are write-once in SQLite.
+  Hard erase is the single controlled cascade that removes their rows and
+  restores the guards before commit. Mismatched, orphaned, or event-forged
+  audit rows fail closed.
 
-## Upgrade
-
-```bash
-pip install --upgrade protoprompt
-```
-
-Create and explicitly confirm records through trusted host code, then plan and
-resolve a data lane immediately before composing the provider request:
+## Safe host flow
 
 ```python
-from protoprompt.ledger import MemoryWriter, SqliteMemoryLedger
-from protoprompt.ledger.recall import LedgerRecallPlanner, StaleMemoryPlanError
+from protoprompt.ledger import (
+    MemoryAdmissionAction,
+    MemoryAdmissionPolicy,
+    MemoryKind,
+    MemoryOrigin,
+    MemoryReviewGate,
+    MemoryWriter,
+    SqliteMemoryLedger,
+)
 from protoprompt.scope import MemoryScope
 
 ledger = SqliteMemoryLedger("memory-ledger.db")
@@ -56,42 +51,81 @@ writer = MemoryWriter(
     ledger,
     scope=MemoryScope(tenant="local", user="alice", thread="chat-42"),
 )
-candidate = writer.propose(
-    kind="preference",
-    content="The user prefers answers in Russian.",
-    source_ref="turn:42",
+gate = MemoryReviewGate(
+    writer,
+    origin=MemoryOrigin.DOCUMENT,
+    policy=MemoryAdmissionPolicy(
+        policy_id="document-facts-v1",
+        policy_version="1",
+        allowed_origins=(MemoryOrigin.DOCUMENT,),
+        minimum_confidence=0.8,
+    ),
 )
-writer.confirm(candidate.record_id, expected_revision=candidate.revision)
 
-planner = LedgerRecallPlanner(writer)
-try:
-    memory_data = planner.resolve(
-        planner.plan(task="answer the user", token_budget=600, byte_budget=32_768)
-    ).render_data()
-except StaleMemoryPlanError:
-    # A lifecycle write won; plan once more before the provider send.
-    memory_data = planner.resolve(
-        planner.plan(task="answer the user", token_budget=600, byte_budget=32_768)
-    ).render_data()
+ingress = gate.ingress(
+    kind=MemoryKind.FACT,
+    source_ref="pdf:handbook:page-4",
+    confidence=0.9,
+)
+candidate = ingress.submit("Support requests are answered in Russian.")
+review = gate.review(candidate.record_id)
+assert review.action is MemoryAdmissionAction.ALLOW
+active = gate.confirm(review, event_id="admission:handbook-p4:allow")
 ```
 
-Treat `memory_data` as untrusted data in your own request composition. Do not
-give model/tool code a `MemoryWriter` or interpret durable record content as
-system instructions.
+The model-facing transport is only a JSON/RPC schema equivalent to
+`{"content": "..."}`. Do not pass a gate, writer, Ledger, review, or ingress
+object to arbitrary in-process code. Those objects are host capabilities, not
+a Python authorization sandbox.
 
-For the local Ollama reference app, install compatible sources and keep the
-server on loopback unless you add an authentication boundary:
+## Upgrade notes
 
 ```bash
-pip install "protoprompt[documents,fastapi,ollama]==0.9.0"
-pip install "git+https://github.com/Idxeed/protoprompt.git@v0.9.0#subdirectory=apps/ollama-chat"
+pip install --upgrade "protoprompt==0.10.0"
+```
+
+Run `ledger.dry_run_setup()`, make a backup, then run `ledger.setup()` in an
+explicit migration job. The forward-only v5 migration retains existing events
+unchanged. Pre-v5 active records remain recallable as `legacy_unknown` for
+compatibility, but were never reviewed by v0.10; a strict deployment must
+quarantine and re-ingest/review them before enabling recall.
+
+Older v0.9 code rejects schema v5. Roll back traffic only by restoring a
+pre-upgrade backup into a separate database; never destructively downgrade a
+shared Ledger file in place. `erase()` removes live Ledger rows and audit
+sidecars but cannot erase historical backups, WAL/journal files, text already
+sent to a model, or external projections without their own deletion contract.
+
+`writer.propose()` / `writer.assert_candidate()` and raw lifecycle cleanup
+remain available only as trusted-host compatibility APIs. They produce
+`unknown` provenance and no admission audit. In particular,
+`writer.confirm()` now rejects a candidate created with a concrete v5 origin;
+apply the matching gate review instead.
+
+`MemoryReview` is process-local. Persist the candidate `record_id` and your
+action `event_id`; after a restart, use `writer.events(record_id)` and
+`writer.admission_audits(record_id)` to resolve a completed decision rather
+than trying to replay an old review. A concrete-origin admission lifecycle
+event without its matching audit is a corruption/atomicity alarm: stop rather
+than retrying. A hard-erased record and its old event IDs remain terminal.
+
+## Reference Ollama app
+
+The local PDF-RAG Ollama app remains loopback-only by default and is released
+from this repository alongside the core package:
+
+```bash
+pip install "protoprompt[documents,fastapi,ollama]==0.10.0"
+pip install "git+https://github.com/Idxeed/protoprompt.git@v0.10.0#subdirectory=apps/ollama-chat"
 pp-ollama-chat
 ```
 
 ## Release gate
 
-The tag workflow checks tag/version alignment; deterministic library, agent,
-and Ollama-app tests; Russian and English documentation; library
-and reference-app distributions; and a clean-environment wheel import. It
-publishes verified library artifacts to PyPI and creates the GitHub release
-only after the checks pass.
+The release workflow verifies tag/version alignment, deterministic core and
+reference-app tests, migration fixtures, the supported Python 3.11–3.13
+compatibility range (with the release build on Python 3.12), Russian and
+English documentation, wheel imports, and publication order. The
+storage admission contract is additionally covered by forged-audit,
+cross-scope, stale-review, write-lock expiry, restart, hard-erase, and v4
+migration regression tests.

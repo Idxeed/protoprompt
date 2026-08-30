@@ -44,7 +44,7 @@ LLM обычно нужна не просто история чата, а нес
 | RAG | чанкинг, индексация, top-k поиск, фильтры, reranking и provenance |
 | Память сессии | эвристическое или LLM-сжатие длинных диалогов |
 | Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
-| Memory Ledger *(experimental)* | scoped lifecycle, host confirmation, provenance, atomic source revocation и проверяемая очистка live rows |
+| Memory Ledger *(experimental)* | scoped lifecycle, host admission, immutable provenance/audit, atomic source revocation и проверяемая очистка live rows |
 | Bounded ledger recall *(experimental)* | локальный deterministic selection active memory в JSON data lane с token/byte budget, receipt и pre-send stale check |
 | Токен-бюджет | жёсткий лимит, приоритеты слоёв, `ContextPlan`/receipt и объяснение обрезки |
 | Хранилища | in-memory, SQLite, ChromaDB, Qdrant, pgvector, Elasticsearch/OpenSearch и Redis services |
@@ -57,7 +57,8 @@ LLM обычно нужна не просто история чата, а нес
 через extras и не импортируются, пока не понадобятся.
 
 Экспериментальный `LedgerRecallPlanner` — первый безопасный read-path для
-текущей задачи агента: он выбирает только active, host-confirmed записи,
+текущей задачи агента: для concrete v5 origin он выбирает только active,
+host-admitted записи с проверенным audit,
 создаёт свежий ограниченный JSON data lane и fail-closed при изменении памяти
 до отправки. Он не подмешивает записи в system prompt и не заменяет финальный
 request accounting; см. [Bounded recall из ledger](docs/ru/ledger-recall.md).
@@ -182,7 +183,7 @@ from protoprompt import (
 )
 
 from protoprompt.rag import DocumentIndexer, Retriever
-from protoprompt.ledger import MemoryWriter, SqliteMemoryLedger
+from protoprompt.ledger import MemoryReviewGate, MemoryWriter, SqliteMemoryLedger
 from protoprompt.secrets import EncryptedSqliteSecretStore, SecretAccess
 from protoprompt.integrations import OpenAIClient, OllamaClient, QdrantStore
 ```

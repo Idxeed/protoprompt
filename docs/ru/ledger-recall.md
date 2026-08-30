@@ -17,12 +17,27 @@
 lane**; итоговый запрос к провайдеру по-прежнему собирает и проверяет trusted
 request planner приложения.
 
+Для concrete v5 ingress origin active reader проверяет парный immutable
+`allow` audit до попадания record в этот lane. Записи, мигрированные из схемы
+до v5, получают `legacy_unknown` и остаются recallable только ради
+совместимости; strict deployment должен quarantine-ить и re-admit-ить их до
+включения recall. Raw `unknown` writer records тоже являются trusted legacy
+escape hatch, а не provenance-reviewed memory от модели.
+
 ## Быстрый старт
 
-Сначала создайте и явно подтвердите запись через host-owned Ledger API:
+Сначала создайте и проведите запись через host-owned v0.10 admission boundary:
 
 ```python
-from protoprompt.ledger import MemoryWriter, SqliteMemoryLedger
+from protoprompt.ledger import (
+    MemoryAdmissionAction,
+    MemoryAdmissionPolicy,
+    MemoryKind,
+    MemoryOrigin,
+    MemoryReviewGate,
+    MemoryWriter,
+    SqliteMemoryLedger,
+)
 from protoprompt.ledger.recall import LedgerRecallPlanner, StaleMemoryPlanError
 from protoprompt.scope import MemoryScope
 
@@ -33,13 +48,24 @@ writer = MemoryWriter(
     scope=MemoryScope(tenant="local", user="alice", thread="agent-42"),
 )
 
-candidate = writer.propose(
-    kind="fact",
-    content="Восстановление checkpoint начинается с durable manifest.",
+gate = MemoryReviewGate(
+    writer,
+    origin=MemoryOrigin.DOCUMENT,
+    policy=MemoryAdmissionPolicy(
+        policy_id="artifact-facts-v1",
+        policy_version="1",
+        allowed_origins=(MemoryOrigin.DOCUMENT,),
+        minimum_confidence=0.8,
+    ),
+)
+candidate = gate.ingress(
+    kind=MemoryKind.FACT,
     source_ref="artifact:checkpoint-manifest",
     confidence=0.9,
-)
-writer.confirm(candidate.record_id, expected_revision=candidate.revision)
+).submit("Восстановление checkpoint начинается с durable manifest.")
+review = gate.review(candidate.record_id)
+assert review.action is MemoryAdmissionAction.ALLOW
+gate.confirm(review, event_id="admission:checkpoint-manifest:allow")
 
 planner = LedgerRecallPlanner(writer)
 plan = planner.plan(
@@ -101,7 +127,8 @@ depth, а не замена trusted data boundary: текст памяти мо�
 
 `LedgerRecallPolicy.safe_default()` допускает только `fact`, `decision` и
 `preference` с confidence не ниже `0.5`. `episode` и `procedure` по умолчанию
-исключены, пока для них не создан отдельный provenance/admission contract.
+исключены. Приложение может opt-in только через явную host policy с evidence
+и risk contract, подходящими для этих более богатых memory kinds.
 
 ```python
 from protoprompt.ledger import MemoryKind
@@ -119,9 +146,11 @@ planner = LedgerRecallPlanner(writer, policy=policy)
 ```
 
 Это immutable local selection policy, а не admission policy. Она не может
-подтвердить candidate. Будущий review gate станет отдельным host-side
-компонентом и никогда не позволит model output автоматически превратиться в
-active memory.
+подтвердить candidate. Admission v0.10 — отдельный host-side
+`MemoryReviewGate`: он фиксирует origin и policy до входа текста в Ledger, а
+затем записывает sealed `allow` / `quarantine` / `reject` decision. Он никогда
+не позволит model output автоматически превратиться в active memory. Граница
+RPC-only и recovery описаны в [Memory Ledger admission](memory-ledger.md#admission-boundary-v010).
 
 При фиксированных task, host-controlled clock, active Ledger snapshot, policy
 и token counter выбор воспроизводим. Ранжирование использует сначала

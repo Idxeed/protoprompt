@@ -1,10 +1,11 @@
 # Experimental memory ledger
 
-The v0.8 ledger foundation turns a durable memory from an unstructured vector
-chunk into a scoped record with an explicit lifecycle. It is deliberately
-**opt-in** and experimental: it does not change `MemoryService`, profiles,
-session compression, vector recall, or `ContextPlan` until a host explicitly
-installs a later adapter.
+The v0.10 ledger turns a durable memory from an unstructured vector chunk into
+a scope-pinned record with an explicit lifecycle, immutable ingress provenance,
+and a host-owned admission decision. It is deliberately **opt-in** and
+experimental: it does not change `MemoryService`, profiles, session
+compression, vector recall, or `ContextPlan` until a host explicitly installs
+an adapter.
 
 That separation is intentional. A PDF, tool result, transcript, or model
 extraction must never become a trusted system-priority fact simply because it
@@ -17,7 +18,15 @@ was persisted.
 Schema setup is an operator action, never an import-time side effect:
 
 ```python
-from protoprompt.ledger import MemoryWriter, SqliteMemoryLedger
+from protoprompt.ledger import (
+    MemoryAdmissionAction,
+    MemoryAdmissionPolicy,
+    MemoryKind,
+    MemoryOrigin,
+    MemoryReviewGate,
+    MemoryWriter,
+    SqliteMemoryLedger,
+)
 from protoprompt.scope import MemoryScope
 
 ledger = SqliteMemoryLedger("memory-ledger.db")
@@ -29,19 +38,27 @@ writer = MemoryWriter(
     scope=MemoryScope(tenant="local", user="alice", thread="chat-42"),
 )
 
-candidate = writer.propose(
-    kind="preference",
-    content="The user prefers answers in Russian.",
+# The host fixes authority-bearing ingress fields before untrusted text
+# arrives. MemoryAdmissionPolicy() by itself quarantines every origin.
+policy = MemoryAdmissionPolicy(
+    policy_id="local-document-v1",
+    policy_version="1",
+    allowed_origins=(MemoryOrigin.DOCUMENT,),
+    minimum_confidence=0.8,
+)
+gate = MemoryReviewGate(writer, origin=MemoryOrigin.DOCUMENT, policy=policy)
+document_ingress = gate.ingress(
+    kind=MemoryKind.PREFERENCE,
     source_ref="turn:42",          # host-minted opaque ID, not raw text
     evidence_refs=("turn:42:line:1",),
+    confidence=0.9,
 )
+candidate = document_ingress.submit("The user prefers answers in Russian.")
 
-# A trusted host policy/reviewer decides this step. Keep the writer and raw
-# ledger out of untrusted plugin or model-tool code.
-active = writer.confirm(
-    candidate.record_id,
-    expected_revision=candidate.revision,
-)
+# review() is pure; a sealed result is applied explicitly by trusted host code.
+review = gate.review(candidate.record_id)
+assert review.action is MemoryAdmissionAction.ALLOW
+active = gate.confirm(review, event_id="admission:turn-42:allow")
 
 assert writer.list_active() == [active]
 ```
@@ -53,16 +70,49 @@ scope on every operation. This is an API-shaping guard inside a trusted host
 process, not a Python sandbox or authorization boundary: do not expose either
 object to untrusted code.
 
+## Admission boundary (v0.10)
+
+`MemoryReviewGate` has one fixed scope, origin, policy, and actor. Its
+`ingress()` creates a narrow host-configured endpoint: `submit(content)` is
+the only variable input. The caller cannot choose scope, origin, kind,
+confidence, source/evidence identifiers, lifecycle state, record ID, or event
+ID. The closed origins are `user_input`, `document`, `tool_output`,
+`model_extraction`, and `host_assertion`; `unknown` and `legacy_unknown` are
+not reviewable origins.
+
+`review()` does not write. It produces a sealed in-process `MemoryReview`;
+only the creating gate can apply it. Its action maps exactly to one lifecycle
+result: `allow` → `active`, `quarantine` → `quarantined`, and `reject` →
+`forget()` with the payload removed. Every applied gate decision writes one
+content-free `MemoryAdmissionAudit` paired with its lifecycle event. A
+concrete-origin record cannot become recallable through `MemoryWriter.confirm`;
+the raw confirmation API rejects it unless its origin is `unknown` or
+`legacy_unknown`.
+
+This is an API boundary inside a trusted host process, not a Python sandbox.
+The model must receive a JSON/RPC tool schema with exactly `{ "content":
+"..." }`; the host adapter derives scope, origin, source, policy, and action
+outside the model. Never pass a `MemoryReviewGate`, `MemoryWriter`,
+`SqliteMemoryLedger`, `MemoryReview`, or ingress object to arbitrary in-process
+plugin code. If arbitrary plugins execute in the same process, isolate this
+adapter behind a process/RPC boundary first.
+
+The legacy raw writer remains a trusted-host compatibility and cleanup escape
+hatch. `writer.propose()` / `writer.assert_candidate()` create `unknown`
+provenance, and raw lifecycle cleanup does **not** create an admission audit.
+Use it only for existing trusted integrations; it is not a model tool and is
+not a strict-admission path.
+
 ## Lifecycle and recall
 
 | State | How it gets there | Default recall |
 |---|---|---|
-| `candidate` | `propose()` / `assert_candidate()` | never |
-| `active` | explicit `confirm()` | only while valid and payload-present |
+| `candidate` | gate ingress, or legacy trusted raw writer | never |
+| `active` | sealed gate `allow`, or legacy raw confirmation | only while valid and payload-present |
 | `superseded` | explicit `supersede(old, replacement)` | never |
 | `retracted` | `retract()` or `forget()` | never |
 | `expired` | `expire()` / `expire_due()` | never |
-| `quarantined` | `quarantine()` | never |
+| `quarantined` | sealed gate `quarantine()` or trusted cleanup | never |
 
 Every lifecycle transition takes `expected_revision`; stale commands fail
 instead of silently overwriting a newer decision. `forget()` records a
@@ -76,10 +126,19 @@ stored erasure receipt. Replaying a candidate after its payload was forgotten,
 or any command after a hard erase, is deliberately rejected rather than
 resurrecting data. Reusing an ID for different input always raises a conflict.
 
+For a concrete v5 origin, `list_active()` validates the matching immutable
+`allow` audit, event payload, origin, revision, and reason before exposing a
+record to recall. A malformed or missing audit fails closed. SQLite is still
+not tamper-evident: a party that can directly alter the database, disable
+triggers, and forge a self-consistent event can defeat an in-database audit.
+Protect the database file and use an external signing/key-management boundary
+when that threat is in scope.
+
 Replacing a fact is explicit and deterministic:
 
 ```python
-new = writer.confirm(new_candidate.record_id, expected_revision=1)
+# ``new_active`` was admitted by its matching MemoryReviewGate above.
+new = new_active
 old = writer.supersede(
     old_active.record_id,
     replacement_record_id=new.record_id,
@@ -103,14 +162,15 @@ fingerprints written by earlier experimental schemas.
 - `forget()` moves it to `retracted`, deletes its local plaintext,
   source/evidence payload, source lookup entries, and relations, and redacts
   its stored content fingerprint. A content-free `forgotten` event and
-  lifecycle receipt remain.
+  lifecycle receipt remain. It intentionally retains any content-free v5
+  origin metadata and admission audit so a rejected decision can be audited.
 - `forget_by_source("pdf:opaque-id")` is atomic for all currently linked
   records in the writer's exact scope. It also keeps a scoped opaque source
   tombstone, so that source cannot be ingested again in that scope; the same
   source ID remains independent in another scope.
 - `erase()` is the explicit irreversible local escape hatch: it removes the
-  record, payload, relations, and its event receipts. It also redacts links to
-  that record from events owned by other records. It retains scoped opaque
+  record, payload, relations, v5 provenance/audits, and its event receipts. It
+  also redacts links to that record from events owned by other records. It retains scoped opaque
   replay tombstones and its hard-erase receipt so an in-flight retry cannot
   resurrect the erased record ID; use a fresh record ID for a new memory.
 
@@ -146,11 +206,36 @@ that target ledger tables, instead of adopting, overwriting, or silently
 running them.
 
 1. Run `dry_run_setup()` and back up the database with `ledger.backup(path)`.
-2. Call `setup()` in an explicit migration job.
-3. Keep legacy readers authoritative while evaluating a separate opt-in
+2. Call `setup()` in an explicit migration job. v5 backfills only
+   payload-bearing pre-v5 records as `legacy_unknown`; it never invents a
+   modern origin or review audit. Pre-v5 active records remain recallable for
+   compatibility.
+3. A strict deployment must inventory those legacy active records, quarantine
+   them through trusted lifecycle code, and re-ingest/review the data through
+   a concrete v5 origin before enabling recall. Do not claim that a migrated
+   legacy record passed v0.10 admission.
+4. Keep legacy readers authoritative while evaluating a separate opt-in
    adapter or importer.
-4. Roll back by stopping writes to the ledger and returning traffic to the
-   old components; do not destructively downgrade a shared database.
+5. Roll back application traffic only by restoring a pre-upgrade backup into a
+   separate database and returning traffic to the old components. v0.9 code
+   rejects schema v5, so do not attempt an in-place or destructive downgrade
+   of a shared database.
+
+## Restart recovery
+
+`MemoryReview` is deliberately process-local: after a restart a new gate
+cannot replay a prior sealed review. Before applying an action, retain the
+candidate `record_id` returned by `submit()` and your host-minted action
+`event_id`. On recovery, use `writer.events(record_id)` and
+`writer.admission_audits(record_id)`:
+
+- a matching **admission** audit/event means the decision is final; do not
+  re-review it;
+- a concrete-origin admission lifecycle event without its matching audit is a
+  corruption/atomicity alarm; stop;
+- neither admission event nor audit while the concrete-origin record is still
+  a candidate requires a new sealed review. A hard-erased record and its
+  prior event IDs are terminal and must never be recreated.
 
 Profile/session/vector importers and stable request composition remain future
 work. The ledger and its experimental recall lane intentionally preserve all

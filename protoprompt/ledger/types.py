@@ -70,6 +70,33 @@ class MemoryTrust(StrEnum):
     HOST_CONFIRMED = "host_confirmed"
 
 
+class MemoryOrigin(StrEnum):
+    """Closed ingress category assigned by trusted host code.
+
+    Origin describes where a candidate entered the Ledger; it is deliberately
+    separate from ``MemoryTrust`` and never promotes a record by itself.
+    ``UNKNOWN`` is used by the low-level trusted writer escape hatch, while
+    ``LEGACY_UNKNOWN`` is reserved for payload-bearing records migrated from
+    pre-admission Ledger schemas.
+    """
+
+    UNKNOWN = "unknown"
+    LEGACY_UNKNOWN = "legacy_unknown"
+    USER_INPUT = "user_input"
+    DOCUMENT = "document"
+    TOOL_OUTPUT = "tool_output"
+    MODEL_EXTRACTION = "model_extraction"
+    HOST_ASSERTION = "host_assertion"
+
+
+class MemoryAdmissionAction(StrEnum):
+    """One host policy outcome for an untrusted Ledger candidate."""
+
+    ALLOW = "allow"
+    QUARANTINE = "quarantine"
+    REJECT = "reject"
+
+
 class MemoryEventType(StrEnum):
     """Append-only lifecycle event names."""
 
@@ -284,6 +311,7 @@ class MemoryRecord:
     retracted_at: datetime | None = None
     expired_at: datetime | None = None
     schema_version: int = LEDGER_SCHEMA_VERSION
+    origin: MemoryOrigin | str = MemoryOrigin.UNKNOWN
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "record_id", validate_identifier(self.record_id, field="record_id"))
@@ -291,6 +319,7 @@ class MemoryRecord:
         object.__setattr__(self, "kind", MemoryKind(self.kind))
         object.__setattr__(self, "state", MemoryState(self.state))
         object.__setattr__(self, "trust", MemoryTrust(self.trust))
+        object.__setattr__(self, "origin", MemoryOrigin(self.origin))
         if (
             self.state is MemoryState.ACTIVE
             and self.trust is not MemoryTrust.HOST_CONFIRMED
@@ -384,6 +413,7 @@ class MemoryRecord:
             "kind": self.kind.value,
             "state": self.state.value,
             "trust": self.trust.value,
+            "origin": self.origin.value,
             "content_hash": self.content_hash,
             "content_available": self.content_available,
             "source_refs": list(self.source_refs),
@@ -463,6 +493,84 @@ class MemoryEvent:
             "actor": self.actor,
             "related_record_id": self.related_record_id,
             "reason_code": self.reason_code,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class MemoryAdmissionAudit:
+    """Content-free durable receipt for one applied admission decision.
+
+    The companion audit deliberately does not duplicate candidate text,
+    source/evidence references, content hashes, or a free-form policy
+    explanation.  Its event ID is the same opaque host-created idempotency
+    key used by the lifecycle transition it accompanies.
+    """
+
+    event_id: str
+    record_id: str
+    scope: MemoryScope
+    candidate_revision: int
+    origin: MemoryOrigin | str
+    policy_id: str
+    policy_version: str
+    policy_fingerprint: str
+    action: MemoryAdmissionAction | str
+    reason_code: str
+    occurred_at: datetime
+    reviewer_actor: str
+    schema_version: int = 1
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "event_id", validate_identifier(self.event_id, field="event_id"))
+        object.__setattr__(self, "record_id", validate_identifier(self.record_id, field="record_id"))
+        scope_dict(self.scope)
+        if isinstance(self.candidate_revision, bool) or not isinstance(
+            self.candidate_revision, int
+        ) or self.candidate_revision < 1:
+            raise ValueError("candidate_revision must be a positive integer")
+        object.__setattr__(self, "origin", MemoryOrigin(self.origin))
+        object.__setattr__(self, "policy_id", validate_identifier(self.policy_id, field="policy_id"))
+        object.__setattr__(
+            self,
+            "policy_version",
+            validate_identifier(self.policy_version, field="policy_version"),
+        )
+        if not isinstance(self.policy_fingerprint, str) or len(self.policy_fingerprint) != 64:
+            raise ValueError("policy_fingerprint must be a 64-character digest")
+        object.__setattr__(self, "action", MemoryAdmissionAction(self.action))
+        object.__setattr__(
+            self,
+            "reason_code",
+            validate_identifier(self.reason_code, field="reason_code"),
+        )
+        occurred_at = coerce_datetime(self.occurred_at, field="occurred_at")
+        assert occurred_at is not None
+        object.__setattr__(self, "occurred_at", occurred_at)
+        object.__setattr__(
+            self,
+            "reviewer_actor",
+            validate_identifier(self.reviewer_actor, field="reviewer_actor"),
+        )
+        if self.schema_version != 1:
+            raise ValueError("unsupported memory admission audit schema_version")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Return the content-free audit representation."""
+
+        return {
+            "schema_version": self.schema_version,
+            "event_id": self.event_id,
+            "record_id": self.record_id,
+            "scope": scope_dict(self.scope),
+            "candidate_revision": self.candidate_revision,
+            "origin": self.origin.value,
+            "policy_id": self.policy_id,
+            "policy_version": self.policy_version,
+            "policy_fingerprint": self.policy_fingerprint,
+            "action": self.action.value,
+            "reason_code": self.reason_code,
+            "occurred_at": format_timestamp(self.occurred_at),
+            "reviewer_actor": self.reviewer_actor,
         }
 
 

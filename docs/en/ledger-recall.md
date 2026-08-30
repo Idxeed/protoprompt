@@ -18,12 +18,27 @@ This is not a claim of an unlimited context window. It is a bounded **memory
 data lane**. The final provider request must still be composed and checked by
 the application's trusted request planner.
 
+For a concrete v5 ingress origin, the active reader verifies the matching
+immutable `allow` audit before a record enters this lane. Records migrated
+from pre-v5 schemas carry `legacy_unknown` and remain recallable only for
+compatibility; strict deployments must quarantine and re-admit them before
+enabling recall. Raw `unknown` writer records are likewise a trusted legacy
+escape hatch, not provenance-reviewed model memory.
+
 ## Quick start
 
-Create and explicitly confirm records through the host-owned Ledger API first:
+Create and admit records through the host-owned v0.10 admission boundary first:
 
 ```python
-from protoprompt.ledger import MemoryWriter, SqliteMemoryLedger
+from protoprompt.ledger import (
+    MemoryAdmissionAction,
+    MemoryAdmissionPolicy,
+    MemoryKind,
+    MemoryOrigin,
+    MemoryReviewGate,
+    MemoryWriter,
+    SqliteMemoryLedger,
+)
 from protoprompt.ledger.recall import LedgerRecallPlanner, StaleMemoryPlanError
 from protoprompt.scope import MemoryScope
 
@@ -34,13 +49,24 @@ writer = MemoryWriter(
     scope=MemoryScope(tenant="local", user="alice", thread="agent-42"),
 )
 
-candidate = writer.propose(
-    kind="fact",
-    content="Checkpoint recovery starts by reading the durable manifest.",
+gate = MemoryReviewGate(
+    writer,
+    origin=MemoryOrigin.DOCUMENT,
+    policy=MemoryAdmissionPolicy(
+        policy_id="artifact-facts-v1",
+        policy_version="1",
+        allowed_origins=(MemoryOrigin.DOCUMENT,),
+        minimum_confidence=0.8,
+    ),
+)
+candidate = gate.ingress(
+    kind=MemoryKind.FACT,
     source_ref="artifact:checkpoint-manifest",
     confidence=0.9,
-)
-writer.confirm(candidate.record_id, expected_revision=candidate.revision)
+).submit("Checkpoint recovery starts by reading the durable manifest.")
+review = gate.review(candidate.record_id)
+assert review.action is MemoryAdmissionAction.ALLOW
+gate.confirm(review, event_id="admission:checkpoint-manifest:allow")
 
 planner = LedgerRecallPlanner(writer)
 plan = planner.plan(
@@ -102,8 +128,9 @@ untrusted instructions and must remain data.
 
 `LedgerRecallPolicy.safe_default()` accepts only `fact`, `decision`, and
 `preference` records with confidence at least `0.5`. `episode` and `procedure`
-are excluded until an application deliberately opts in, because their
-provenance/admission contract is still being built.
+are excluded by default. An application may opt in only through an explicit
+host policy with an evidence and risk contract appropriate to those richer
+memory kinds.
 
 ```python
 from protoprompt.ledger import MemoryKind
@@ -121,8 +148,12 @@ planner = LedgerRecallPlanner(writer, policy=policy)
 ```
 
 The policy is an immutable local selection policy, not an admission policy. It
-cannot confirm a candidate. A future review gate will be a separate host-side
-component; it will never let model output auto-promote itself to active memory.
+cannot confirm a candidate. v0.10 admission is a separate host-side
+`MemoryReviewGate`: it pins origin and policy before text enters the Ledger,
+then records a sealed `allow` / `quarantine` / `reject` decision. It never lets
+model output auto-promote itself to active memory. See
+[Memory Ledger admission](memory-ledger.md#admission-boundary-v010) for the
+RPC-only trust boundary and recovery rules.
 
 For a fixed task, host-controlled clock, active Ledger snapshot, policy, and
 token counter, selection is deterministic. Ranking uses lexical overlap first,

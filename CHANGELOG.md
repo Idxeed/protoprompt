@@ -7,6 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-08-30
+
+### Added
+- Experimental host-owned admission boundary for the SQLite Memory Ledger:
+  `MemoryReviewGate`, conservative versioned `MemoryAdmissionPolicy`, sealed
+  in-process `MemoryReview`, fixed-origin narrow ingress, closed
+  `MemoryOrigin` categories, and content-free `MemoryAdmissionAudit` receipts.
+  Gate decisions map explicitly to allow/active, quarantine/quarantined, or
+  reject/forget; model text never receives a lifecycle or trust parameter.
+- Ledger schema v5 sidecars for immutable origin provenance and review audits,
+  including exact-table/index validation, behavioral SQLite immutability
+  guards, controlled hard-erase cascade, dry-run migration, and a read-only
+  v4→v5 backfill of live payload rows as `legacy_unknown`.
+- Targeted recall validation for concrete v5 origins: an active record must
+  carry a fully bound `allow` audit whose event record, revision, reason,
+  origin, and command fingerprint match before it enters the bounded recall
+  lane.
+
+### Changed
+- `MemoryRecord` and explicit Ledger exports now include additive origin and
+  admission-audit metadata. Raw `MemoryWriter` candidate APIs remain a
+  trusted-host compatibility/cleanup escape hatch with `unknown` origin.
+- Raw `MemoryWriter.confirm()` rejects candidates created through a concrete
+  v5 ingress. They must be confirmed through the matching sealed review gate.
+- Admission action timestamps preserve a writer's deterministic test clock,
+  while an allow decision also rechecks the Ledger's UTC time inside the final
+  SQLite write boundary before activating an expired record.
+
+### Security
+- The admission API documents an RPC-only model boundary: only `{content}`
+  crosses from model to a trusted host adapter. Gate, writer, review, ingress,
+  and Ledger objects are never a Python sandbox or an arbitrary-plugin API.
+- Origin and audit sidecars reject direct updates and deletes. Hard erase is
+  their sole controlled cascade path and restores the exact guards before its
+  transaction commits. Invalid, orphaned, mismatched, or event-forged audit
+  rows fail closed during setup/dry-run and before recall.
+- Pre-v5 active memories remain recallable as `legacy_unknown` for compatibility
+  and have no invented audit. Strict deployments must quarantine and re-admit
+  them through a concrete origin before enabling recall.
+
 ## [0.9.0] - 2026-08-30
 
 ### Added

@@ -47,6 +47,8 @@ jobs:
         run: |
           package_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
           app_version="$(python -c 'import tomllib; print(tomllib.load(open("apps/ollama-chat/pyproject.toml", "rb"))["project"]["version"])')"
+          runtime_version="$(python -c 'from protoprompt import __version__; print(__version__)')"
+          app_runtime_version="$(python -c 'from protoprompt_ollama_chat import __version__; print(__version__)')"
           expected_tag="v${package_version}"
           if [[ "${RELEASE_TAG}" != "${expected_tag}" ]]; then
             echo "tag ${RELEASE_TAG} does not match package version ${expected_tag}" >&2
@@ -54,6 +56,14 @@ jobs:
           fi
           if [[ "${app_version}" != "${package_version}" ]]; then
             echo "ollama reference app version ${app_version} does not match ${package_version}" >&2
+            exit 1
+          fi
+          if [[ "${runtime_version}" != "${package_version}" ]]; then
+            echo "protoprompt runtime version ${runtime_version} does not match ${package_version}" >&2
+            exit 1
+          fi
+          if [[ "${app_runtime_version}" != "${package_version}" ]]; then
+            echo "ollama reference app runtime version ${app_runtime_version} does not match ${package_version}" >&2
             exit 1
           fi
 

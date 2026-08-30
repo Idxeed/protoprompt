@@ -46,14 +46,15 @@ The budgeted path also exposes a `ContextPlan` and request receipt, so a UI can
 show exactly which blocks made the final prompt, why, and at what token cost.
 
 The experimental `MemoryWriter` / SQLite Memory Ledger adds a separate,
-host-confirmed lifecycle for durable facts, decisions, preferences, and agent
-episodes. It is intentionally opt-in while adapters to legacy vector/profile
-memory are built; see the [Memory Ledger guide](docs/en/memory-ledger.md).
+host-admitted lifecycle with immutable ingress provenance and review evidence
+for durable facts, decisions, preferences, and agent episodes. It is
+intentionally opt-in while adapters to legacy vector/profile memory are built;
+see the [Memory Ledger guide](docs/en/memory-ledger.md).
 
 Its experimental `LedgerRecallPlanner` is the first safe read lane for an
-agent's current task: it selects only active, host-confirmed records into a
-fresh, bounded JSON data envelope, provides a content-free receipt, and fails
-closed if selected memory changes before send. It does not silently modify a
+agent's current task: concrete v5-origin records require matching admission
+evidence before entering a fresh, bounded JSON data envelope. It provides a
+content-free receipt and fails closed if selected memory changes before send. It does not silently modify a
 system prompt or replace final request accounting; see [Bounded ledger
 recall](docs/en/ledger-recall.md).
 
@@ -182,7 +183,7 @@ asyncio.run(main())
 | `protoprompt.store`      | `StoreProtocol`, `AsyncStoreProtocol`, `InMemStore`, `SqliteStore`, `as_async` |
 | `protoprompt.session`    | `Session`, `CompressedBlock`, `HeuristicStrategy`, `LLMSummaryStrategy` |
 | `protoprompt.profile`    | `UserProfile`, `ProfileBuilder`                                   |
-| `protoprompt.ledger` *(experimental)* | `MemoryWriter`, `SqliteMemoryLedger`, typed lifecycle records and receipts |
+| `protoprompt.ledger` *(experimental)* | `MemoryReviewGate`, `MemoryWriter`, `SqliteMemoryLedger`, typed lifecycle and admission receipts |
 | `protoprompt.tokens`     | `TokenCounter`, `RegexTokenCounter`, `TiktokenCounter`            |
 | `protoprompt.llm`        | `LLMClientProtocol`                                               |
 | `protoprompt.cache`      | `CachedLLMClient`, `InMemoryEmbeddingCache`                       |

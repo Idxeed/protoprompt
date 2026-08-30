@@ -9,18 +9,24 @@ its own policy/review step.
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Callable, Iterable
+from typing import TYPE_CHECKING, Callable, Iterable
 
 from protoprompt.ledger.sqlite import SqliteMemoryLedger
 from protoprompt.ledger.types import (
     ErasureReceipt,
+    MemoryAdmissionAudit,
+    MemoryOrigin,
     MemoryKind,
     MemoryRecord,
+    coerce_datetime,
     scope_dict,
     utc_now,
     validate_identifier,
 )
 from protoprompt.scope import MemoryScope
+
+if TYPE_CHECKING:
+    from protoprompt.ledger.admission import MemoryReview
 
 
 def _references(values: Iterable[str], *, field: str) -> tuple[str, ...]:
@@ -85,6 +91,40 @@ class MemoryWriter:
             occurred_at=self._clock(),
         )
 
+    def _propose_with_origin(
+        self,
+        *,
+        origin: MemoryOrigin,
+        kind: MemoryKind | str,
+        content: str,
+        source_ref: str,
+        evidence_refs: Iterable[str] = (),
+        confidence: float = 0.5,
+        record_id: str | None = None,
+        retention_policy: str = "default",
+        valid_from: datetime | str | None = None,
+        valid_until: datetime | str | None = None,
+        event_id: str | None = None,
+    ) -> MemoryRecord:
+        """Internal origin-pinned ingress used by ``MemoryReviewGate`` only."""
+
+        return self._ledger._observe_with_origin(
+            self._scope,
+            origin=origin,
+            kind=kind,
+            content=content,
+            source_ref=source_ref,
+            evidence_refs=_references(evidence_refs, field="evidence_refs"),
+            confidence=confidence,
+            record_id=record_id,
+            retention_policy=retention_policy,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            actor=self._actor,
+            event_id=event_id,
+            occurred_at=self._clock(),
+        )
+
     def assert_candidate(
         self,
         *,
@@ -102,6 +142,40 @@ class MemoryWriter:
         """Create a host assertion that still requires explicit confirmation."""
         return self._ledger.assert_candidate(
             self._scope,
+            kind=kind,
+            content=content,
+            source_ref=source_ref,
+            evidence_refs=_references(evidence_refs, field="evidence_refs"),
+            confidence=confidence,
+            record_id=record_id,
+            retention_policy=retention_policy,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            actor=self._actor,
+            event_id=event_id,
+            occurred_at=self._clock(),
+        )
+
+    def _assert_candidate_with_origin(
+        self,
+        *,
+        origin: MemoryOrigin,
+        kind: MemoryKind | str,
+        content: str,
+        source_ref: str,
+        evidence_refs: Iterable[str] = (),
+        confidence: float = 0.5,
+        record_id: str | None = None,
+        retention_policy: str = "default",
+        valid_from: datetime | str | None = None,
+        valid_until: datetime | str | None = None,
+        event_id: str | None = None,
+    ) -> MemoryRecord:
+        """Internal origin-pinned assertion used by ``MemoryReviewGate`` only."""
+
+        return self._ledger._assert_candidate_with_origin(
+            self._scope,
+            origin=origin,
             kind=kind,
             content=content,
             source_ref=source_ref,
@@ -305,9 +379,57 @@ class MemoryWriter:
             selections=selections,
         )
 
+    def _apply_admission_review(
+        self,
+        *,
+        review: "MemoryReview",
+        event_id: str,
+        occurred_at: datetime,
+    ) -> MemoryRecord | ErasureReceipt:
+        """Apply one gate-validated review inside the Ledger's write boundary.
+
+        ``occurred_at`` is sampled by the owning gate before it asks SQLite for
+        its write lock.  This preserves a host's injected clock without ever
+        invoking host code while ``BEGIN IMMEDIATE`` is held.
+        """
+
+        return self._ledger._apply_admission_review(
+            self._scope,
+            record_id=review._record_id,
+            expected_revision=review._candidate_revision,
+            expected_content_hash=review._content_hash,
+            origin=review._origin,
+            policy_id=review.policy_id,
+            policy_version=review.policy_version,
+            policy_fingerprint=review.policy_fingerprint,
+            action=review.action,
+            reason_code=review.reason_code,
+            actor=review._reviewer_actor,
+            event_id=event_id,
+            occurred_at=occurred_at,
+        )
+
+    def _sample_admission_timestamp(self) -> datetime:
+        """Read the host clock before an admission transaction begins.
+
+        This private helper intentionally keeps arbitrary host callbacks out
+        of the Ledger's write transaction.  It also makes admission actions
+        use the same deterministic clock as the writer's ordinary lifecycle
+        operations.
+        """
+
+        timestamp = coerce_datetime(self._clock(), field="clock")
+        assert timestamp is not None
+        return timestamp
+
     def events(self, record_id: str):
         """Return content-free lifecycle receipts for one record."""
         return self._ledger.events(self._scope, record_id)
+
+    def admission_audits(self, record_id: str) -> list[MemoryAdmissionAudit]:
+        """Return content-free admission receipts for one record."""
+
+        return self._ledger.admission_audits(self._scope, record_id)
 
     def export(self, *, include_content: bool = False) -> dict:
         """Create a deliberate local export; plaintext remains opt-in."""

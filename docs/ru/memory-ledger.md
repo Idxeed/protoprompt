@@ -1,7 +1,8 @@
 # Экспериментальный memory ledger
 
-Основа v0.8 превращает долговременную память из безличного vector chunk в
-запись со scope и явным жизненным циклом. Это намеренно **opt-in** и пока
+v0.10 превращает долговременную память из безличного vector chunk в запись с
+прикреплённым scope, явным жизненным циклом, неизменяемым происхождением входа
+и host-owned admission-решением. Это намеренно **opt-in** и пока
 экспериментально: новый ledger не меняет `MemoryService`, профиль, сжатие
 сессий, vector recall и `ContextPlan`, пока хост не подключит отдельный
 адаптер.
@@ -17,7 +18,15 @@ LLM extraction не может стать доверенным фактом с s
 Инициализация схемы — действие оператора, а не побочный эффект импорта:
 
 ```python
-from protoprompt.ledger import MemoryWriter, SqliteMemoryLedger
+from protoprompt.ledger import (
+    MemoryAdmissionAction,
+    MemoryAdmissionPolicy,
+    MemoryKind,
+    MemoryOrigin,
+    MemoryReviewGate,
+    MemoryWriter,
+    SqliteMemoryLedger,
+)
 from protoprompt.scope import MemoryScope
 
 ledger = SqliteMemoryLedger("memory-ledger.db")
@@ -29,19 +38,27 @@ writer = MemoryWriter(
     scope=MemoryScope(tenant="local", user="alice", thread="chat-42"),
 )
 
-candidate = writer.propose(
-    kind="preference",
-    content="Пользователь предпочитает ответы на русском.",
+# Хост фиксирует authority-bearing поля до поступления недоверенного текста.
+# Пустой MemoryAdmissionPolicy по умолчанию quarantine-ит любой origin.
+policy = MemoryAdmissionPolicy(
+    policy_id="local-document-v1",
+    policy_version="1",
+    allowed_origins=(MemoryOrigin.DOCUMENT,),
+    minimum_confidence=0.8,
+)
+gate = MemoryReviewGate(writer, origin=MemoryOrigin.DOCUMENT, policy=policy)
+document_ingress = gate.ingress(
+    kind=MemoryKind.PREFERENCE,
     source_ref="turn:42",          # opaque ID от хоста, не исходный текст
     evidence_refs=("turn:42:line:1",),
+    confidence=0.9,
 )
+candidate = document_ingress.submit("Пользователь предпочитает ответы на русском.")
 
-# Это решение принимает trusted host policy/reviewer. Не передавайте writer и
-# raw ledger недоверенному plugin- или model-tool-коду.
-active = writer.confirm(
-    candidate.record_id,
-    expected_revision=candidate.revision,
-)
+# review() ничего не пишет; sealed result применяет только trusted host code.
+review = gate.review(candidate.record_id)
+assert review.action is MemoryAdmissionAction.ALLOW
+active = gate.confirm(review, event_id="admission:turn-42:allow")
 
 assert writer.list_active() == [active]
 ```
@@ -53,16 +70,47 @@ trust level. У низкоуровневого `SqliteMemoryLedger` этот ж�
 а не Python sandbox и не authorization boundary: не выдавайте ни writer, ни
 ledger недоверенному коду.
 
+## Admission boundary (v0.10)
+
+`MemoryReviewGate` имеет один фиксированный scope, origin, policy и actor.
+Его `ingress()` создаёт узкую host-configured точку входа: переменным входом
+остаётся только `submit(content)`. Вызывающий не выбирает scope, origin, kind,
+confidence, source/evidence ID, lifecycle state, record ID или event ID.
+Закрытые origin: `user_input`, `document`, `tool_output`,
+`model_extraction` и `host_assertion`; `unknown` и `legacy_unknown` нельзя
+review-ить через gate.
+
+`review()` ничего не пишет. Он создаёт sealed in-process `MemoryReview`,
+который применяет только создавший его gate. Действия отображаются строго в
+один lifecycle-результат: `allow` → `active`, `quarantine` → `quarantined`,
+`reject` → `forget()` с удалением payload. Каждое применённое решение gate
+создаёт content-free `MemoryAdmissionAudit`, парный lifecycle event. Record с
+concrete v5 origin нельзя сделать recallable через `MemoryWriter.confirm`:
+raw confirmation разрешён только для `unknown` или `legacy_unknown`.
+
+Это API-boundary внутри доверенного процесса хоста, а не Python sandbox.
+Модель должна получать JSON/RPC tool schema ровно с `{ "content": "..." }`;
+scope, origin, source, policy и action выводит host adapter за пределами
+модели. Не передавайте `MemoryReviewGate`, `MemoryWriter`,
+`SqliteMemoryLedger`, `MemoryReview` или ingress object произвольному
+in-process plugin-коду. Если plugin исполняется в том же процессе, сначала
+изолируйте адаптер отдельным process/RPC boundary.
+
+Legacy raw writer остаётся trusted-host escape hatch для совместимости и
+cleanup. `writer.propose()` / `writer.assert_candidate()` дают происхождение
+`unknown`, а raw lifecycle cleanup **не** создаёт admission audit. Это не
+model tool и не strict-admission path.
+
 ## Жизненный цикл и recall
 
 | Состояние | Как появляется | Default recall |
 |---|---|---|
-| `candidate` | `propose()` / `assert_candidate()` | никогда |
-| `active` | явный `confirm()` | только при валидности и наличии payload |
+| `candidate` | ingress gate или legacy trusted raw writer | никогда |
+| `active` | sealed `allow` gate или legacy raw confirmation | только при валидности и наличии payload |
 | `superseded` | явный `supersede(old, replacement)` | никогда |
 | `retracted` | `retract()` или `forget()` | никогда |
 | `expired` | `expire()` / `expire_due()` | никогда |
-| `quarantined` | `quarantine()` | никогда |
+| `quarantined` | sealed `quarantine()` gate или trusted cleanup | никогда |
 
 Каждый переход принимает `expected_revision`: устаревшая команда не сможет
 молча затереть новое решение. `forget()` записывает событие `forgotten` и
@@ -76,10 +124,19 @@ addressable; повтор завершённого `forget()` вернёт со�
 намеренно отклоняются, а не воскрешают данные. Повтор одного ID с другим
 вводом всегда вызывает conflict.
 
+Для concrete v5 origin `list_active()` перед выдачей записи в recall проверяет
+парный immutable `allow` audit, payload event-а, origin, revision и reason.
+Отсутствующий или некорректный audit fail-closed. SQLite всё ещё не
+tamper-evident: тот, кто может напрямую менять БД, отключить triggers и
+подделать внутренне согласованный event, способен обойти in-database audit.
+Защитите файл БД; если такая угроза в scope, нужен внешний signing/key-management
+boundary.
+
 Замена факта всегда явная и детерминированная:
 
 ```python
-new = writer.confirm(new_candidate.record_id, expected_revision=1)
+# ``new_active`` уже прошёл admission через свой MemoryReviewGate.
+new = new_active
 old = writer.supersede(
     old_active.record_id,
     replacement_record_id=new.record_id,
@@ -103,12 +160,13 @@ creation fingerprints из ранних experimental schema.
 - `forget()` переводит record в `retracted`, удаляет локальный plaintext,
   source/evidence payload, source lookup и relation, а также redacts его
   stored content fingerprint. Остаются content-free событие `forgotten` и
-  lifecycle receipt.
+  lifecycle receipt. Content-free v5 origin metadata и admission audit
+  намеренно остаются, чтобы reject-решение можно было аудировать.
 - `forget_by_source("pdf:opaque-id")` атомарен для всех найденных records в
   точном scope writer’а. Он также сохраняет scoped opaque source tombstone:
   тот же source нельзя ingest’ить снова в этом scope, но он независим в другом.
 - `erase()` — явный необратимый локальный escape hatch: удаляет record,
-  payload, relation и его event receipts. Он также redacts ссылки на этот
+  payload, relation, v5 provenance/audits и его event receipts. Он также redacts ссылки на этот
   record из событий других records. Остаются scoped opaque replay tombstones
   и hard-erase receipt, чтобы in-flight retry не воскресил тот же record ID;
   для новой памяти используйте новый record ID.
@@ -144,11 +202,34 @@ ledger-owned table/index definitions и отклоняют внешние indexe
 незаметного запуска.
 
 1. Запустите `dry_run_setup()` и сделайте backup через `ledger.backup(path)`.
-2. Вызовите `setup()` из явной migration job.
-3. Оставьте legacy readers authoritative, пока проверяете отдельный opt-in
+2. Вызовите `setup()` из явной migration job. v5 помечает только
+   payload-bearing records до v5 как `legacy_unknown`; он не придумывает
+   современный origin или review audit. Active records до v5 остаются
+   recallable ради совместимости.
+3. В strict deployment сначала inventory этих legacy active records,
+   quarantine через trusted lifecycle code и re-ingest/review через concrete
+   v5 origin; нельзя заявлять, что migrated legacy record прошёл v0.10
+   admission.
+4. Оставьте legacy readers authoritative, пока проверяете отдельный opt-in
    adapter/importer.
-4. Для rollback остановите записи в ledger и верните traffic к старым
-   компонентам; не делайте destructive downgrade общей БД.
+5. Для rollback верните traffic к старым компонентам только через restore
+   backup до upgrade в отдельную БД. Код v0.9 отклоняет schema v5, поэтому не
+   делайте in-place или destructive downgrade общей БД.
+
+## Recovery после restart
+
+`MemoryReview` намеренно process-local: после restart новый gate не может
+повторить ранее sealed review. До применения action сохраните `record_id`,
+который вернул `submit()`, и host-minted action `event_id`. При recovery
+используйте `writer.events(record_id)` и `writer.admission_audits(record_id)`:
+
+- парный **admission** audit/event означает final decision; не делайте review
+  заново;
+- lifecycle event concrete-origin admission без парного audit — сигнал
+  corruption/нарушенной атомарности: остановитесь;
+- если нет admission event или audit и concrete-origin record всё ещё
+  candidate, нужен новый sealed review. Hard-erased record и его прежние event
+  ID terminal и не должны создаваться заново.
 
 Importer для profile/session/vector и stable request composition — будущая
 работа. Ledger и его experimental recall lane специально сохраняют всё

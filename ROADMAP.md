@@ -1,7 +1,7 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: опубликован `0.9.0`; первый безопасный recall-slice готов и ведёт к
-> `1.0.0`.
+> Статус: `0.10.0` добавляет проверяемую admission-boundary для Memory Ledger;
+> следующий этап — стабилизация и RC к `1.0.0`.
 > Обновлён: 2026-08-30.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
@@ -253,6 +253,38 @@ index, summaries и framework-specific state — его projections/caches, а �
   `0` cross-scope leaks и `0` untrusted records с system-priority.
 - Planning overhead p95 не выше 50 ms на 10k local records без remote I/O и
   embedding call на зафиксированной reference configuration.
+
+## 0.10.0 — Admission provenance boundary
+
+**Цель:** сделать происхождение memory candidate проверяемым до того, как
+concrete-origin запись станет active и попадёт в bounded recall.
+
+### Выполнено
+
+- [x] Добавлены закрытые `MemoryOrigin`, консервативная versioned
+  `MemoryAdmissionPolicy`, scope/origin/policy-pinned `MemoryReviewGate` и
+  narrow ingress: модельный transport передаёт только `content`, а host
+  владеет scope, source, confidence, event ID и решением.
+- [x] `review()` не пишет в storage; sealed in-process review применяет только
+  исходный gate как `allow → active`, `quarantine → quarantined` или
+  `reject → forget`. Stale/revoked/expired/forged/cross-gate reviews fail
+  closed.
+- [x] Schema v5 добавляет immutable origin/audit sidecars. Concrete active
+  memory попадает в recall только после точной проверки парного `allow` audit
+  и lifecycle event; SQLite guards защищают update, delete и
+  `INSERT OR REPLACE`, а hard erase — единственный controlled cascade.
+- [x] v4→v5 migration add-only: live payload получает лишь `legacy_unknown`,
+  events не переписываются, audit не выдумывается. Compatibility recall для
+  legacy active сохраняется; strict deployment должен quarantine/re-admit.
+- [x] Зафиксированы regression cases для forged audit, write-lock expiry,
+  restart recovery, cross-scope/gate reviews, hard erase и RPC transport shape.
+
+### Неподвижная граница
+
+Это не Python sandbox: arbitrary in-process plugin и прямой SQLite writer вне
+модели угроз admission API. До `1.0` production adapter, который принимает
+модельный input, должен оставаться JSON/RPC boundary; для более сильной
+tamper-evidence понадобится внешний ключ/signing или process isolation.
 
 ## 1.0.0 release candidates — Stabilize, don't expand
 

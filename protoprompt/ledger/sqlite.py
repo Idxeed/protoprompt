@@ -22,9 +22,12 @@ from protoprompt.ledger.types import (
     LedgerConflictError,
     LedgerNotReadyError,
     LedgerStateError,
+    MemoryAdmissionAction,
+    MemoryAdmissionAudit,
     MemoryEvent,
     MemoryEventType,
     MemoryKind,
+    MemoryOrigin,
     MemoryRecord,
     MemoryRelation,
     MemoryRelationType,
@@ -56,11 +59,88 @@ _ERASED_RELATION_EVENT_PAYLOAD_HASH = command_hash({
 })
 _EVENT_UPDATE_TRIGGER_NAME = "protoprompt_memory_ledger_events_reject_update_v1"
 _LEGACY_EVENT_UPDATE_TRIGGER_NAME = "memory_events_reject_update"
+_EVENT_GUARD_SCHEMA_VERSION = 4
+_ADMISSION_GUARD_SCHEMA_VERSION = 5
+_ADMISSION_METADATA_UPDATE_TRIGGER_NAME = (
+    "protoprompt_memory_ledger_admission_metadata_reject_update_v1"
+)
+_ADMISSION_METADATA_DELETE_TRIGGER_NAME = (
+    "protoprompt_memory_ledger_admission_metadata_reject_delete_v1"
+)
+_ADMISSION_METADATA_INSERT_TRIGGER_NAME = (
+    "protoprompt_memory_ledger_admission_metadata_reject_replace_v1"
+)
+_REVIEW_AUDIT_UPDATE_TRIGGER_NAME = (
+    "protoprompt_memory_ledger_review_audits_reject_update_v1"
+)
+_REVIEW_AUDIT_DELETE_TRIGGER_NAME = (
+    "protoprompt_memory_ledger_review_audits_reject_delete_v1"
+)
+_REVIEW_AUDIT_INSERT_TRIGGER_NAME = (
+    "protoprompt_memory_ledger_review_audits_reject_replace_v1"
+)
+_ADMISSION_ACTION_EVENTS = {
+    MemoryAdmissionAction.ALLOW: MemoryEventType.CONFIRMED,
+    MemoryAdmissionAction.QUARANTINE: MemoryEventType.QUARANTINED,
+    MemoryAdmissionAction.REJECT: MemoryEventType.FORGOTTEN,
+}
 _EVENT_UPDATE_TRIGGER_SQL = f"""
 CREATE TRIGGER IF NOT EXISTS {_EVENT_UPDATE_TRIGGER_NAME}
 BEFORE UPDATE ON memory_events
 BEGIN
     SELECT RAISE(ABORT, 'memory_events are append-only');
+END
+"""
+_ADMISSION_METADATA_UPDATE_TRIGGER_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS {_ADMISSION_METADATA_UPDATE_TRIGGER_NAME}
+BEFORE UPDATE ON memory_record_admission_metadata
+BEGIN
+    SELECT RAISE(ABORT, 'memory admission metadata are immutable');
+END
+"""
+_ADMISSION_METADATA_DELETE_TRIGGER_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS {_ADMISSION_METADATA_DELETE_TRIGGER_NAME}
+BEFORE DELETE ON memory_record_admission_metadata
+BEGIN
+    SELECT RAISE(ABORT, 'memory admission metadata are append-only');
+END
+"""
+_ADMISSION_METADATA_INSERT_TRIGGER_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS {_ADMISSION_METADATA_INSERT_TRIGGER_NAME}
+BEFORE INSERT ON memory_record_admission_metadata
+WHEN EXISTS (
+    SELECT 1 FROM memory_record_admission_metadata
+    WHERE scope_id = NEW.scope_id AND scope_json = NEW.scope_json
+    AND record_id = NEW.record_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'memory admission metadata are append-only');
+END
+"""
+_REVIEW_AUDIT_UPDATE_TRIGGER_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS {_REVIEW_AUDIT_UPDATE_TRIGGER_NAME}
+BEFORE UPDATE ON memory_review_audits
+BEGIN
+    SELECT RAISE(ABORT, 'memory review audits are immutable');
+END
+"""
+_REVIEW_AUDIT_DELETE_TRIGGER_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS {_REVIEW_AUDIT_DELETE_TRIGGER_NAME}
+BEFORE DELETE ON memory_review_audits
+BEGIN
+    SELECT RAISE(ABORT, 'memory review audits are append-only');
+END
+"""
+_REVIEW_AUDIT_INSERT_TRIGGER_SQL = f"""
+CREATE TRIGGER IF NOT EXISTS {_REVIEW_AUDIT_INSERT_TRIGGER_NAME}
+BEFORE INSERT ON memory_review_audits
+WHEN EXISTS (
+    SELECT 1 FROM memory_review_audits
+    WHERE scope_id = NEW.scope_id AND scope_json = NEW.scope_json
+    AND event_id = NEW.event_id
+)
+BEGIN
+    SELECT RAISE(ABORT, 'memory review audits are append-only');
 END
 """
 
@@ -217,6 +297,41 @@ _SCHEMA_STATEMENTS = (
     CREATE INDEX IF NOT EXISTS idx_memory_relations_target
     ON memory_relations (scope_id, scope_json, to_record_id)
     """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_record_admission_metadata (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        PRIMARY KEY (scope_id, scope_json, record_id),
+        FOREIGN KEY (scope_id, scope_json, record_id)
+            REFERENCES memory_records(scope_id, scope_json, record_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_review_audits (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        candidate_revision INTEGER NOT NULL CHECK (candidate_revision > 0),
+        origin TEXT NOT NULL,
+        policy_id TEXT NOT NULL,
+        policy_version TEXT NOT NULL,
+        policy_fingerprint TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('allow', 'quarantine', 'reject')),
+        reason_code TEXT NOT NULL,
+        PRIMARY KEY (scope_id, scope_json, event_id),
+        FOREIGN KEY (scope_id, scope_json, record_id)
+            REFERENCES memory_records(scope_id, scope_json, record_id) ON DELETE CASCADE,
+        FOREIGN KEY (scope_id, scope_json, event_id)
+            REFERENCES memory_events(scope_id, scope_json, event_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_memory_review_audits_record
+    ON memory_review_audits (scope_id, scope_json, record_id, event_id)
+    """,
 )
 
 _V2_MIGRATION_STATEMENTS = (
@@ -283,6 +398,44 @@ _V4_MIGRATION_STATEMENTS = (
     """,
 )
 
+_V5_MIGRATION_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS memory_record_admission_metadata (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        origin TEXT NOT NULL,
+        PRIMARY KEY (scope_id, scope_json, record_id),
+        FOREIGN KEY (scope_id, scope_json, record_id)
+            REFERENCES memory_records(scope_id, scope_json, record_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_review_audits (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        event_id TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        candidate_revision INTEGER NOT NULL CHECK (candidate_revision > 0),
+        origin TEXT NOT NULL,
+        policy_id TEXT NOT NULL,
+        policy_version TEXT NOT NULL,
+        policy_fingerprint TEXT NOT NULL,
+        action TEXT NOT NULL CHECK (action IN ('allow', 'quarantine', 'reject')),
+        reason_code TEXT NOT NULL,
+        PRIMARY KEY (scope_id, scope_json, event_id),
+        FOREIGN KEY (scope_id, scope_json, record_id)
+            REFERENCES memory_records(scope_id, scope_json, record_id) ON DELETE CASCADE,
+        FOREIGN KEY (scope_id, scope_json, event_id)
+            REFERENCES memory_events(scope_id, scope_json, event_id) ON DELETE CASCADE
+    )
+    """,
+    """
+    CREATE INDEX IF NOT EXISTS idx_memory_review_audits_record
+    ON memory_review_audits (scope_id, scope_json, record_id, event_id)
+    """,
+)
+
 _V1_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     "ledger_schema": frozenset({"component", "version", "applied_at"}),
     "memory_events": frozenset({
@@ -332,8 +485,23 @@ _V4_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     }),
 }
 
+_V5_TABLE_COLUMNS: dict[str, frozenset[str]] = {
+    "memory_record_admission_metadata": frozenset({
+        "scope_id", "scope_json", "record_id", "origin",
+    }),
+    "memory_review_audits": frozenset({
+        "scope_id", "scope_json", "event_id", "record_id", "candidate_revision",
+        "origin", "policy_id", "policy_version", "policy_fingerprint", "action",
+        "reason_code",
+    }),
+}
+
 _ALL_LEDGER_TABLE_COLUMNS = (
-    _V1_TABLE_COLUMNS | _V2_TABLE_COLUMNS | _V3_TABLE_COLUMNS | _V4_TABLE_COLUMNS
+    _V1_TABLE_COLUMNS
+    | _V2_TABLE_COLUMNS
+    | _V3_TABLE_COLUMNS
+    | _V4_TABLE_COLUMNS
+    | _V5_TABLE_COLUMNS
 )
 
 
@@ -389,12 +557,50 @@ def _ledger_index_signatures() -> dict[str, str]:
 
 
 _LEDGER_INDEX_SIGNATURES = _ledger_index_signatures()
+_V5_INDEX_NAMES = frozenset({"idx_memory_review_audits_record"})
 _EVENT_UPDATE_TRIGGER_SIGNATURE = _normalized_table_sql(_EVENT_UPDATE_TRIGGER_SQL)
+_ADMISSION_IMMUTABILITY_TRIGGERS = {
+    _ADMISSION_METADATA_UPDATE_TRIGGER_NAME: (
+        "memory_record_admission_metadata",
+        _normalized_table_sql(_ADMISSION_METADATA_UPDATE_TRIGGER_SQL),
+    ),
+    _ADMISSION_METADATA_DELETE_TRIGGER_NAME: (
+        "memory_record_admission_metadata",
+        _normalized_table_sql(_ADMISSION_METADATA_DELETE_TRIGGER_SQL),
+    ),
+    _ADMISSION_METADATA_INSERT_TRIGGER_NAME: (
+        "memory_record_admission_metadata",
+        _normalized_table_sql(_ADMISSION_METADATA_INSERT_TRIGGER_SQL),
+    ),
+    _REVIEW_AUDIT_UPDATE_TRIGGER_NAME: (
+        "memory_review_audits",
+        _normalized_table_sql(_REVIEW_AUDIT_UPDATE_TRIGGER_SQL),
+    ),
+    _REVIEW_AUDIT_DELETE_TRIGGER_NAME: (
+        "memory_review_audits",
+        _normalized_table_sql(_REVIEW_AUDIT_DELETE_TRIGGER_SQL),
+    ),
+    _REVIEW_AUDIT_INSERT_TRIGGER_NAME: (
+        "memory_review_audits",
+        _normalized_table_sql(_REVIEW_AUDIT_INSERT_TRIGGER_SQL),
+    ),
+}
 _LEDGER_RESERVED_OBJECT_NAMES = frozenset(
     set(_ALL_LEDGER_TABLE_COLUMNS)
     | set(_LEDGER_INDEX_SIGNATURES)
     | {_EVENT_UPDATE_TRIGGER_NAME}
+    | set(_ADMISSION_IMMUTABILITY_TRIGGERS)
 )
+
+
+def _required_index_signatures(current: int) -> dict[str, str]:
+    """Return only indexes introduced by the installed schema version."""
+
+    return {
+        name: signature
+        for name, signature in _LEDGER_INDEX_SIGNATURES.items()
+        if current >= 5 or name not in _V5_INDEX_NAMES
+    }
 
 
 def _scope_storage(scope: MemoryScope) -> tuple[str, str]:
@@ -450,7 +656,7 @@ class SqliteMemoryLedger:
     migration/setup job before serving traffic.
     """
 
-    MIGRATION_VERSION = 4
+    MIGRATION_VERSION = 5
 
     def __init__(self, path: str = ":memory:") -> None:
         self._conn = sqlite3.connect(path, check_same_thread=False)
@@ -470,7 +676,10 @@ class SqliteMemoryLedger:
         with self._lock:
             self._ensure_open_locked()
             current = self._schema_version_locked()
-            self._assert_schema_compatible_locked(current)
+            self._assert_schema_compatible_locked(
+                current,
+                validate_admission_data=True,
+            )
             if current > self.MIGRATION_VERSION:
                 raise LedgerStateError(
                     f"ledger schema v{current} is newer than supported v{self.MIGRATION_VERSION}"
@@ -490,7 +699,10 @@ class SqliteMemoryLedger:
             with self._write_transaction_locked():
                 current = self._schema_version_locked()
                 self._assert_schema_compatible_locked(
-                    current, allow_event_guard_repair=True
+                    current,
+                    allow_event_guard_repair=True,
+                    allow_admission_guard_repair=True,
+                    validate_admission_data=True,
                 )
                 if current > self.MIGRATION_VERSION:
                     raise LedgerStateError(
@@ -498,14 +710,20 @@ class SqliteMemoryLedger:
                     )
                 if current == self.MIGRATION_VERSION:
                     self._ensure_event_immutability_locked()
+                    self._ensure_admission_immutability_locked()
                     return
                 statements = self._migration_statements(current)
                 for statement in statements:
                     self._conn.execute(statement)
                 if current < 4:
                     self._scrub_legacy_creation_event_fingerprints_locked()
+                if current < 5:
+                    self._backfill_legacy_admission_metadata_locked()
                 self._assert_schema_compatible_locked(
-                    self.MIGRATION_VERSION, allow_event_guard_repair=True
+                    self.MIGRATION_VERSION,
+                    allow_event_guard_repair=True,
+                    allow_admission_guard_repair=True,
+                    validate_admission_data=True,
                 )
                 self._conn.execute(
                     "INSERT INTO ledger_schema (component, version, applied_at) "
@@ -515,6 +733,7 @@ class SqliteMemoryLedger:
                     (_COMPONENT, self.MIGRATION_VERSION, format_timestamp(utc_now())),
                 )
                 self._ensure_event_immutability_locked()
+                self._ensure_admission_immutability_locked()
 
     def observe(
         self,
@@ -537,6 +756,7 @@ class SqliteMemoryLedger:
         return self._create_candidate(
             scope,
             event_type=MemoryEventType.OBSERVED,
+            origin=MemoryOrigin.UNKNOWN,
             kind=kind,
             content=content,
             source_ref=source_ref,
@@ -572,6 +792,88 @@ class SqliteMemoryLedger:
         return self._create_candidate(
             scope,
             event_type=MemoryEventType.ASSERTED,
+            origin=MemoryOrigin.UNKNOWN,
+            kind=kind,
+            content=content,
+            source_ref=source_ref,
+            evidence_refs=evidence_refs,
+            confidence=confidence,
+            record_id=record_id,
+            retention_policy=retention_policy,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            actor=actor,
+            event_id=event_id,
+            occurred_at=occurred_at,
+        )
+
+    def _observe_with_origin(
+        self,
+        scope: MemoryScope,
+        *,
+        origin: MemoryOrigin,
+        kind: MemoryKind | str,
+        content: str,
+        source_ref: str,
+        evidence_refs: tuple[str, ...] | list[str] = (),
+        confidence: float = 0.5,
+        record_id: str | None = None,
+        retention_policy: str = "default",
+        valid_from: datetime | str | None = None,
+        valid_until: datetime | str | None = None,
+        actor: str = "host",
+        event_id: str | None = None,
+        occurred_at: datetime | str | None = None,
+    ) -> MemoryRecord:
+        """Create a candidate with a trusted, immutable ingress category.
+
+        This is intentionally an internal bridge for ``MemoryReviewGate``.
+        Model-facing integrations should receive the gate, not the Ledger or
+        this raw mutator.
+        """
+
+        return self._create_candidate(
+            scope,
+            event_type=MemoryEventType.OBSERVED,
+            origin=MemoryOrigin(origin),
+            kind=kind,
+            content=content,
+            source_ref=source_ref,
+            evidence_refs=evidence_refs,
+            confidence=confidence,
+            record_id=record_id,
+            retention_policy=retention_policy,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            actor=actor,
+            event_id=event_id,
+            occurred_at=occurred_at,
+        )
+
+    def _assert_candidate_with_origin(
+        self,
+        scope: MemoryScope,
+        *,
+        origin: MemoryOrigin,
+        kind: MemoryKind | str,
+        content: str,
+        source_ref: str,
+        evidence_refs: tuple[str, ...] | list[str] = (),
+        confidence: float = 0.5,
+        record_id: str | None = None,
+        retention_policy: str = "default",
+        valid_from: datetime | str | None = None,
+        valid_until: datetime | str | None = None,
+        actor: str = "host",
+        event_id: str | None = None,
+        occurred_at: datetime | str | None = None,
+    ) -> MemoryRecord:
+        """Internal host-admission bridge for an asserted candidate."""
+
+        return self._create_candidate(
+            scope,
+            event_type=MemoryEventType.ASSERTED,
+            origin=MemoryOrigin(origin),
             kind=kind,
             content=content,
             source_ref=source_ref,
@@ -606,6 +908,7 @@ class SqliteMemoryLedger:
             actor=actor,
             event_id=event_id,
             occurred_at=occurred_at,
+            raw_confirmation=True,
         )
 
     def quarantine(
@@ -1164,16 +1467,22 @@ class SqliteMemoryLedger:
                     "AND superseded_by = ?",
                     (scope_id, scope_json, identity),
                 ).rowcount
-                events_deleted = self._conn.execute(
-                    "DELETE FROM memory_events WHERE scope_id = ? AND scope_json = ? "
-                    "AND record_id = ?",
-                    (scope_id, scope_json, identity),
-                ).rowcount
-                self._conn.execute(
-                    "DELETE FROM memory_records WHERE scope_id = ? AND scope_json = ? "
-                    "AND record_id = ?",
-                    (scope_id, scope_json, identity),
-                )
+                # Sidecar provenance and audit rows are write-once.  Their
+                # only deletion path is the controlled, all-or-nothing hard
+                # erase below; dropping the guards happens while this same
+                # SQLite write transaction already excludes other writers and
+                # they are immediately reinstalled before commit.
+                with self._suspend_admission_immutability_locked():
+                    events_deleted = self._conn.execute(
+                        "DELETE FROM memory_events WHERE scope_id = ? AND scope_json = ? "
+                        "AND record_id = ?",
+                        (scope_id, scope_json, identity),
+                    ).rowcount
+                    self._conn.execute(
+                        "DELETE FROM memory_records WHERE scope_id = ? AND scope_json = ? "
+                        "AND record_id = ?",
+                        (scope_id, scope_json, identity),
+                    )
                 receipt = ErasureReceipt(
                     record_id=identity,
                     state=None,
@@ -1309,12 +1618,14 @@ class SqliteMemoryLedger:
                 limit,
             ),
         ).fetchall()
-        records = [
-            record
-            for row in rows
-            if (record := self._load_record_locked(scope, str(row["record_id"]))) is not None
-        ]
-        return [record for record in records if record.is_recallable(now=instant)]
+        records: list[MemoryRecord] = []
+        for row in rows:
+            record = self._load_record_locked(scope, str(row["record_id"]))
+            if record is None or not record.is_recallable(now=instant):
+                continue
+            self._assert_active_admission_verified_locked(scope, record)
+            records.append(record)
+        return records
 
     def events(self, scope: MemoryScope, record_id: str) -> list[MemoryEvent]:
         """Return content-free operational history in sequence order."""
@@ -1352,6 +1663,72 @@ class SqliteMemoryLedger:
             for local_sequence, row in enumerate(rows, start=1)
         ]
 
+    def admission_audits(
+        self,
+        scope: MemoryScope,
+        record_id: str,
+    ) -> list[MemoryAdmissionAudit]:
+        """Return content-free policy receipts for one exact-scope record."""
+
+        identity = validate_identifier(record_id, field="record_id")
+        with self._lock:
+            self._require_ready_locked()
+            rows = self._admission_audit_rows_for_record_locked(scope, identity)
+        return [self._admission_audit_from_row(scope, row) for row in rows]
+
+    def _admission_audit_rows_for_record_locked(
+        self,
+        scope: MemoryScope,
+        record_id: str,
+    ) -> list[sqlite3.Row]:
+        """Return joined audit rows; callers must parse each row fail-closed."""
+
+        scope_id, scope_json = _scope_storage(scope)
+        return self._conn.execute(
+            "SELECT a.event_id, a.record_id, a.candidate_revision, a.origin, "
+            "a.policy_id, a.policy_version, a.policy_fingerprint, a.action, "
+            "a.reason_code, e.record_id AS event_record_id, e.event_type, "
+            "e.revision AS event_revision, e.occurred_at, e.actor, "
+            "e.reason_code AS event_reason_code, e.payload_hash AS event_payload_hash, "
+            "m.origin AS record_origin FROM memory_review_audits AS a "
+            "JOIN memory_events AS e ON e.scope_id = a.scope_id "
+            "AND e.scope_json = a.scope_json AND e.event_id = a.event_id "
+            "LEFT JOIN memory_record_admission_metadata AS m ON "
+            "m.scope_id = a.scope_id AND m.scope_json = a.scope_json "
+            "AND m.record_id = a.record_id WHERE a.scope_id = ? "
+            "AND a.scope_json = ? AND a.record_id = ? ORDER BY e.sequence",
+            (scope_id, scope_json, record_id),
+        ).fetchall()
+
+    def _assert_active_admission_verified_locked(
+        self,
+        scope: MemoryScope,
+        record: MemoryRecord,
+    ) -> None:
+        """Require a fully bound allow receipt before recalling v5 provenance.
+
+        This targeted check runs for records about to cross into the active
+        recall lane.  It is stronger than an ``EXISTS`` query: every candidate
+        audit is parsed against its event payload, record, revision, reason,
+        and immutable origin, so a valid-looking audit attached to another
+        lifecycle event cannot make a corrupt record recallable.
+        """
+
+        if record.origin in {MemoryOrigin.UNKNOWN, MemoryOrigin.LEGACY_UNKNOWN}:
+            return
+        audits = [
+            self._admission_audit_from_row(scope, row)
+            for row in self._admission_audit_rows_for_record_locked(scope, record.record_id)
+        ]
+        if not any(
+            audit.action is MemoryAdmissionAction.ALLOW
+            and audit.origin is record.origin
+            for audit in audits
+        ):
+            raise LedgerStateError(
+                "concrete-origin active memory record is missing a valid allow admission audit"
+            )
+
     def export(
         self,
         scope: MemoryScope,
@@ -1375,14 +1752,17 @@ class SqliteMemoryLedger:
                     is not None
                 ]
                 events: list[MemoryEvent] = []
+                audits: list[MemoryAdmissionAudit] = []
                 for record in records:
                     events.extend(self.events(scope, record.record_id))
+                    audits.extend(self.admission_audits(scope, record.record_id))
         return {
             "schema_version": LEDGER_SCHEMA_VERSION,
             "ledger_schema_version": self.MIGRATION_VERSION,
             "scope": scope_dict(scope),
             "records": [record.to_dict(include_content=include_content) for record in records],
             "events": [event.to_dict() for event in events],
+            "admission_audits": [audit.to_dict() for audit in audits],
         }
 
     def count(self, scope: MemoryScope) -> int:
@@ -1432,6 +1812,7 @@ class SqliteMemoryLedger:
         scope: MemoryScope,
         *,
         event_type: MemoryEventType,
+        origin: MemoryOrigin,
         kind: MemoryKind | str,
         content: str,
         source_ref: str,
@@ -1451,6 +1832,7 @@ class SqliteMemoryLedger:
             validate_identifier(record_id, field="record_id") if record_id else None
         )
         semantic_kind = MemoryKind(kind)
+        origin = MemoryOrigin(origin)
         plaintext = validate_content(content)
         source = validate_reference(source_ref, field="source_ref")
         evidence = validate_references(evidence_refs, field="evidence_refs")
@@ -1474,6 +1856,7 @@ class SqliteMemoryLedger:
             valid_from=starts_at,
             valid_until=ends_at,
             actor=actor,
+            origin=origin,
         )
 
         with self._lock:
@@ -1516,6 +1899,7 @@ class SqliteMemoryLedger:
                         retention_policy=retention,
                         valid_from=starts_at,
                         valid_until=ends_at,
+                        origin=origin,
                     ):
                         raise LedgerConflictError(
                             "event_id was already used for a different command"
@@ -1583,6 +1967,11 @@ class SqliteMemoryLedger:
                     ),
                 )
                 self._conn.execute(
+                    "INSERT INTO memory_record_admission_metadata "
+                    "(scope_id, scope_json, record_id, origin) VALUES (?, ?, ?, ?)",
+                    (scope_id, scope_json, identity, origin.value),
+                )
+                self._conn.execute(
                     "INSERT INTO memory_sources (scope_id, scope_json, source_ref, record_id) "
                     "VALUES (?, ?, ?, ?)",
                     (scope_id, scope_json, source, identity),
@@ -1602,6 +1991,7 @@ class SqliteMemoryLedger:
         valid_from: datetime | None,
         valid_until: datetime | None,
         actor: str,
+        origin: MemoryOrigin,
     ) -> str:
         """Fingerprint non-sensitive candidate command metadata only.
 
@@ -1610,7 +2000,7 @@ class SqliteMemoryLedger:
         Exact candidate-retry equality is checked against the live payload
         while it exists instead of persisting those fields in this fingerprint.
         """
-        return command_hash({
+        payload: dict[str, object] = {
             "event_type": event_type.value,
             "record_id": requested_record_id,
             "kind": kind.value,
@@ -1620,7 +2010,11 @@ class SqliteMemoryLedger:
             "valid_until": format_timestamp(valid_until) if valid_until else None,
             "actor": actor,
             "format": "memory-ledger-v4-metadata-only-candidate-command",
-        })
+        }
+        if origin is not MemoryOrigin.UNKNOWN:
+            payload["origin"] = origin.value
+            payload["format"] = "memory-ledger-v5-admission-origin-candidate-command"
+        return command_hash(payload)
 
     @staticmethod
     def _candidate_matches_record(
@@ -1634,6 +2028,7 @@ class SqliteMemoryLedger:
         retention_policy: str,
         valid_from: datetime | None,
         valid_until: datetime | None,
+        origin: MemoryOrigin,
     ) -> bool:
         """Compare a candidate retry while its private payload is still live."""
         return (
@@ -1645,7 +2040,392 @@ class SqliteMemoryLedger:
             and record.retention_policy == retention_policy
             and record.valid_from == valid_from
             and record.valid_until == valid_until
+            and (
+                record.origin is origin
+                or (
+                    origin is MemoryOrigin.UNKNOWN
+                    and record.origin is MemoryOrigin.LEGACY_UNKNOWN
+                )
+            )
         )
+
+    @staticmethod
+    def _admission_command_hash(
+        *,
+        record_id: str,
+        expected_revision: int,
+        origin: MemoryOrigin,
+        policy_id: str,
+        policy_version: str,
+        policy_fingerprint: str,
+        action: MemoryAdmissionAction,
+        reason_code: str,
+        actor: str,
+    ) -> str:
+        """Fingerprint one gated decision without preserving private payloads."""
+
+        return command_hash({
+            "format": "memory-ledger-v5-admission-review",
+            "event_type": _ADMISSION_ACTION_EVENTS[action].value,
+            "record_id": record_id,
+            "expected_revision": expected_revision,
+            "origin": origin.value,
+            "policy_id": policy_id,
+            "policy_version": policy_version,
+            "policy_fingerprint": policy_fingerprint,
+            "action": action.value,
+            "reason_code": reason_code,
+            "actor": actor,
+        })
+
+    def _apply_admission_review(
+        self,
+        scope: MemoryScope,
+        *,
+        record_id: str,
+        expected_revision: int,
+        expected_content_hash: str,
+        origin: MemoryOrigin,
+        policy_id: str,
+        policy_version: str,
+        policy_fingerprint: str,
+        action: MemoryAdmissionAction,
+        reason_code: str,
+        actor: str,
+        event_id: str,
+        occurred_at: datetime | str,
+    ) -> MemoryRecord | ErasureReceipt:
+        """Atomically resolve one gate-authenticated admission review.
+
+        The gate owns review capability verification.  This internal Ledger
+        entry point supplies the durable half of that contract: it re-reads a
+        candidate and its sidecar origin only after owning the SQLite write
+        lock, validates expiry against its own UTC clock at that boundary,
+        then writes the lifecycle event and content-free companion audit in
+        one transaction. The host writer timestamp is captured before the
+        lock and is never called from this path; it intentionally does not
+        call a model, policy, or arbitrary host callback.
+        """
+
+        identity = validate_identifier(record_id, field="record_id")
+        expected_revision = _expected_revision(expected_revision)
+        if not isinstance(expected_content_hash, str) or len(expected_content_hash) != 64:
+            raise ValueError("expected_content_hash must be a 64-character operational marker")
+        origin = MemoryOrigin(origin)
+        policy_id = validate_identifier(policy_id, field="policy_id")
+        policy_version = validate_identifier(policy_version, field="policy_version")
+        if not isinstance(policy_fingerprint, str) or len(policy_fingerprint) != 64:
+            raise ValueError("policy_fingerprint must be a 64-character digest")
+        action = MemoryAdmissionAction(action)
+        reason_code = validate_identifier(reason_code, field="reason_code")
+        actor = _actor(actor)
+        event_identity = validate_identifier(event_id, field="event_id")
+        instant = coerce_datetime(occurred_at, field="occurred_at")
+        assert instant is not None
+        scope_id, scope_json = _scope_storage(scope)
+        payload_hash = self._admission_command_hash(
+            record_id=identity,
+            expected_revision=expected_revision,
+            origin=origin,
+            policy_id=policy_id,
+            policy_version=policy_version,
+            policy_fingerprint=policy_fingerprint,
+            action=action,
+            reason_code=reason_code,
+            actor=actor,
+        )
+
+        with self._lock:
+            with self._ready_write_transaction_locked():
+                audit = self._admission_audit_for_event_locked(
+                    scope,
+                    event_identity,
+                )
+                if audit is not None:
+                    self._assert_matching_admission_audit(
+                        audit,
+                        record_id=identity,
+                        expected_revision=expected_revision,
+                        origin=origin,
+                        policy_id=policy_id,
+                        policy_version=policy_version,
+                        policy_fingerprint=policy_fingerprint,
+                        action=action,
+                        reason_code=reason_code,
+                        actor=actor,
+                    )
+                    event = self._event_for_id_locked(scope_id, scope_json, event_identity)
+                    if event is None or str(event["payload_hash"]) != payload_hash:
+                        raise LedgerStateError(
+                            "admission audit is not paired with its expected lifecycle event"
+                        )
+                    if action is MemoryAdmissionAction.REJECT:
+                        receipt = self._erasure_receipt_locked(
+                            scope_id,
+                            scope_json,
+                            event_identity,
+                            identity,
+                            payload_hash,
+                        )
+                        if receipt is None:
+                            raise LedgerStateError(
+                                "reject admission audit is missing its erasure receipt"
+                            )
+                        return receipt
+                    record = self._load_record_locked(scope, identity)
+                    if record is None:
+                        raise LedgerStateError(
+                            "admission audit refers to an erased memory record"
+                        )
+                    return record
+
+                existing_event = self._event_for_id_locked(
+                    scope_id,
+                    scope_json,
+                    event_identity,
+                )
+                if existing_event is not None:
+                    if str(existing_event["payload_hash"]) == payload_hash:
+                        raise LedgerStateError(
+                            "admission lifecycle event is missing its companion audit"
+                        )
+                    raise LedgerConflictError("event_id was already used for a different command")
+                self._ensure_no_erasure_receipt_event_id_locked(
+                    scope_id,
+                    scope_json,
+                    event_identity,
+                )
+                record = self._load_record_locked(scope, identity)
+                if record is None:
+                    raise KeyError(identity)
+                if (
+                    record.state is not MemoryState.CANDIDATE
+                    or record.trust is not MemoryTrust.UNTRUSTED
+                    or record.revision != expected_revision
+                    or record.content is None
+                    or record.content_hash != expected_content_hash
+                    or record.origin is not origin
+                ):
+                    raise LedgerConflictError(
+                        "candidate changed before its admission review could be applied"
+                    )
+                if any(
+                    self._is_source_revoked_locked(scope_id, scope_json, source_ref)
+                    for source_ref in record.source_refs
+                ):
+                    raise LedgerStateError(
+                        "candidate source was revoked before its admission review could be applied"
+                    )
+                # The host clock was sampled by ``MemoryReviewGate`` before
+                # this transaction begins. Never invoke arbitrary host code
+                # while ``BEGIN IMMEDIATE`` is held; this immutable timestamp
+                # keeps deterministic writer clocks coherent with candidate
+                # creation and ordinary lifecycle transitions. Admission
+                # expiry additionally uses the Ledger's own UTC time after
+                # this write boundary is owned, so a queued allow cannot
+                # become active after a real-time validity deadline.
+                admission_instant = utc_now()
+                if (
+                    action is MemoryAdmissionAction.ALLOW
+                    and record.valid_until is not None
+                    and (
+                        instant >= record.valid_until
+                        or admission_instant >= record.valid_until
+                    )
+                ):
+                    raise LedgerStateError(
+                        "cannot confirm a record whose validity already ended"
+                    )
+                if action is MemoryAdmissionAction.REJECT:
+                    outcome: MemoryRecord | ErasureReceipt = self._forget_locked(
+                        scope,
+                        record_id=identity,
+                        expected_revision=expected_revision,
+                        reason_code=reason_code,
+                        actor=actor,
+                        event_id=event_identity,
+                        occurred_at=instant,
+                        payload_hash=payload_hash,
+                    )
+                else:
+                    event_type = _ADMISSION_ACTION_EVENTS[action]
+                    target_state = (
+                        MemoryState.ACTIVE
+                        if action is MemoryAdmissionAction.ALLOW
+                        else MemoryState.QUARANTINED
+                    )
+                    outcome = self._transition_locked(
+                        scope,
+                        record,
+                        event_id=event_identity,
+                        payload_hash=payload_hash,
+                        event_type=event_type,
+                        target_state=target_state,
+                        actor=actor,
+                        occurred_at=instant,
+                        related_record_id=None,
+                        reason_code=reason_code,
+                    )
+                self._insert_admission_audit_locked(
+                    scope,
+                    event_id=event_identity,
+                    record_id=identity,
+                    candidate_revision=expected_revision,
+                    origin=origin,
+                    policy_id=policy_id,
+                    policy_version=policy_version,
+                    policy_fingerprint=policy_fingerprint,
+                    action=action,
+                    reason_code=reason_code,
+                )
+                return outcome
+
+    @staticmethod
+    def _assert_matching_admission_audit(
+        audit: MemoryAdmissionAudit,
+        *,
+        record_id: str,
+        expected_revision: int,
+        origin: MemoryOrigin,
+        policy_id: str,
+        policy_version: str,
+        policy_fingerprint: str,
+        action: MemoryAdmissionAction,
+        reason_code: str,
+        actor: str,
+    ) -> None:
+        if (
+            audit.record_id != record_id
+            or audit.candidate_revision != expected_revision
+            or audit.origin is not origin
+            or audit.policy_id != policy_id
+            or audit.policy_version != policy_version
+            or audit.policy_fingerprint != policy_fingerprint
+            or audit.action is not action
+            or audit.reason_code != reason_code
+            or audit.reviewer_actor != actor
+        ):
+            raise LedgerConflictError("event_id was already used for a different admission review")
+
+    def _insert_admission_audit_locked(
+        self,
+        scope: MemoryScope,
+        *,
+        event_id: str,
+        record_id: str,
+        candidate_revision: int,
+        origin: MemoryOrigin,
+        policy_id: str,
+        policy_version: str,
+        policy_fingerprint: str,
+        action: MemoryAdmissionAction,
+        reason_code: str,
+    ) -> None:
+        """Persist a review companion after its lifecycle event was appended."""
+
+        scope_id, scope_json = _scope_storage(scope)
+        self._conn.execute(
+            "INSERT INTO memory_review_audits "
+            "(scope_id, scope_json, event_id, record_id, candidate_revision, origin, "
+            "policy_id, policy_version, policy_fingerprint, action, reason_code) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                scope_id,
+                scope_json,
+                event_id,
+                record_id,
+                candidate_revision,
+                origin.value,
+                policy_id,
+                policy_version,
+                policy_fingerprint,
+                action.value,
+                reason_code,
+            ),
+        )
+
+    def _admission_audit_for_event_locked(
+        self,
+        scope: MemoryScope,
+        event_id: str,
+    ) -> MemoryAdmissionAudit | None:
+        """Load and validate one event's immutable admission companion."""
+
+        scope_id, scope_json = _scope_storage(scope)
+        row = self._conn.execute(
+            "SELECT a.event_id, a.record_id, a.candidate_revision, a.origin, "
+            "a.policy_id, a.policy_version, a.policy_fingerprint, a.action, "
+            "a.reason_code, e.record_id AS event_record_id, e.event_type, "
+            "e.revision AS event_revision, e.occurred_at, e.actor, "
+            "e.reason_code AS event_reason_code, e.payload_hash AS event_payload_hash, "
+            "m.origin AS record_origin "
+            "FROM memory_review_audits AS a JOIN memory_events AS e ON "
+            "e.scope_id = a.scope_id AND e.scope_json = a.scope_json "
+            "AND e.event_id = a.event_id "
+            "LEFT JOIN memory_record_admission_metadata AS m ON "
+            "m.scope_id = a.scope_id AND m.scope_json = a.scope_json "
+            "AND m.record_id = a.record_id "
+            "WHERE a.scope_id = ? AND a.scope_json = ? AND a.event_id = ?",
+            (scope_id, scope_json, event_id),
+        ).fetchone()
+        return self._admission_audit_from_row(scope, row) if row is not None else None
+
+    def _admission_audit_from_row(
+        self,
+        scope: MemoryScope,
+        row: sqlite3.Row,
+    ) -> MemoryAdmissionAudit:
+        """Parse and cross-check one sidecar audit joined to its event."""
+
+        try:
+            audit = MemoryAdmissionAudit(
+                event_id=str(row["event_id"]),
+                record_id=str(row["record_id"]),
+                scope=scope,
+                candidate_revision=int(row["candidate_revision"]),
+                origin=MemoryOrigin(str(row["origin"])),
+                policy_id=str(row["policy_id"]),
+                policy_version=str(row["policy_version"]),
+                policy_fingerprint=str(row["policy_fingerprint"]),
+                action=MemoryAdmissionAction(str(row["action"])),
+                reason_code=str(row["reason_code"]),
+                occurred_at=parse_timestamp(str(row["occurred_at"]), field="occurred_at"),
+                reviewer_actor=str(row["actor"]),
+            )
+        except (TypeError, ValueError) as exc:
+            raise LedgerStateError("memory admission audit row is invalid") from exc
+        expected_event = _ADMISSION_ACTION_EVENTS[audit.action]
+        try:
+            record_origin = MemoryOrigin(str(row["record_origin"]))
+        except (TypeError, ValueError) as exc:
+            raise LedgerStateError(
+                "memory admission audit record origin is invalid or missing"
+            ) from exc
+        expected_payload_hash = self._admission_command_hash(
+            record_id=audit.record_id,
+            expected_revision=audit.candidate_revision,
+            origin=audit.origin,
+            policy_id=audit.policy_id,
+            policy_version=audit.policy_version,
+            policy_fingerprint=audit.policy_fingerprint,
+            action=audit.action,
+            reason_code=audit.reason_code,
+            actor=audit.reviewer_actor,
+        )
+        if (
+            audit.origin in {MemoryOrigin.UNKNOWN, MemoryOrigin.LEGACY_UNKNOWN}
+            or record_origin is not audit.origin
+            or str(row["event_record_id"]) != audit.record_id
+            or str(row["event_type"]) != expected_event.value
+            or int(row["event_revision"]) != audit.candidate_revision + 1
+            or row["event_reason_code"] is None
+            or str(row["event_reason_code"]) != audit.reason_code
+            or str(row["event_payload_hash"]) != expected_payload_hash
+        ):
+            raise LedgerStateError(
+                "memory admission audit does not match its lifecycle event"
+            )
+        return audit
 
     def _transition(
         self,
@@ -1660,6 +2440,7 @@ class SqliteMemoryLedger:
         occurred_at: datetime | str | None,
         related_record_id: str | None = None,
         reason_code: str | None = None,
+        raw_confirmation: bool = False,
     ) -> MemoryRecord:
         identity = validate_identifier(record_id, field="record_id")
         expected_revision = _expected_revision(expected_revision)
@@ -1699,6 +2480,8 @@ class SqliteMemoryLedger:
                     record = self._load_record_locked(scope, identity)
                     if record is None:
                         raise LedgerConflictError("event_id belongs to an erased record")
+                    if raw_confirmation:
+                        self._assert_raw_confirmation_eligible(record)
                     return record
                 self._ensure_no_erasure_receipt_event_id_locked(
                     scope_id,
@@ -1709,6 +2492,8 @@ class SqliteMemoryLedger:
                 if record is None:
                     raise KeyError(identity)
                 self._check_revision(record, expected_revision)
+                if raw_confirmation:
+                    self._assert_raw_confirmation_eligible(record)
                 return self._transition_locked(
                     scope,
                     record,
@@ -1721,6 +2506,21 @@ class SqliteMemoryLedger:
                     related_record_id=related,
                     reason_code=reason,
                 )
+
+    @staticmethod
+    def _assert_raw_confirmation_eligible(record: MemoryRecord) -> None:
+        """Keep provenance-backed v5 candidates behind the review gate.
+
+        The legacy writer API remains a compatibility escape hatch only for
+        candidates with no concrete v5 ingress origin. Otherwise it could
+        promote a gate-created document, tool, model, or host assertion
+        without recording the paired admission audit.
+        """
+
+        if record.origin not in {MemoryOrigin.UNKNOWN, MemoryOrigin.LEGACY_UNKNOWN}:
+            raise LedgerStateError(
+                "concrete-origin candidate must be confirmed through MemoryReviewGate"
+            )
 
     def _transition_locked(
         self,
@@ -2138,10 +2938,13 @@ class SqliteMemoryLedger:
     ) -> MemoryRecord | None:
         scope_id, scope_json = _scope_storage(scope)
         row = self._conn.execute(
-            "SELECT r.*, p.content, p.source_refs_json, p.evidence_refs_json "
+            "SELECT r.*, p.content, p.source_refs_json, p.evidence_refs_json, m.origin "
             "FROM memory_records AS r LEFT JOIN memory_payloads AS p ON "
             "p.scope_id = r.scope_id AND p.scope_json = r.scope_json "
             "AND p.record_id = r.record_id "
+            "LEFT JOIN memory_record_admission_metadata AS m ON "
+            "m.scope_id = r.scope_id AND m.scope_json = r.scope_json "
+            "AND m.record_id = r.record_id "
             "WHERE r.scope_id = ? AND r.scope_json = ? AND r.record_id = ?",
             (scope_id, scope_json, record_id),
         ).fetchone()
@@ -2163,12 +2966,21 @@ class SqliteMemoryLedger:
             if row["evidence_refs_json"] is not None
             else ()
         )
+        if row["origin"] is None:
+            if row["content"] is not None:
+                raise LedgerStateError(
+                    "payload-bearing memory record is missing admission origin metadata"
+                )
+            origin = MemoryOrigin.UNKNOWN
+        else:
+            origin = MemoryOrigin(str(row["origin"]))
         return MemoryRecord(
             record_id=str(row["record_id"]),
             scope=scope,
             kind=MemoryKind(str(row["kind"])),
             state=MemoryState(str(row["state"])),
             trust=MemoryTrust(str(row["trust"])),
+            origin=origin,
             content=str(row["content"]) if row["content"] is not None else None,
             content_hash=str(row["content_hash"]),
             source_refs=source_refs,
@@ -2233,6 +3045,8 @@ class SqliteMemoryLedger:
             statements += _V3_MIGRATION_STATEMENTS
         if current <= 3:
             statements += _V4_MIGRATION_STATEMENTS
+        if current <= 4:
+            statements += _V5_MIGRATION_STATEMENTS
         return statements
 
     @staticmethod
@@ -2244,15 +3058,46 @@ class SqliteMemoryLedger:
                 "add v2 erasure receipts and replay tombstones",
                 "add v3 erased-command replay barriers",
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
+                "add v5 admission provenance and review audit tables",
             ]
         if current == 2:
             return [
                 "add v3 erased-command replay barriers",
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
+                "add v5 admission provenance and review audit tables",
             ]
         if current == 3:
-            return ["add v4 source-revocation barriers and scrub legacy event fingerprints"]
+            return [
+                "add v4 source-revocation barriers and scrub legacy event fingerprints",
+                "add v5 admission provenance and review audit tables",
+            ]
+        if current == 4:
+            return ["add v5 admission provenance and review audit tables"]
         return []
+
+    def _backfill_legacy_admission_metadata_locked(self) -> None:
+        """Mark live pre-v5 payloads as unknown without inventing review history.
+
+        A v4 Ledger did not persist an ingress category.  The migration may
+        therefore only label payload-bearing rows as ``legacy_unknown``; it
+        must not infer provenance from an actor, an event type, or payload
+        text.  Records already forgotten before the migration deliberately
+        receive no new provenance projection.
+        """
+
+        self._conn.execute(
+            "INSERT INTO memory_record_admission_metadata "
+            "(scope_id, scope_json, record_id, origin) "
+            "SELECT r.scope_id, r.scope_json, r.record_id, ? "
+            "FROM memory_records AS r "
+            "JOIN memory_payloads AS p ON p.scope_id = r.scope_id "
+            "AND p.scope_json = r.scope_json AND p.record_id = r.record_id "
+            "LEFT JOIN memory_record_admission_metadata AS m "
+            "ON m.scope_id = r.scope_id AND m.scope_json = r.scope_json "
+            "AND m.record_id = r.record_id "
+            "WHERE m.record_id IS NULL",
+            (MemoryOrigin.LEGACY_UNKNOWN.value,),
+        )
 
     def _scrub_legacy_creation_event_fingerprints_locked(self) -> None:
         """Redact pre-v4 event fingerprints during an explicit migration.
@@ -2380,6 +3225,8 @@ class SqliteMemoryLedger:
         current: int,
         *,
         allow_event_guard_repair: bool = False,
+        allow_admission_guard_repair: bool = False,
+        validate_admission_data: bool = False,
     ) -> None:
         """Fail closed instead of adopting an unrelated generic SQLite table."""
         objects = {
@@ -2404,6 +3251,19 @@ class SqliteMemoryLedger:
                     + ", ".join(collisions)
                 )
             return
+        if current < 5:
+            unexpected_future = sorted(
+                set(objects).intersection(
+                    set(_V5_TABLE_COLUMNS)
+                    | _V5_INDEX_NAMES
+                    | set(_ADMISSION_IMMUTABILITY_TRIGGERS)
+                )
+            )
+            if unexpected_future:
+                raise LedgerStateError(
+                    f"ledger schema v{current} unexpectedly contains v5 admission objects: "
+                    + ", ".join(unexpected_future)
+                )
         for table_name in _ALL_LEDGER_TABLE_COLUMNS:
             existing = objects.get(table_name)
             if existing is not None and existing[0] != "table":
@@ -2417,6 +3277,8 @@ class SqliteMemoryLedger:
             required.update(_V3_TABLE_COLUMNS)
         if current >= 4:
             required.update(_V4_TABLE_COLUMNS)
+        if current >= 5:
+            required.update(_V5_TABLE_COLUMNS)
         for table_name, expected_columns in _ALL_LEDGER_TABLE_COLUMNS.items():
             if table_name not in table_names:
                 continue
@@ -2444,7 +3306,7 @@ class SqliteMemoryLedger:
                 raise LedgerStateError(
                     f"memory ledger schema v{current} is missing required table {table_name!r}"
                 )
-        for index_name, expected_signature in _LEDGER_INDEX_SIGNATURES.items():
+        for index_name, expected_signature in _required_index_signatures(current).items():
             index = objects.get(index_name)
             if (
                 index is None
@@ -2470,6 +3332,14 @@ class SqliteMemoryLedger:
             raise LedgerStateError(
                 "memory event immutability trigger name is owned by another schema object"
             )
+        admission_guards = {
+            name: objects.get(name) for name in _ADMISSION_IMMUTABILITY_TRIGGERS
+        }
+        for name, guard in admission_guards.items():
+            if guard is not None and guard[0] != "trigger":
+                raise LedgerStateError(
+                    f"admission immutability trigger name {name!r} is owned by another schema object"
+                )
         for object_name, (object_type, target, definition) in objects.items():
             if object_type != "trigger":
                 continue
@@ -2479,7 +3349,7 @@ class SqliteMemoryLedger:
                         "memory event immutability trigger name is owned by another table"
                     )
                 if (
-                    current >= self.MIGRATION_VERSION
+                    current >= _EVENT_GUARD_SCHEMA_VERSION
                     and not allow_event_guard_repair
                     and (
                         definition is None
@@ -2491,10 +3361,28 @@ class SqliteMemoryLedger:
                         "memory event immutability trigger does not match the ledger definition"
                     )
                 continue
+            if object_name in _ADMISSION_IMMUTABILITY_TRIGGERS:
+                expected_target, expected_signature = _ADMISSION_IMMUTABILITY_TRIGGERS[object_name]
+                if target != expected_target:
+                    raise LedgerStateError(
+                        f"admission immutability trigger {object_name!r} targets another table"
+                    )
+                if (
+                    current >= _ADMISSION_GUARD_SCHEMA_VERSION
+                    and not allow_admission_guard_repair
+                    and (
+                        definition is None
+                        or _normalized_table_sql(str(definition)) != expected_signature
+                    )
+                ):
+                    raise LedgerStateError(
+                        f"admission immutability trigger {object_name!r} does not match the ledger definition"
+                    )
+                continue
             if target not in _ALL_LEDGER_TABLE_COLUMNS:
                 continue
             if (
-                current < self.MIGRATION_VERSION
+                current < _EVENT_GUARD_SCHEMA_VERSION
                 and object_name == _LEGACY_EVENT_UPDATE_TRIGGER_NAME
                 and target == "memory_events"
                 and definition is not None
@@ -2505,11 +3393,114 @@ class SqliteMemoryLedger:
                 f"unexpected trigger {object_name!r} targets memory ledger table {target!r}"
             )
         if (
-            current >= self.MIGRATION_VERSION
+            current >= _EVENT_GUARD_SCHEMA_VERSION
             and event_guard is None
             and not allow_event_guard_repair
         ):
             raise LedgerStateError("memory event immutability trigger is missing")
+        if current >= _ADMISSION_GUARD_SCHEMA_VERSION and not allow_admission_guard_repair:
+            missing_admission_guards = [
+                name for name, guard in admission_guards.items() if guard is None
+            ]
+            if missing_admission_guards:
+                raise LedgerStateError(
+                    "admission immutability trigger is missing: "
+                    + ", ".join(sorted(missing_admission_guards))
+                )
+        if current >= 5 and validate_admission_data:
+            self._validate_admission_sidecars_locked()
+
+    def _validate_admission_sidecars_locked(self) -> None:
+        """Fail closed on corrupted or orphaned v5 admission sidecars.
+
+        Foreign keys protect normal writes, but SQLite databases may be
+        created or edited with foreign-key enforcement disabled.  Setup and
+        explicit setup and dry-run validation therefore independently prove
+        that every live payload has a closed origin and every audit has the
+        matching record, event, action, revision, and opaque metadata it
+        claims. Ordinary operation paths validate only rows they touch to
+        keep reads and writes bounded.
+        """
+
+        missing_origin = self._conn.execute(
+            "SELECT 1 FROM memory_records AS r JOIN memory_payloads AS p ON "
+            "p.scope_id = r.scope_id AND p.scope_json = r.scope_json "
+            "AND p.record_id = r.record_id LEFT JOIN "
+            "memory_record_admission_metadata AS m ON m.scope_id = r.scope_id "
+            "AND m.scope_json = r.scope_json AND m.record_id = r.record_id "
+            "WHERE m.record_id IS NULL LIMIT 1"
+        ).fetchone()
+        if missing_origin is not None:
+            raise LedgerStateError(
+                "payload-bearing memory record is missing admission origin metadata"
+            )
+        metadata_rows = self._conn.execute(
+            "SELECT m.scope_id, m.scope_json, m.record_id, m.origin, "
+            "r.record_id AS matched_record_id FROM memory_record_admission_metadata AS m "
+            "LEFT JOIN memory_records AS r ON r.scope_id = m.scope_id "
+            "AND r.scope_json = m.scope_json AND r.record_id = m.record_id"
+        ).fetchall()
+        for row in metadata_rows:
+            if row["matched_record_id"] is None:
+                raise LedgerStateError("memory admission origin metadata is orphaned")
+            try:
+                MemoryOrigin(str(row["origin"]))
+            except ValueError as exc:
+                raise LedgerStateError("memory admission origin metadata is invalid") from exc
+        audit_rows = self._conn.execute(
+            "SELECT a.scope_id, a.scope_json, a.event_id, a.record_id, "
+            "a.candidate_revision, a.origin, a.policy_id, a.policy_version, "
+            "a.policy_fingerprint, a.action, a.reason_code, "
+            "r.record_id AS matched_record_id, e.record_id AS event_record_id, "
+            "e.event_type, e.revision AS event_revision, e.occurred_at, e.actor, "
+            "e.reason_code AS event_reason_code, e.payload_hash AS event_payload_hash, "
+            "m.origin AS record_origin FROM memory_review_audits AS a "
+            "LEFT JOIN memory_records AS r ON r.scope_id = a.scope_id "
+            "AND r.scope_json = a.scope_json AND r.record_id = a.record_id "
+            "LEFT JOIN memory_events AS e ON e.scope_id = a.scope_id "
+            "AND e.scope_json = a.scope_json AND e.event_id = a.event_id"
+            " LEFT JOIN memory_record_admission_metadata AS m ON "
+            "m.scope_id = a.scope_id AND m.scope_json = a.scope_json "
+            "AND m.record_id = a.record_id"
+        ).fetchall()
+        for row in audit_rows:
+            if row["matched_record_id"] is None or row["event_record_id"] is None:
+                raise LedgerStateError("memory admission audit is orphaned")
+            try:
+                scope_data = json.loads(str(row["scope_json"]))
+                if not isinstance(scope_data, dict):
+                    raise TypeError("scope JSON must be an object")
+                audit_scope = MemoryScope(**scope_data)
+                scope_id, scope_json = _scope_storage(audit_scope)
+            except (TypeError, ValueError, json.JSONDecodeError) as exc:
+                raise LedgerStateError("memory admission audit has an invalid scope") from exc
+            if scope_id != str(row["scope_id"]) or scope_json != str(row["scope_json"]):
+                raise LedgerStateError("memory admission audit scope does not match its storage key")
+            self._admission_audit_from_row(audit_scope, row)
+        unreviewed_active = self._conn.execute(
+            "SELECT 1 FROM memory_records AS r JOIN "
+            "memory_record_admission_metadata AS m ON m.scope_id = r.scope_id "
+            "AND m.scope_json = r.scope_json AND m.record_id = r.record_id "
+            "WHERE r.state = ? AND r.trust = ? AND m.origin NOT IN (?, ?) "
+            "AND NOT EXISTS (SELECT 1 FROM memory_review_audits AS a JOIN "
+            "memory_events AS e ON e.scope_id = a.scope_id "
+            "AND e.scope_json = a.scope_json AND e.event_id = a.event_id "
+            "WHERE a.scope_id = r.scope_id AND a.scope_json = r.scope_json "
+            "AND a.record_id = r.record_id AND a.origin = m.origin "
+            "AND a.action = ? AND e.event_type = ?) LIMIT 1",
+            (
+                MemoryState.ACTIVE.value,
+                MemoryTrust.HOST_CONFIRMED.value,
+                MemoryOrigin.UNKNOWN.value,
+                MemoryOrigin.LEGACY_UNKNOWN.value,
+                MemoryAdmissionAction.ALLOW.value,
+                MemoryEventType.CONFIRMED.value,
+            ),
+        ).fetchone()
+        if unreviewed_active is not None:
+            raise LedgerStateError(
+                "concrete-origin active memory record is missing an allow admission audit"
+            )
 
     def _ensure_event_immutability_locked(self) -> None:
         """Install and behaviorally verify the uniquely named update guard.
@@ -2568,6 +3559,214 @@ class SqliteMemoryLedger:
         finally:
             self._conn.execute("ROLLBACK TO memory_event_trigger_probe")
             self._conn.execute("RELEASE memory_event_trigger_probe")
+
+    def _ensure_admission_immutability_locked(self) -> None:
+        """Install and behaviorally verify immutable v5 sidecar guards.
+
+        Origin and review rows are companion provenance records, not mutable
+        annotations.  Deletes remain permitted for hard erasure and foreign
+        key cascade; normal lifecycle code never updates either table.
+        """
+
+        trigger_sql = {
+            _ADMISSION_METADATA_UPDATE_TRIGGER_NAME: _ADMISSION_METADATA_UPDATE_TRIGGER_SQL,
+            _ADMISSION_METADATA_DELETE_TRIGGER_NAME: _ADMISSION_METADATA_DELETE_TRIGGER_SQL,
+            _ADMISSION_METADATA_INSERT_TRIGGER_NAME: _ADMISSION_METADATA_INSERT_TRIGGER_SQL,
+            _REVIEW_AUDIT_UPDATE_TRIGGER_NAME: _REVIEW_AUDIT_UPDATE_TRIGGER_SQL,
+            _REVIEW_AUDIT_DELETE_TRIGGER_NAME: _REVIEW_AUDIT_DELETE_TRIGGER_SQL,
+            _REVIEW_AUDIT_INSERT_TRIGGER_NAME: _REVIEW_AUDIT_INSERT_TRIGGER_SQL,
+        }
+        for trigger_name, (target, _) in _ADMISSION_IMMUTABILITY_TRIGGERS.items():
+            row = self._conn.execute(
+                "SELECT tbl_name FROM sqlite_master WHERE type = 'trigger' "
+                "AND name = ? COLLATE NOCASE",
+                (trigger_name,),
+            ).fetchone()
+            if row is not None:
+                if str(row["tbl_name"]).casefold() != target:
+                    raise LedgerStateError(
+                        f"admission immutability trigger {trigger_name!r} is owned by another table"
+                    )
+                self._conn.execute(f"DROP TRIGGER {trigger_name}")
+            self._conn.execute(trigger_sql[trigger_name])
+
+        probe_id = f"__ledger-admission-trigger-probe-{uuid.uuid4().hex}"
+        probe_scope_id = "__ledger-admission-trigger-probe__"
+        probe_scope_json = "{}"
+        timestamp = format_timestamp(utc_now())
+        self._conn.execute("SAVEPOINT memory_admission_trigger_probe")
+        try:
+            self._conn.execute(
+                "INSERT INTO memory_records "
+                "(scope_id, scope_json, record_id, kind, state, trust, content_hash, "
+                "confidence, valid_from, valid_until, retention_policy, created_at, updated_at, "
+                "revision, last_event_sequence, superseded_by, retracted_at, expired_at, schema_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, NULL, NULL, NULL, ?)",
+                (
+                    probe_scope_id,
+                    probe_scope_json,
+                    probe_id,
+                    MemoryKind.FACT.value,
+                    MemoryState.CANDIDATE.value,
+                    MemoryTrust.UNTRUSTED.value,
+                    _REDACTED_CONTENT_HASH,
+                    0.0,
+                    "probe",
+                    timestamp,
+                    timestamp,
+                    1,
+                    1,
+                    LEDGER_SCHEMA_VERSION,
+                ),
+            )
+            self._conn.execute(
+                "INSERT INTO memory_events "
+                "(scope_id, scope_json, record_id, event_id, event_type, revision, occurred_at, "
+                "actor, related_record_id, reason_code, content_hash, payload_hash, schema_version) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, NULL, ?, ?)",
+                (
+                    probe_scope_id,
+                    probe_scope_json,
+                    probe_id,
+                    probe_id,
+                    MemoryEventType.CONFIRMED.value,
+                    2,
+                    timestamp,
+                    "host",
+                    "probe",
+                    "probe",
+                    LEDGER_SCHEMA_VERSION,
+                ),
+            )
+            self._conn.execute(
+                "INSERT INTO memory_record_admission_metadata "
+                "(scope_id, scope_json, record_id, origin) VALUES (?, ?, ?, ?)",
+                (probe_scope_id, probe_scope_json, probe_id, MemoryOrigin.UNKNOWN.value),
+            )
+            self._conn.execute(
+                "INSERT INTO memory_review_audits "
+                "(scope_id, scope_json, event_id, record_id, candidate_revision, origin, "
+                "policy_id, policy_version, policy_fingerprint, action, reason_code) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    probe_scope_id,
+                    probe_scope_json,
+                    probe_id,
+                    probe_id,
+                    1,
+                    MemoryOrigin.UNKNOWN.value,
+                    "probe",
+                    "1",
+                    "0" * 64,
+                    MemoryAdmissionAction.ALLOW.value,
+                    "probe",
+                ),
+            )
+            probes = (
+                (
+                    "UPDATE memory_record_admission_metadata SET origin = ? "
+                    "WHERE record_id = ?",
+                    (MemoryOrigin.USER_INPUT.value, probe_id),
+                    "memory admission metadata are immutable",
+                ),
+                (
+                    "UPDATE memory_review_audits SET policy_id = ? WHERE event_id = ?",
+                    ("mutated", probe_id),
+                    "memory review audits are immutable",
+                ),
+                (
+                    "DELETE FROM memory_record_admission_metadata WHERE record_id = ?",
+                    (probe_id,),
+                    "memory admission metadata are append-only",
+                ),
+                (
+                    "DELETE FROM memory_review_audits WHERE event_id = ?",
+                    (probe_id,),
+                    "memory review audits are append-only",
+                ),
+                (
+                    "INSERT OR REPLACE INTO memory_record_admission_metadata "
+                    "(scope_id, scope_json, record_id, origin) VALUES (?, ?, ?, ?)",
+                    (
+                        probe_scope_id,
+                        probe_scope_json,
+                        probe_id,
+                        MemoryOrigin.USER_INPUT.value,
+                    ),
+                    "memory admission metadata are append-only",
+                ),
+                (
+                    "INSERT OR REPLACE INTO memory_review_audits "
+                    "(scope_id, scope_json, event_id, record_id, candidate_revision, origin, "
+                    "policy_id, policy_version, policy_fingerprint, action, reason_code) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        probe_scope_id,
+                        probe_scope_json,
+                        probe_id,
+                        probe_id,
+                        1,
+                        MemoryOrigin.UNKNOWN.value,
+                        "probe",
+                        "1",
+                        "0" * 64,
+                        MemoryAdmissionAction.ALLOW.value,
+                        "probe",
+                    ),
+                    "memory review audits are append-only",
+                ),
+            )
+            for statement, parameters, expected_error in probes:
+                try:
+                    self._conn.execute(statement, parameters)
+                except sqlite3.DatabaseError as exc:
+                    if expected_error not in str(exc):
+                        raise LedgerStateError(
+                            "admission immutability trigger rejected the probe unexpectedly"
+                        ) from exc
+                else:
+                    raise LedgerStateError(
+                        "admission immutability trigger is missing or invalid"
+                    )
+        finally:
+            self._conn.execute("ROLLBACK TO memory_admission_trigger_probe")
+            self._conn.execute("RELEASE memory_admission_trigger_probe")
+
+    def _drop_owned_admission_immutability_triggers_locked(self) -> None:
+        """Remove exact sidecar guards inside the sole hard-erase path."""
+
+        for trigger_name, (target, expected_signature) in (
+            _ADMISSION_IMMUTABILITY_TRIGGERS.items()
+        ):
+            row = self._conn.execute(
+                "SELECT tbl_name, sql FROM sqlite_master WHERE type = 'trigger' "
+                "AND name = ? COLLATE NOCASE",
+                (trigger_name,),
+            ).fetchone()
+            if (
+                row is None
+                or str(row["tbl_name"]).casefold() != target
+                or row["sql"] is None
+                or _normalized_table_sql(str(row["sql"])) != expected_signature
+            ):
+                raise LedgerStateError(
+                    "admission immutability trigger cannot be safely suspended"
+                )
+            self._conn.execute(f"DROP TRIGGER {trigger_name}")
+
+    @contextmanager
+    def _suspend_admission_immutability_locked(self) -> Iterator[None]:
+        """Permit sidecar FK cascades only for one hard-erase transaction."""
+
+        self._drop_owned_admission_immutability_triggers_locked()
+        try:
+            yield
+        finally:
+            # Reinstall before the outer write transaction can commit.  If a
+            # statement above failed, rollback still restores its prior guard
+            # definitions; this explicit reinstall also proves the committed
+            # successful path remains protected.
+            self._ensure_admission_immutability_locked()
 
     def _require_ready_locked(self) -> None:
         self._ensure_open_locked()
