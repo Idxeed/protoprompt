@@ -167,8 +167,17 @@ index, summaries и framework-specific state — его projections/caches, а �
 
 ### Работа
 
-- Ввести append-only `MemoryEvent` и materialized `MemoryRecord` view:
-  observed, asserted, confirmed, superseded, expired, retracted.
+- [x] Введён первый изолированный experimental SQLite slice: content-free
+  `MemoryEvent` append-only в normal operation (кроме controlled migration
+  scrub и hard-erase redaction), локальная lifecycle projection `MemoryRecord`,
+  pinned `MemoryWriter`, optimistic revision/idempotency и lifecycle `observed`,
+  `asserted`, `confirmed`, `superseded`, `expired`, `retracted`, `forgotten`,
+  `quarantined`; atomic scoped source revocation, hard-erase replay barriers и
+  fail-closed explicit SQLite migrations с exact table/index/trigger checks и
+  revalidation после write lock. Он не делает silent dual-write в legacy
+  vector/profile/session API.
+- Сделать projection полностью rebuildable из event history без возврата
+  plaintext/source/evidence в append-only log.
 - Ввести `MemoryWriter` и `MemoryPolicy`: extract → validate → reconcile →
   accept/quarantine/reject.
 - Реализовать deterministic conflict handling: пользователь переехал,

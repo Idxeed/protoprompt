@@ -43,6 +43,11 @@ The `ContextBuilder` orchestrates all three. The result is a single
 The budgeted path also exposes a `ContextPlan` and request receipt, so a UI can
 show exactly which blocks made the final prompt, why, and at what token cost.
 
+The experimental `MemoryWriter` / SQLite Memory Ledger adds a separate,
+host-confirmed lifecycle for durable facts, decisions, preferences, and agent
+episodes. It is intentionally opt-in while adapters to legacy vector/profile
+memory are built; see the [Memory Ledger guide](docs/en/memory-ledger.md).
+
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of
 blocks that fits the active context window. See the [roadmap](ROADMAP.md) for
@@ -168,6 +173,7 @@ asyncio.run(main())
 | `protoprompt.store`      | `StoreProtocol`, `AsyncStoreProtocol`, `InMemStore`, `SqliteStore`, `as_async` |
 | `protoprompt.session`    | `Session`, `CompressedBlock`, `HeuristicStrategy`, `LLMSummaryStrategy` |
 | `protoprompt.profile`    | `UserProfile`, `ProfileBuilder`                                   |
+| `protoprompt.ledger` *(experimental)* | `MemoryWriter`, `SqliteMemoryLedger`, typed lifecycle records and receipts |
 | `protoprompt.tokens`     | `TokenCounter`, `RegexTokenCounter`, `TiktokenCounter`            |
 | `protoprompt.llm`        | `LLMClientProtocol`                                               |
 | `protoprompt.cache`      | `CachedLLMClient`, `InMemoryEmbeddingCache`                       |

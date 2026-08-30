@@ -7,6 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-08-30
+
+### Added
+- Experimental opt-in SQLite Memory Ledger foundation: host-pinned
+  `MemoryWriter`, schema-versioned explicit setup/dry-run/backup, immutable
+  content-free lifecycle receipts and a local lifecycle projection, optimistic
+  revisions and idempotency keys.
+  Candidate memories require an explicit host confirmation before they are
+  recallable; scope-local supersede, quarantine, expiry, retraction and
+  payload-aware forget/erase operations are available without changing legacy
+  vector, profile or session behavior. `forget()` emits a revision-advancing
+  `forgotten` receipt; `forget_by_source()` atomically revokes a scoped opaque
+  source and blocks its re-ingestion; hard erase redacts dependent event links
+  and retains only opaque replay barriers.
+- Memory Ledger schema v4 guards: fail-closed exact table/index compatibility,
+  reserved object names, rejection of unowned SQLite triggers on ledger tables,
+  case-insensitive SQLite-name handling, migration-time scrubbing of legacy
+  creation-event fingerprints, and verified append-only event triggers.
+- Snapshot-consistent reads for recall, record lookup, and export. Lifecycle
+  writes acquire the SQLite write lock before revalidating the schema boundary,
+  so a concurrent DDL change cannot slip a payload-copying trigger or a
+  restrictive index between validation and mutation.
+
+### Changed
+- The ledger documentation now states its strict shared-database boundary:
+  external indexes and triggers on ledger tables are unsupported and fail
+  closed; `forget()` and `erase()` clear live ledger rows rather than claiming
+  physical deletion from SQLite media or backups.
+
+### Security
+- Ledger event history is append-only in normal operation. Controlled setup
+  migrations may scrub legacy experimental fingerprints, and hard erase may
+  redact references from another record's event solely to remove an erased ID.
+
+## [0.7.0] - 2026-08-30
+
 ### Added
 - Additive `ContextPlan`, `ContextBlockDecision`, and
   `ContextRequestReceipt` contracts for the budgeted builder. `plan()` returns

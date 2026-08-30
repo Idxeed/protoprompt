@@ -57,6 +57,7 @@ nav:
       - Сжатие сессии: concepts/compression.md
       - Токен-бюджет: concepts/budget.md
   - Память:
+      - Экспериментальный memory ledger: memory-ledger.md
       - Память чат-бота: memory.md
       - RAG по документам: rag.md
       - Профиль пользователя: profile.md

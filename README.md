@@ -42,6 +42,7 @@ LLM обычно нужна не просто история чата, а нес
 | RAG | чанкинг, индексация, top-k поиск, фильтры, reranking и provenance |
 | Память сессии | эвристическое или LLM-сжатие длинных диалогов |
 | Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
+| Memory Ledger *(experimental)* | scoped lifecycle, host confirmation, provenance, atomic source revocation и проверяемая очистка live rows |
 | Токен-бюджет | жёсткий лимит, приоритеты слоёв, `ContextPlan`/receipt и объяснение обрезки |
 | Хранилища | in-memory, SQLite, ChromaDB, Qdrant, pgvector, Elasticsearch/OpenSearch и Redis services |
 | LLM и embeddings | OpenAI, Anthropic, Google GenAI, Bedrock, Ollama и локальные модели |
@@ -172,6 +173,7 @@ from protoprompt import (
 )
 
 from protoprompt.rag import DocumentIndexer, Retriever
+from protoprompt.ledger import MemoryWriter, SqliteMemoryLedger
 from protoprompt.secrets import EncryptedSqliteSecretStore, SecretAccess
 from protoprompt.integrations import OpenAIClient, OllamaClient, QdrantStore
 ```
@@ -181,6 +183,7 @@ from protoprompt.integrations import OpenAIClient, OllamaClient, QdrantStore
 - [быстрый старт](https://idxeed.github.io/protoprompt/ru/quickstart/);
 - [RAG](https://idxeed.github.io/protoprompt/ru/rag/);
 - [память и сжатие](https://idxeed.github.io/protoprompt/ru/concepts/compression/);
+- [экспериментальный Memory Ledger](https://idxeed.github.io/protoprompt/ru/memory-ledger/);
 - [профиль пользователя](https://idxeed.github.io/protoprompt/ru/profile/);
 - [секреты](https://idxeed.github.io/protoprompt/ru/secrets/);
 - [интеграции](https://idxeed.github.io/protoprompt/ru/integrations/).

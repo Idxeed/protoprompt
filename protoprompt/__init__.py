@@ -92,7 +92,7 @@ from protoprompt.store.sqlite import SqliteStore
 from protoprompt.tokens.protocol import TokenCounter
 from protoprompt.tokens.regex_counter import RegexTokenCounter
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 
 __all__ = [
     "ContextBuilder",

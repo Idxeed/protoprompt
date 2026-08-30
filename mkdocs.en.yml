@@ -57,6 +57,7 @@ nav:
       - Compression: concepts/compression.md
       - Token budget: concepts/budget.md
   - Memory:
+      - Experimental memory ledger: memory-ledger.md
       - RAG retrieval: rag.md
       - User profile: profile.md
       - Secrets: secrets.md
