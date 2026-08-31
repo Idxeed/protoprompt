@@ -150,17 +150,21 @@ class LedgerRecallPolicy:
 
     @classmethod
     def task_resume_safe_default(cls) -> "LedgerRecallPolicy":
-        """Return the strict host-confirmed Episode/Procedure resume policy.
+        """Return the strict host-confirmed Episode resume policy.
 
         This remains a bounded Ledger-memory selection contract, not a
-        workflow checkpoint.  It selects only concrete host assertions that
-        already passed the immutable admission-review path; generic recall
-        defaults remain unchanged.
+        workflow checkpoint.  It selects only concrete host assertions for
+        individual task episodes that already passed the immutable
+        admission-review path; generic recall defaults remain unchanged.
+
+        Procedures intentionally require a separate dependency- and
+        conflict-aware planner.  Including them here would make a generic
+        lexical selector look like a workflow executor.
         """
 
         return cls(
             policy_id="ledger-recall-task-resume-safe-v1",
-            allowed_kinds=(MemoryKind.EPISODE, MemoryKind.PROCEDURE),
+            allowed_kinds=(MemoryKind.EPISODE,),
             allowed_origins=(MemoryOrigin.HOST_ASSERTION,),
             minimum_confidence=0.75,
             require_admission_audit=True,

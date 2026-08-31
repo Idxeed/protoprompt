@@ -883,6 +883,23 @@ class LedgerRecallPlanner:
         self._assert_plan_boundary(resume._recall_plan)
         return resume._recall_plan
 
+    def resolve_resume(
+        self,
+        resume: LedgerRecallResume,
+        *,
+        task: str,
+    ) -> LedgerRecallContext:
+        """Resolve a freshly resumed checkpoint through the normal read gate.
+
+        This is the public preflight counterpart to checkpoint composition.
+        It verifies that ``resume`` belongs to this planner and that ``task``
+        matches the freshly re-planned checkpoint before applying the same
+        lifecycle/revision/hash validation used by :meth:`resolve`.  It does
+        not persist, compose, or send provider messages.
+        """
+
+        return self.resolve(self._plan_from_resume(resume, task=task))
+
     def _require_checkpoint_secret(self) -> bytes:
         """Return the stable host HMAC key required for durable checkpoints."""
 

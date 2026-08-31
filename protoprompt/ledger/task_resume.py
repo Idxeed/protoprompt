@@ -18,6 +18,7 @@ from protoprompt.ledger.types import (
     MemoryKind,
     canonical_json,
     validate_content,
+    validate_identifier,
     validate_reference,
     validate_references,
 )
@@ -122,7 +123,7 @@ class TaskEpisode:
         object.__setattr__(
             self,
             "task_ref",
-            validate_reference(self.task_ref, field="task_ref"),
+            validate_identifier(self.task_ref, field="task_ref"),
         )
         object.__setattr__(
             self,
@@ -191,7 +192,7 @@ class TaskProcedure:
         object.__setattr__(
             self,
             "task_ref",
-            validate_reference(self.task_ref, field="task_ref"),
+            validate_identifier(self.task_ref, field="task_ref"),
         )
         object.__setattr__(
             self,
@@ -272,7 +273,7 @@ def _decode_json_object(value: str) -> Mapping[str, Any]:
             object_pairs_hook=_reject_duplicate_keys,
             parse_constant=_reject_nonfinite_constant,
         )
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, RecursionError) as exc:
         raise TaskResumePayloadError("invalid task-resume JSON") from exc
     if not isinstance(decoded, dict):
         raise TaskResumePayloadError("task-resume payload must be a JSON object")

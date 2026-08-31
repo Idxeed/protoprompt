@@ -481,7 +481,7 @@ def test_safe_default_excludes_episodes_and_procedures_until_explicit_opt_in(led
     }
 
 
-def test_task_resume_policy_selects_only_host_confirmed_episodes_and_procedures(
+def test_task_resume_policy_selects_only_host_confirmed_episodes(
     ledger,
     scope_a,
 ):
@@ -492,13 +492,6 @@ def test_task_resume_policy_selects_only_host_confirmed_episodes_and_procedures(
         content="resume host episode evidence",
         origin=MemoryOrigin.HOST_ASSERTION,
         kind=MemoryKind.EPISODE,
-    )
-    host_procedure = _admitted_active(
-        writer,
-        record_id="host-procedure",
-        content="resume host procedure evidence",
-        origin=MemoryOrigin.HOST_ASSERTION,
-        kind=MemoryKind.PROCEDURE,
     )
     _admitted_active(
         writer,
@@ -539,16 +532,13 @@ def test_task_resume_policy_selects_only_host_confirmed_episodes_and_procedures(
     context = planner.resolve(plan)
 
     assert policy.allowed_origins == (MemoryOrigin.HOST_ASSERTION,)
-    assert policy.allowed_kinds == (MemoryKind.EPISODE, MemoryKind.PROCEDURE)
+    assert policy.allowed_kinds == (MemoryKind.EPISODE,)
     assert policy.require_admission_audit is True
     assert policy.explain()["allowed_origins"] == [MemoryOrigin.HOST_ASSERTION.value]
-    assert {entry["content"] for entry in _records(context)} == {
-        host_episode.content,
-        host_procedure.content,
-    }
-    assert {entry["kind"] for entry in _records(context)} == {"episode", "procedure"}
+    assert {entry["content"] for entry in _records(context)} == {host_episode.content}
+    assert {entry["kind"] for entry in _records(context)} == {"episode"}
     assert sum(decision.reason == "origin_excluded" for decision in plan.decisions) == 3
-    assert any(decision.reason == "policy_excluded" for decision in plan.decisions)
+    assert sum(decision.reason == "policy_excluded" for decision in plan.decisions) == 1
 
 
 def test_task_resume_policy_rechecks_origin_during_resolution(ledger, scope_a):
@@ -580,14 +570,14 @@ def test_task_resume_policy_rechecks_origin_at_final_freshness_boundary(
     writer = _writer(ledger, scope_a)
     _admitted_active(
         writer,
-        record_id="freshness-host-procedure",
-        content="resume host procedure must retain its origin contract",
+        record_id="freshness-host-episode",
+        content="resume host episode must retain its origin contract",
         origin=MemoryOrigin.HOST_ASSERTION,
-        kind=MemoryKind.PROCEDURE,
+        kind=MemoryKind.EPISODE,
     )
     planner = _planner(writer, policy=LedgerRecallPolicy.task_resume_safe_default())
     plan = planner.plan(
-        task="resume host procedure",
+        task="resume host episode",
         token_budget=500,
         byte_budget=10_000,
     )

@@ -155,6 +155,7 @@ class LedgerComposedRequest:
     composition: LedgerCompositionReceipt
     _context_plan: ContextPlan = field(repr=False, compare=False)
     _recall_plan: LedgerRecallPlan = field(repr=False, compare=False)
+    _ledger_data: str | None = field(repr=False, compare=False, default=None)
 
     def __post_init__(self) -> None:
         if self.schema_version != _COMPOSITION_SCHEMA_VERSION:
@@ -170,8 +171,17 @@ class LedgerComposedRequest:
         if self.composition.data_lane is None:
             if self._context_plan.data_lanes:
                 raise ValueError("empty composition must not retain request data lanes")
+            if self._ledger_data is not None:
+                raise ValueError("empty composition must not retain ledger data")
         elif self.composition.data_lane not in self._context_plan.data_lanes:
             raise ValueError("composition lane must match the ContextPlan receipt")
+        elif (
+            not isinstance(self._ledger_data, str)
+            or not self._ledger_data
+            or len(self._ledger_data.encode("utf-8", errors="strict"))
+            != self.composition.data_lane.data_bytes
+        ):
+            raise ValueError("composition ledger data must match its lane receipt")
 
     @property
     def receipt(self) -> ContextRequestReceipt:
@@ -184,6 +194,19 @@ class LedgerComposedRequest:
         """Return a detached provider-message list ready for immediate send."""
 
         return self._context_plan.render_messages()
+
+    def render_ledger_data(self) -> str:
+        """Return the exact fixed Ledger JSON data lane for host validation.
+
+        This is available only when the composition receipt reports the one
+        Ledger lane.  It returns data already present in ``render_messages``;
+        the accessor exists so host adapters do not need to guess its position
+        among caller-controlled history or final messages.
+        """
+
+        if self._ledger_data is None:
+            raise ValueError("composed request has no Ledger data lane")
+        return self._ledger_data
 
     def explain(self) -> dict[str, object]:
         """Return content-free context, recall, and composition receipts."""
@@ -420,6 +443,7 @@ class LedgerContextComposer:
             ),
             _context_plan=context_plan,
             _recall_plan=recall_plan,
+            _ledger_data=final_context.render_data() if data_lane is not None else None,
         )
 
     def _prefix_for(self, data: str, context) -> _HostRequestPrefix | None:
