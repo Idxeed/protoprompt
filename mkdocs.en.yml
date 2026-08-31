@@ -59,6 +59,7 @@ nav:
   - Memory:
       - Experimental memory ledger: memory-ledger.md
       - Bounded ledger recall: ledger-recall.md
+      - Task-resume memory (experimental): task-resume.md
       - RAG retrieval: rag.md
       - User profile: profile.md
       - Secrets: secrets.md

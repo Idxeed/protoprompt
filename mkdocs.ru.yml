@@ -59,6 +59,7 @@ nav:
   - Память:
       - Экспериментальный memory ledger: memory-ledger.md
       - Bounded recall из ledger: ledger-recall.md
+      - Возобновление задачи (experimental): task-resume.md
       - Память чат-бота: memory.md
       - RAG по документам: rag.md
       - Профиль пользователя: profile.md
