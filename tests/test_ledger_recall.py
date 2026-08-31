@@ -7,13 +7,21 @@ import threading
 
 import pytest
 
-from protoprompt.ledger import MemoryKind, MemoryWriter, SqliteMemoryLedger
+from protoprompt.ledger import (
+    MemoryAdmissionPolicy,
+    MemoryKind,
+    MemoryOrigin,
+    MemoryReviewGate,
+    MemoryWriter,
+    SqliteMemoryLedger,
+)
 from protoprompt.ledger.recall import (
     LedgerRecallBudgetError,
     LedgerRecallPlanner,
     LedgerRecallPolicy,
     StaleMemoryPlanError,
 )
+from protoprompt.ledger.recall.planner import _policy_signature
 from protoprompt.ledger.recall.types import _RecallSelection
 from protoprompt.scope import MemoryScope
 from protoprompt.tokens import RegexTokenCounter
@@ -151,6 +159,36 @@ def _active(
         record_id,
         expected_revision=candidate.revision,
         event_id=f"confirm:{record_id}",
+    )
+
+
+def _admitted_active(
+    writer: MemoryWriter,
+    *,
+    record_id: str,
+    content: str,
+    origin: MemoryOrigin,
+    kind: MemoryKind,
+    confidence: float = 0.9,
+):
+    policy = MemoryAdmissionPolicy(
+        policy_id=f"recall-{origin.value}-{kind.value}-{record_id}-v1",
+        policy_version="1",
+        allowed_origins=(origin,),
+        allowed_kinds=(kind,),
+        minimum_confidence=0.5,
+    )
+    gate = MemoryReviewGate(writer, origin=origin, policy=policy)
+    candidate = gate.ingress(
+        kind=kind,
+        source_ref=f"source:{record_id}",
+        evidence_refs=(f"evidence:{record_id}",),
+        confidence=confidence,
+        asserted=origin is MemoryOrigin.HOST_ASSERTION,
+    ).submit(content)
+    return gate.confirm(
+        gate.review(candidate.record_id),
+        event_id=f"admission:{record_id}",
     )
 
 
@@ -441,6 +479,130 @@ def test_safe_default_excludes_episodes_and_procedures_until_explicit_opt_in(led
         "episode",
         "procedure",
     }
+
+
+def test_task_resume_policy_selects_only_host_confirmed_episodes_and_procedures(
+    ledger,
+    scope_a,
+):
+    writer = _writer(ledger, scope_a)
+    host_episode = _admitted_active(
+        writer,
+        record_id="host-episode",
+        content="resume host episode evidence",
+        origin=MemoryOrigin.HOST_ASSERTION,
+        kind=MemoryKind.EPISODE,
+    )
+    host_procedure = _admitted_active(
+        writer,
+        record_id="host-procedure",
+        content="resume host procedure evidence",
+        origin=MemoryOrigin.HOST_ASSERTION,
+        kind=MemoryKind.PROCEDURE,
+    )
+    _admitted_active(
+        writer,
+        record_id="document-episode",
+        content="resume document episode evidence",
+        origin=MemoryOrigin.DOCUMENT,
+        kind=MemoryKind.EPISODE,
+    )
+    _admitted_active(
+        writer,
+        record_id="tool-procedure",
+        content="resume tool procedure evidence",
+        origin=MemoryOrigin.TOOL_OUTPUT,
+        kind=MemoryKind.PROCEDURE,
+    )
+    _admitted_active(
+        writer,
+        record_id="model-episode",
+        content="resume model episode evidence",
+        origin=MemoryOrigin.MODEL_EXTRACTION,
+        kind=MemoryKind.EPISODE,
+    )
+    _admitted_active(
+        writer,
+        record_id="host-fact",
+        content="resume host fact evidence",
+        origin=MemoryOrigin.HOST_ASSERTION,
+        kind=MemoryKind.FACT,
+    )
+
+    policy = LedgerRecallPolicy.task_resume_safe_default()
+    planner = _planner(writer, policy=policy)
+    plan = planner.plan(
+        task="resume host episode procedure",
+        token_budget=500,
+        byte_budget=10_000,
+    )
+    context = planner.resolve(plan)
+
+    assert policy.allowed_origins == (MemoryOrigin.HOST_ASSERTION,)
+    assert policy.allowed_kinds == (MemoryKind.EPISODE, MemoryKind.PROCEDURE)
+    assert policy.require_admission_audit is True
+    assert policy.explain()["allowed_origins"] == [MemoryOrigin.HOST_ASSERTION.value]
+    assert {entry["content"] for entry in _records(context)} == {
+        host_episode.content,
+        host_procedure.content,
+    }
+    assert {entry["kind"] for entry in _records(context)} == {"episode", "procedure"}
+    assert sum(decision.reason == "origin_excluded" for decision in plan.decisions) == 3
+    assert any(decision.reason == "policy_excluded" for decision in plan.decisions)
+
+
+def test_task_resume_policy_rechecks_origin_during_resolution(ledger, scope_a):
+    writer = _writer(ledger, scope_a)
+    active = _admitted_active(
+        writer,
+        record_id="resolution-host-episode",
+        content="resume host episode must retain its origin contract",
+        origin=MemoryOrigin.HOST_ASSERTION,
+        kind=MemoryKind.EPISODE,
+    )
+    planner = _planner(writer, policy=LedgerRecallPolicy.task_resume_safe_default())
+    plan = planner.plan(
+        task="resume host episode",
+        token_budget=500,
+        byte_budget=10_000,
+    )
+    disallowed_origin = replace(active, origin=MemoryOrigin.DOCUMENT)
+
+    with pytest.raises(StaleMemoryPlanError, match="replan"):
+        planner._resolve_records(plan, [disallowed_origin], instant=T0)
+
+
+def test_task_resume_policy_rechecks_origin_at_final_freshness_boundary(
+    ledger,
+    scope_a,
+    monkeypatch,
+):
+    writer = _writer(ledger, scope_a)
+    _admitted_active(
+        writer,
+        record_id="freshness-host-procedure",
+        content="resume host procedure must retain its origin contract",
+        origin=MemoryOrigin.HOST_ASSERTION,
+        kind=MemoryKind.PROCEDURE,
+    )
+    planner = _planner(writer, policy=LedgerRecallPolicy.task_resume_safe_default())
+    plan = planner.plan(
+        task="resume host procedure",
+        token_budget=500,
+        byte_budget=10_000,
+    )
+    original_resolve_records = planner._resolve_records
+
+    def resolve_with_disallowed_origin(*args, **kwargs):
+        return [
+            replace(record, origin=MemoryOrigin.DOCUMENT)
+            for record in original_resolve_records(*args, **kwargs)
+        ]
+
+    monkeypatch.setattr(planner, "_resolve_records", resolve_with_disallowed_origin)
+
+    with pytest.raises(StaleMemoryPlanError, match="final host time"):
+        planner.resolve(plan)
 
 
 def test_recall_plan_and_explain_do_not_retain_or_expose_private_text(ledger, scope_a):
@@ -754,6 +916,12 @@ def test_recall_exposes_bounded_candidate_scan_without_hidden_remote_ranking(led
 def test_recall_policy_and_plan_validate_public_configuration(ledger, scope_a):
     with pytest.raises(ValueError, match="duplicates"):
         LedgerRecallPolicy(allowed_kinds=(MemoryKind.FACT, MemoryKind.FACT))
+    with pytest.raises(ValueError, match="must not be empty"):
+        LedgerRecallPolicy(allowed_origins=())
+    with pytest.raises(ValueError, match="duplicates"):
+        LedgerRecallPolicy(
+            allowed_origins=(MemoryOrigin.DOCUMENT, MemoryOrigin.DOCUMENT),
+        )
     with pytest.raises(ValueError, match="between 0 and 1"):
         LedgerRecallPolicy(minimum_confidence=1.1)
     planner = _planner(_writer(ledger, scope_a))
@@ -761,6 +929,14 @@ def test_recall_policy_and_plan_validate_public_configuration(ledger, scope_a):
         planner.plan(task="  ", token_budget=500)
     with pytest.raises(TypeError, match="token_budget"):
         planner.plan(task="task", token_budget=True)
+
+
+def test_unrestricted_admission_policy_keeps_its_v1_checkpoint_fingerprint():
+    policy = LedgerRecallPolicy.admission_safe_default()
+
+    assert policy.allowed_origins is None
+    assert "allowed_origins" not in policy.explain()
+    assert _policy_signature(policy) == "ea834cf661dc74020b7ce4b6441186320d68b4ecbd340f9f3cbf8b8d4b02c53d"
 
 
 def test_recall_rejects_resolution_through_a_different_same_named_policy(ledger, scope_a):

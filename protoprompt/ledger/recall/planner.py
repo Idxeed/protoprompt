@@ -387,6 +387,17 @@ class LedgerRecallPlanner:
                         reason="admission_required",
                     )
                 )
+            elif (
+                self._policy.allowed_origins is not None
+                and record.origin not in self._policy.allowed_origins
+            ):
+                decisions.append(
+                    LedgerRecallDecision(
+                        kind=record.kind,
+                        decision="excluded",
+                        reason="origin_excluded",
+                    )
+                )
             elif record.kind not in self._policy.allowed_kinds:
                 decisions.append(
                     LedgerRecallDecision(
@@ -653,6 +664,10 @@ class LedgerRecallPlanner:
         assert post_validation_instant is not None
         if any(
             record.kind not in self._policy.allowed_kinds
+            or (
+                self._policy.allowed_origins is not None
+                and record.origin not in self._policy.allowed_origins
+            )
             or record.confidence < self._policy.minimum_confidence
             or not record.is_recallable(now=post_validation_instant)
             for record in resolved_records
@@ -922,6 +937,10 @@ class LedgerRecallPlanner:
                 or record.content_hash != selection.content_hash
                 or record.kind is not selection.kind
                 or record.kind not in self._policy.allowed_kinds
+                or (
+                    self._policy.allowed_origins is not None
+                    and record.origin not in self._policy.allowed_origins
+                )
                 or record.confidence < self._policy.minimum_confidence
                 or not record.is_recallable(now=instant)
             ):

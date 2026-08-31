@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 
-from protoprompt.ledger.types import MemoryKind, validate_identifier
+from protoprompt.ledger.types import MemoryKind, MemoryOrigin, validate_identifier
 
 
 _DEFAULT_KINDS = (
@@ -53,6 +53,10 @@ class LedgerRecallPolicy:
     confidence_weight: float = 10.0
     recency_weight: float = 1.0
     require_admission_audit: bool = False
+    # ``None`` deliberately preserves the v1 unrestricted-origin contract.
+    # It also keeps existing policy receipts/fingerprints stable for durable
+    # v6 checkpoint compatibility.  A concrete tuple is an explicit filter.
+    allowed_origins: tuple[MemoryOrigin | str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.schema_version != 1:
@@ -109,6 +113,13 @@ class LedgerRecallPolicy:
             raise ValueError("at least one recall ranking weight must be non-zero")
         if not isinstance(self.require_admission_audit, bool):
             raise TypeError("require_admission_audit must be a bool")
+        if self.allowed_origins is not None:
+            origins = tuple(MemoryOrigin(origin) for origin in self.allowed_origins)
+            if not origins:
+                raise ValueError("allowed_origins must not be empty when configured")
+            if len(set(origins)) != len(origins):
+                raise ValueError("allowed_origins must not contain duplicates")
+            object.__setattr__(self, "allowed_origins", origins)
 
     @classmethod
     def safe_default(cls) -> "LedgerRecallPolicy":
@@ -137,10 +148,28 @@ class LedgerRecallPolicy:
             require_admission_audit=True,
         )
 
+    @classmethod
+    def task_resume_safe_default(cls) -> "LedgerRecallPolicy":
+        """Return the strict host-confirmed Episode/Procedure resume policy.
+
+        This remains a bounded Ledger-memory selection contract, not a
+        workflow checkpoint.  It selects only concrete host assertions that
+        already passed the immutable admission-review path; generic recall
+        defaults remain unchanged.
+        """
+
+        return cls(
+            policy_id="ledger-recall-task-resume-safe-v1",
+            allowed_kinds=(MemoryKind.EPISODE, MemoryKind.PROCEDURE),
+            allowed_origins=(MemoryOrigin.HOST_ASSERTION,),
+            minimum_confidence=0.75,
+            require_admission_audit=True,
+        )
+
     def explain(self) -> dict[str, object]:
         """Return the public, content-free policy shape."""
 
-        return {
+        result: dict[str, object] = {
             "schema_version": self.schema_version,
             "policy_id": self.policy_id,
             "allowed_kinds": [kind.value for kind in self.allowed_kinds],
@@ -153,3 +182,8 @@ class LedgerRecallPolicy:
             "recency_weight": self.recency_weight,
             "require_admission_audit": self.require_admission_audit,
         }
+        # Do not add a no-op field to unrestricted v1 policies: their exact
+        # explain payload is fingerprinted by existing sealed checkpoints.
+        if self.allowed_origins is not None:
+            result["allowed_origins"] = [origin.value for origin in self.allowed_origins]
+        return result
