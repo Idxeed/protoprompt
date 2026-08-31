@@ -8,7 +8,7 @@
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.md) · [v0.16 launch kit](LAUNCH-v0.16.md)
+[Русская версия](README.md) · [v0.16.1 launch kit](LAUNCH-v0.16.1.md)
 
 **Reliable agent memory under a fixed context budget.** ProtoPrompt is an
 embeddable context runtime for LLM applications. The core combines **RAG over
@@ -277,17 +277,17 @@ pip install -e "apps/agent-cli[ollama]"
 pp-agent /path/to/project
 ```
 
-For 0.16, `protoprompt-cli` is not separately uploaded to PyPI. Its matching
+For 0.16.1, `protoprompt-cli` is not separately uploaded to PyPI. Its matching
 wheel and sdist are attached to the GitHub Release; install the matching core
 with the desired backend first:
 
 ```bash
-python -m pip install "protoprompt[ollama]==0.16.0"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.0/protoprompt_cli-0.16.0-py3-none-any.whl"
+python -m pip install "protoprompt[ollama]==0.16.1"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.1/protoprompt_cli-0.16.1-py3-none-any.whl"
 ```
 
 Alternatively, after installing the matching core, install the tagged source:
-`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.0#subdirectory=apps/agent-cli"`.
+`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.1#subdirectory=apps/agent-cli"`.
 
 It supports sessions, hot/cold memory, planning mode, and confirmation for
 dangerous tools. Every provider request goes through an immutable `ContextPlan`:

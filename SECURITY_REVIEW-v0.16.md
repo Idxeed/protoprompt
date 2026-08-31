@@ -1,11 +1,13 @@
-# ProtoPrompt 0.16.0 — internal security review
+# ProtoPrompt 0.16.0 — superseded candidate security review
 
-**Release-gate status:** passed on 2026-08-31.
+**Release-gate status:** superseded; no PyPI or GitHub Release artifacts were
+published for this tag.
 
-This is an internal, source-level release review of the `v0.16.0` candidate.
-It is not an external penetration test or a certification. Its scope is the
-working-tree change set from `7b379e338d132d1c22441aabc3dc631d5c7e89a0` to the
-release candidate, with emphasis on the local `pp-agent` authority boundary.
+This is the historical internal source-level review of the `v0.16.0`
+candidate. Its Ubuntu release verification subsequently found a Linux-only
+jailed-edit regression, so the tag is retained only as an unpublished
+candidate and must not be used as a release reference. The corrective record
+is [SECURITY_REVIEW-v0.16.1.md](SECURITY_REVIEW-v0.16.1.md).
 
 ## Result
 
@@ -29,7 +31,8 @@ classes:
 
 ## Evidence
 
-The final candidate passed the following local, non-integration checks:
+The candidate passed the following local, non-integration checks before the
+Ubuntu-only release gate found the regression:
 
 - `272 passed, 42 skipped, 10 deselected` — full `pp-agent` suite;
 - `601 passed, 3 skipped, 26 deselected` — core suite;

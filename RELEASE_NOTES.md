@@ -1,10 +1,34 @@
-# protoprompt 0.16.0
+# protoprompt 0.16.1
 
-ProtoPrompt 0.16 is a hardening release for the local reference-agent
+ProtoPrompt 0.16.1 is the corrective hardening release for the local reference-agent
 boundary. It does not expand the public memory or context API. Instead, it
 makes the ownership of local state, project paths, jailed file operations, and
 provider transport explicit and fail closed where the platform cannot support
 the required guarantee.
+
+The `v0.16.0` verification workflow stopped before publishing any PyPI or
+GitHub Release artifact after its Linux CLI gate found a real edit-path
+regression. The tag remains an unpublished candidate; this patch release does
+not rewrite it.
+
+## 0.16.1 corrective changes
+
+- A normal Linux jailed `edit` now succeeds after `RENAME_EXCHANGE`: that
+  syscall updates the old inode's `ctime`, so an optimistic exact snapshot is
+  checked before the exchange and a ctime-tolerant inode/size/mtime/digest
+  check is performed when the displaced entry remains observable. A concurrent
+  source write in the exchange window is detected and the atomic exchange is
+  rolled back. If a competing writer replaces the target entry in that window,
+  the inverse exchange restores the competing entry while its identity remains
+  observable. A missing or replaced displaced entry, a second rename, or a
+  post-commit filesystem failure reports an uncertain outcome with the target
+  and generated recovery path rather than a false success; this low-level
+  pathname API cannot promise inode-CAS, last-writer ordering, or a
+  transactional abort in that window.
+- The startup project chooser accepts only an existing directory.
+- Linux symlink-grep coverage now proves that external file contents are not
+  returned without mistaking the user-provided search string in a no-match
+  message for leaked content.
 
 ## Highlights
 
@@ -34,7 +58,7 @@ the required guarantee.
 
 ## Compatibility and migration
 
-There is no core signature or data-schema migration in 0.16.0. There is one
+There is no core signature or data-schema migration in 0.16.1. There is one
 outbound-transport behavior migration: `HttpxLLMClient` and `OllamaClient` now
 default to `trust_env=False`. A deployment that intentionally used process
 proxy or CA environment settings must pass `trust_env=True` explicitly for a
@@ -47,18 +71,18 @@ user-owned configuration directory or pass a trusted file through `--config`;
 remove plaintext secrets from old TOML files rather than copying them.
 
 Install the core from PyPI, the local Ollama/PDF reference application from the
-matching source tag, and `protoprompt-cli` 0.16 from its checksum-verified
+matching source tag, and `protoprompt-cli` 0.16.1 from its checksum-verified
 GitHub Release asset (it is not a separate PyPI upload):
 
 ```bash
-python -m pip install "protoprompt[documents,fastapi,ollama]==0.16.0"
-python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.0#subdirectory=apps/ollama-chat"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.0/protoprompt_cli-0.16.0-py3-none-any.whl"
+python -m pip install "protoprompt[documents,fastapi,ollama]==0.16.1"
+python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.1#subdirectory=apps/ollama-chat"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.1/protoprompt_cli-0.16.1-py3-none-any.whl"
 ```
 
 After installing the matching core, the agent can instead be installed directly
 from the tag with
-`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.0#subdirectory=apps/agent-cli"`.
+`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.1#subdirectory=apps/agent-cli"`.
 
 ## Explicit boundaries
 
@@ -84,7 +108,7 @@ from the tag with
 Run the platform-appropriate non-integration suites before using a release
 candidate. Linux-only jail behavior requires a host with `openat2`; Windows
 coverage verifies the native no-reparse boundary and intentionally fail-closed
-operations. This [internal security review record](SECURITY_REVIEW-v0.16.md)
+operations. This [internal security review record](SECURITY_REVIEW-v0.16.1.md)
 and the build-artifact checksums must accompany the published release; neither
 is a substitute for an external security assessment.
 
@@ -94,5 +118,5 @@ python -m pytest -q apps/agent-cli/tests -m "not integration"
 python -m pytest -q apps/ollama-chat/tests -m "not integration"
 ```
 
-`0.16.0` is one RC-hardening step toward the contracts described in
+`0.16.1` is one RC-hardening step toward the contracts described in
 [ROADMAP.md](ROADMAP.md), not the final 1.0 release.

@@ -35,6 +35,17 @@ def test_find_root_resolves_file_to_parent(tmp_path):
     assert persistence.find_root(f) == project.resolve()
 
 
+def test_safe_project_directory_requires_an_existing_directory(tmp_path):
+    missing = tmp_path / "missing"
+    file_path = tmp_path / "not-a-directory.txt"
+    file_path.write_text("not a project", encoding="utf-8")
+
+    with pytest.raises(OSError):
+        persistence.safe_project_directory(missing)
+    with pytest.raises(OSError):
+        persistence.safe_project_directory(file_path)
+
+
 def test_namespace_is_deterministic_and_distinct(tmp_path):
     one = tmp_path / "one"
     two = tmp_path / "two"

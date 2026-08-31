@@ -26,18 +26,18 @@ pp-agent C:\path\to\project
 ```
 
 При установке из checkout сначала ставьте корневой пакет: агент требует
-ProtoPrompt `>=0.16.0,<0.17.0`, потому что использует `ContextPlan` и exact
+ProtoPrompt `>=0.16.1,<0.17.0`, потому что использует `ContextPlan` и exact
 request receipt.
 
-### Из релиза 0.16
+### Из релиза 0.16.1
 
-`protoprompt-cli` 0.16 распространяется как wheel и sdist в соответствующем
+`protoprompt-cli` 0.16.1 распространяется как wheel и sdist в соответствующем
 GitHub Release, а не как отдельный PyPI upload. Сначала установите версию
 ядра с нужным backend, затем соответствующий wheel из GitHub Release:
 
 ```powershell
-python -m pip install "protoprompt[ollama]==0.16.0"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.0/protoprompt_cli-0.16.0-py3-none-any.whl"
+python -m pip install "protoprompt[ollama]==0.16.1"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.1/protoprompt_cli-0.16.1-py3-none-any.whl"
 pp-agent --version
 ```
 
@@ -45,7 +45,7 @@ pp-agent --version
 прямо из соответствующего тега (например, чтобы проверить исходный код):
 
 ```powershell
-python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.0#subdirectory=apps/agent-cli"
+python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.1#subdirectory=apps/agent-cli"
 ```
 
 Ollama должна иметь модели `llama3.1:8b` и `nomic-embed-text`.
@@ -135,8 +135,9 @@ permission/jail путь `bash`; отдельного `subprocess` с path-based
 При включённом jail `write` и `edit` принимают только относительные пути
 проекта. Linux заменяет файл через привязанный к корню handle, временный файл
 и `renameat2`; при замене сохраняются POSIX mode/ACL. `edit` привязан к полному
-снимку inode+содержимого и отменяется, если файл изменился до commit. Все
-jailed file-tools отсекают symlink/junction, hard link и mount/bind-mount
+снимку inode+содержимого и отменяется, если изменение замечено в финальной
+проверке перед exchange. Это optimistic validation, а не inode-CAS pathname
+операция. Все jailed file-tools отсекают symlink/junction, hard link и mount/bind-mount
 переходы: на Linux это `openat2` с kernel-enforced `RESOLVE_NO_XDEV`, а на
 Windows чтение идёт через native root-relative handle без reparse traversal.
 У POSIX-хоста без `openat2` нет path-based fallback: прямой доступ завершается
@@ -144,8 +145,13 @@ Windows чтение идёт через native root-relative handle без repa
 
 После commit Linux дополнительно сверяет inode результата со staged inode. При
 конкурентной подмене, которую нельзя доказуемо откатить, инструмент возвращает
-ошибку и сохраняет случайный `.protoprompt-write-*.tmp` как recovery evidence;
-он никогда не сообщает об успешной записи с непроверенным содержимым.
+ошибку с `uncertain outcome`. Для замены существующего файла он указывает
+target плюс случайный `.protoprompt-write-*.tmp` recovery path для проверки;
+при сомнительном создании нового файла нужно проверить target, поскольку
+временное имя уже могло быть consumed rename. Если конкурентная rename успевает
+ровно во время rollback, CLI не обещает last-writer ordering или transactional
+abort: путь recovery может уже отсутствовать, но результат никогда не
+маркируется как проверенный success.
 
 Windows jail намеренно уже: он безопасно читает конкретный файл только по
 относительному project path и создаёт новый `write`-файл, но отказывает для

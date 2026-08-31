@@ -514,7 +514,7 @@ async def test_write_does_not_claim_success_after_staged_inode_substitution(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Linux renameat2 verification")
-async def test_overwrite_restores_original_after_staged_inode_substitution(
+async def test_overwrite_reports_uncertain_after_staged_inode_substitution(
     runner, tmp_path, monkeypatch
 ):
     target = tmp_path / "existing.txt"
@@ -539,8 +539,11 @@ async def test_overwrite_restores_original_after_staged_inode_substitution(
     )
 
     assert result.ok is False
-    assert "changed during atomic replacement" in result.error
-    assert target.read_text(encoding="utf-8") == "original"
+    assert "replacement outcome is uncertain" in result.error
+    assert target.read_text(encoding="utf-8") == "attacker content"
+    recovery_entries = list(tmp_path.glob(".protoprompt-write-*.tmp"))
+    assert len(recovery_entries) == 1
+    assert recovery_entries[0].read_text(encoding="utf-8") == "original"
 
 
 @pytest.mark.skipif(os.name != "nt", reason="Windows native create-only commit")
@@ -700,27 +703,256 @@ async def test_edit_rejects_a_same_inode_change_after_its_snapshot(
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
-async def test_edit_rolls_back_when_its_post_exchange_version_check_fails(
+async def test_edit_rejects_a_source_change_during_staging(
     runner, tmp_path, monkeypatch
 ):
     target = tmp_path / "a.py"
     target.write_text("alpha", encoding="utf-8")
-    original_matches = runner._matches_file_version
-    calls = 0
+    original_write = runner._write_all
 
-    def fail_after_exchange(descriptor, expected):
-        nonlocal calls
-        calls += 1
-        return calls == 1 and original_matches(descriptor, expected)
+    def rewrite_source_during_staging(descriptor, payload):
+        original_write(descriptor, payload)
+        # This happens after the edit snapshot but before the exchange.  The
+        # final descriptor check must reject the stale proposed edit.
+        target.write_text("omega", encoding="utf-8")
 
-    monkeypatch.setattr(runner, "_matches_file_version", fail_after_exchange)
+    monkeypatch.setattr(runner, "_write_all", rewrite_source_during_staging)
     result = await runner.run(
         _action("edit", body="", path="a.py", old="alpha", new="OMEGA")
     )
 
     assert result.ok is False
     assert "changed during operation" in result.error
-    assert target.read_text(encoding="utf-8") == "alpha"
+    assert target.read_text(encoding="utf-8") == "omega"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
+async def test_edit_rolls_back_a_target_replaced_immediately_before_exchange(
+    runner, tmp_path, monkeypatch
+):
+    target = tmp_path / "a.py"
+    replacement = tmp_path / "concurrent.py"
+    target.write_text("alpha", encoding="utf-8")
+    original_rename = runner._renameat2
+    replaced = False
+
+    def replace_target_before_exchange(parent_fd, source, destination, flags):
+        nonlocal replaced
+        if flags == 0x02 and not replaced:
+            replaced = True
+            replacement.write_text("concurrent change", encoding="utf-8")
+            replacement.replace(tmp_path / destination)
+        original_rename(parent_fd, source, destination, flags)
+
+    monkeypatch.setattr(runner, "_renameat2", replace_target_before_exchange)
+    result = await runner.run(
+        _action("edit", body="", path="a.py", old="alpha", new="OMEGA")
+    )
+
+    assert result.ok is False
+    assert target.read_text(encoding="utf-8") == "concurrent change"
+    assert not list(tmp_path.glob(".protoprompt-write-*.tmp"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
+async def test_edit_preserves_concurrent_target_after_second_exchange_churn(
+    runner, tmp_path, monkeypatch
+):
+    target = tmp_path / "a.py"
+    first_replacement = tmp_path / "first-concurrent.py"
+    second_replacement = tmp_path / "second-concurrent.py"
+    target.write_text("alpha", encoding="utf-8")
+    original_rename = runner._renameat2
+    exchanges = 0
+
+    def churn_both_exchange_windows(parent_fd, source, destination, flags):
+        nonlocal exchanges
+        if flags == 0x02:
+            exchanges += 1
+            if exchanges == 1:
+                first_replacement.write_text("first concurrent", encoding="utf-8")
+                first_replacement.replace(tmp_path / destination)
+            elif exchanges == 2:
+                second_replacement.write_text("second concurrent", encoding="utf-8")
+                second_replacement.replace(tmp_path / destination)
+        original_rename(parent_fd, source, destination, flags)
+
+    monkeypatch.setattr(runner, "_renameat2", churn_both_exchange_windows)
+    result = await runner.run(
+        _action("edit", body="", path="a.py", old="alpha", new="OMEGA")
+    )
+
+    assert result.ok is False
+    assert target.read_text(encoding="utf-8") == "first concurrent"
+    recovery_entries = list(tmp_path.glob(".protoprompt-write-*.tmp"))
+    assert len(recovery_entries) == 1
+    assert recovery_entries[0].read_text(encoding="utf-8") == "second concurrent"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
+async def test_edit_reports_uncertain_outcome_when_old_source_is_unlinked_after_exchange(
+    runner, tmp_path, monkeypatch
+):
+    target = tmp_path / "a.py"
+    target.write_text("alpha", encoding="utf-8")
+    original_rename = runner._renameat2
+
+    def unlink_old_source_after_exchange(parent_fd, source, destination, flags):
+        if flags == 0x02:
+            original_rename(parent_fd, source, destination, flags)
+            os.unlink(tmp_path / source)
+            return
+        original_rename(parent_fd, source, destination, flags)
+
+    monkeypatch.setattr(
+        runner, "_renameat2", unlink_old_source_after_exchange
+    )
+    result = await runner.run(
+        _action("edit", body="", path="a.py", old="alpha", new="OMEGA")
+    )
+
+    assert result.ok is False
+    assert "replacement outcome is uncertain" in result.error
+    assert "inspect target and recovery path" in result.error
+    assert target.read_text(encoding="utf-8") == "OMEGA"
+    assert not list(tmp_path.glob(".protoprompt-write-*.tmp"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
+async def test_edit_reports_uncertain_outcome_when_concurrent_entry_is_unlinked(
+    runner, tmp_path, monkeypatch
+):
+    target = tmp_path / "a.py"
+    concurrent = tmp_path / "concurrent.py"
+    target.write_text("alpha", encoding="utf-8")
+    original_rename = runner._renameat2
+    exchanged = False
+
+    def replace_target_then_unlink_displaced(parent_fd, source, destination, flags):
+        nonlocal exchanged
+        if flags == 0x02 and not exchanged:
+            exchanged = True
+            concurrent.write_text("concurrent change", encoding="utf-8")
+            concurrent.replace(tmp_path / destination)
+            original_rename(parent_fd, source, destination, flags)
+            os.unlink(tmp_path / source)
+            return
+        original_rename(parent_fd, source, destination, flags)
+
+    monkeypatch.setattr(
+        runner, "_renameat2", replace_target_then_unlink_displaced
+    )
+    result = await runner.run(
+        _action("edit", body="", path="a.py", old="alpha", new="OMEGA")
+    )
+
+    assert result.ok is False
+    assert "replacement outcome is uncertain" in result.error
+    assert "inspect target and recovery path" in result.error
+    assert target.read_text(encoding="utf-8") == "OMEGA"
+    assert not list(tmp_path.glob(".protoprompt-write-*.tmp"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
+async def test_edit_reports_uncertain_outcome_for_unlinked_stale_source(
+    runner, tmp_path, monkeypatch
+):
+    target = tmp_path / "a.py"
+    target.write_text("alpha", encoding="utf-8")
+    held_fd = os.open(target, os.O_RDWR)
+    original_rename = runner._renameat2
+
+    def mutate_before_exchange_then_unlink_source(parent_fd, source, destination, flags):
+        if flags == 0x02:
+            os.pwrite(held_fd, b"omega", 0)
+            os.fsync(held_fd)
+            original_rename(parent_fd, source, destination, flags)
+            os.unlink(tmp_path / source)
+            return
+        original_rename(parent_fd, source, destination, flags)
+
+    monkeypatch.setattr(
+        runner, "_renameat2", mutate_before_exchange_then_unlink_source
+    )
+    try:
+        result = await runner.run(
+            _action("edit", body="", path="a.py", old="alpha", new="OMEGA")
+        )
+    finally:
+        os.close(held_fd)
+
+    assert result.ok is False
+    assert "replacement outcome is uncertain" in result.error
+    assert "inspect target and recovery path" in result.error
+    assert target.read_text(encoding="utf-8") == "OMEGA"
+    assert not list(tmp_path.glob(".protoprompt-write-*.tmp"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
+async def test_edit_reports_uncertain_outcome_when_rollback_source_is_removed(
+    runner, tmp_path, monkeypatch
+):
+    target = tmp_path / "a.py"
+    target.write_text("alpha", encoding="utf-8")
+    original_rename = runner._renameat2
+    exchanged = False
+
+    def remove_old_source_after_exchange(parent_fd, source, destination, flags):
+        nonlocal exchanged
+        original_rename(parent_fd, source, destination, flags)
+        if flags == 0x02 and not exchanged:
+            exchanged = True
+            os.unlink(tmp_path / source)
+
+    def fail_metadata(source_fd, destination_fd):
+        raise OSError("simulated metadata failure")
+
+    monkeypatch.setattr(runner, "_renameat2", remove_old_source_after_exchange)
+    monkeypatch.setattr(runner, "_copy_posix_security_metadata", fail_metadata)
+    result = await runner.run(
+        _action("edit", body="", path="a.py", old="alpha", new="OMEGA")
+    )
+
+    assert result.ok is False
+    assert "replacement outcome is uncertain" in result.error
+    assert "inspect target and recovery path" in result.error
+    assert target.read_text(encoding="utf-8") == "OMEGA"
+    assert not list(tmp_path.glob(".protoprompt-write-*.tmp"))
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
+async def test_edit_rolls_back_a_source_change_during_exchange(
+    runner, tmp_path, monkeypatch
+):
+    target = tmp_path / "a.py"
+    target.write_text("alpha", encoding="utf-8")
+    held_fd = os.open(target, os.O_RDWR)
+    original_rename = runner._renameat2
+    changed = False
+
+    def rewrite_exchanged_source(parent_fd, source, destination, flags):
+        nonlocal changed
+        original_rename(parent_fd, source, destination, flags)
+        if flags != 0x02 or changed:
+            return
+        changed = True
+        # The old source is now reachable at the random temporary name.  A
+        # write through a concurrently held descriptor must be detected by
+        # the ctime-tolerant post-exchange content verifier and rolled back.
+        os.pwrite(held_fd, b"omega", 0)
+        os.fsync(held_fd)
+
+    monkeypatch.setattr(runner, "_renameat2", rewrite_exchanged_source)
+    try:
+        result = await runner.run(
+            _action("edit", body="", path="a.py", old="alpha", new="OMEGA")
+        )
+    finally:
+        os.close(held_fd)
+
+    assert result.ok is False
+    assert "changed during operation" in result.error
+    assert target.read_text(encoding="utf-8") == "omega"
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows jailed overwrites fail closed")
@@ -958,7 +1190,7 @@ async def test_grep_does_not_follow_external_file_symlinks(runner, tmp_path):
         link.symlink_to(external)
     except OSError:
         pytest.skip("symlink creation is unavailable on this host")
-    result = await runner.run(_action("grep", pattern="TOP_SECRET"))
+    result = await runner.run(_action("grep", pattern="TOP_"))
     assert result.ok is True
     assert "TOP_SECRET" not in result.output
 

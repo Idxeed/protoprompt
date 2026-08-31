@@ -1,6 +1,6 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.16.0` hardens reference-agent boundary: user-owned state,
+> Статус: `0.16.1` hardens reference-agent boundary: user-owned state,
 > identity-bound project namespaces, native no-reparse project discovery и
 > fail-closed jailed operations. `0.15.0` остаётся frozen dual-backend semantic
 > evidence для strict Ledger recall. Это усиливает release gate без расширения

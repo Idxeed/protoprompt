@@ -1,17 +1,19 @@
-# ProtoPrompt 0.16 — reference-agent boundary launch kit
+# ProtoPrompt 0.16 — superseded candidate launch kit
 
-Use this page only after the `v0.16.0` tag and its verified release artifacts
-are published. It deliberately makes no performance, model-quality, universal
-prompt-injection, unlimited-memory, or `1.0.0` claim.
+Do not use this launch kit: `v0.16.0` stopped at its Linux release gate and
+published no artifacts. The corrective public-release material is
+[LAUNCH-v0.16.1.md](LAUNCH-v0.16.1.md). It deliberately makes no performance,
+model-quality, universal prompt-injection, unlimited-memory, or `1.0.0` claim.
 
 ## Release links
 
-- Release: <https://github.com/Idxeed/protoprompt/releases/tag/v0.16.0>
-- PyPI: <https://pypi.org/project/protoprompt/0.16.0/> (link only after the
+- Corrective release: <https://github.com/Idxeed/protoprompt/releases/tag/v0.16.1>
+- PyPI: <https://pypi.org/project/protoprompt/0.16.1/> (link only after the
   artifact is actually published)
 - `pp-agent`: matching wheel and sdist are GitHub Release assets, not a
   separate PyPI upload.
 - Notes: [RELEASE_NOTES.md](RELEASE_NOTES.md)
+- Corrective kit: [LAUNCH-v0.16.1.md](LAUNCH-v0.16.1.md)
 - Roadmap: [ROADMAP.md](ROADMAP.md)
 
 ## RU
@@ -82,7 +84,7 @@ new model-quality number or an "infinite context" claim.
 
 ## Maintainer checklist
 
-1. Attach [the internal security-review record](SECURITY_REVIEW-v0.16.md) and
+1. Attach [the internal security-review record](SECURITY_REVIEW-v0.16.1.md) and
    the artifact checksums to the release before using this text publicly; keep
    the core and `pp-agent` wheel/sdist pairs in `SHA256SUMS`.
 2. Add the PyPI link only after the package was actually uploaded and verified.

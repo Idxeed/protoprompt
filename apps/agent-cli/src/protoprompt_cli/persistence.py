@@ -739,14 +739,18 @@ def _capture_root(root: str | Path) -> _RootCapture:
 
 
 def safe_project_directory(path: str | Path) -> Path:
-    """Return a checked project directory without accepting Windows reparses."""
-    if os.name == "nt":
-        capture = _capture_windows_root_no_reparse(path)
-        try:
-            return capture.snapshot.root
-        finally:
-            capture.close()
-    return Path(path).resolve()
+    """Return an existing, checked project directory for the launcher.
+
+    The interactive chooser must not accept a missing path (or a regular
+    file) and defer that error until the agent is already starting.  Reuse the
+    same descriptor-backed capture as the runner so both platforms validate a
+    directory before it is offered as a project.
+    """
+    capture = _capture_root(path)
+    try:
+        return capture.snapshot.root
+    finally:
+        capture.close()
 
 
 def capture_project_identity(root: str | Path) -> ProjectIdentity:

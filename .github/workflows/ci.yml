@@ -176,8 +176,8 @@ jobs:
                   ".dockerignore",
                   "CHANGELOG.md",
                   "RELEASE_NOTES.md",
-                  "SECURITY_REVIEW-v0.16.md",
-                  "LAUNCH-v0.16.md",
+                  "SECURITY_REVIEW-v0.16.1.md",
+                  "LAUNCH-v0.16.1.md",
                   "CONTRIBUTING.md",
                   "INTEGRATIONS.md",
                   "ROADMAP.md",
@@ -261,11 +261,11 @@ jobs:
               )
               metadata = email.message_from_bytes(archive.read(metadata_name))
               assert metadata["Name"] == "protoprompt-cli"
-              assert metadata["Version"] == "0.16.0"
+              assert metadata["Version"] == "0.16.1"
               requirements = metadata.get_all("Requires-Dist") or []
               assert any(
                   requirement.startswith("protoprompt")
-                  and ">=0.16.0" in requirement
+                  and ">=0.16.1" in requirement
                   and "<0.17.0" in requirement
                   for requirement in requirements
               ), requirements
@@ -290,7 +290,7 @@ jobs:
           smoke_python=/tmp/protoprompt-agent-cli-smoke/bin/python
           "$smoke_python" -m pip install --no-deps dist-core/*.whl dist-agent-cli/*.whl
           cd /tmp
-          test "$(/tmp/protoprompt-agent-cli-smoke/bin/pp-agent --version)" = "0.16.0"
+          test "$(/tmp/protoprompt-agent-cli-smoke/bin/pp-agent --version)" = "0.16.1"
 
   agent-cli-windows:
     name: agent CLI tests (Windows)

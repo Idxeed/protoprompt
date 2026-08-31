@@ -357,6 +357,38 @@ class ToolRunner:
             and hashlib.sha256(content).digest() == expected.digest
         )
 
+    @classmethod
+    def _matches_file_content_after_exchange(
+        cls, descriptor: int, expected: _FileVersion
+    ) -> bool:
+        """Verify source content after ``RENAME_EXCHANGE`` changed its ctime.
+
+        The pre-exchange verifier includes ctime so it notices metadata-only
+        changes to the inspected source.  A successful ``RENAME_EXCHANGE``
+        legitimately updates that source inode's ctime, however.  This
+        narrower recheck keeps the stale-content protection for the tiny
+        interval around the exchange without treating the agent's own rename
+        as an attacker mutation.
+        """
+        current = os.fstat(descriptor)
+        if (
+            current.st_dev != expected.device
+            or current.st_ino != expected.inode
+            or current.st_size != expected.size
+            or current.st_mtime_ns != expected.mtime_ns
+        ):
+            return False
+        content = cls._read_descriptor_bounded(descriptor, expected.size)
+        after = os.fstat(descriptor)
+        return (
+            after.st_dev == expected.device
+            and after.st_ino == expected.inode
+            and after.st_size == expected.size
+            and after.st_mtime_ns == expected.mtime_ns
+            and len(content) == expected.size
+            and hashlib.sha256(content).digest() == expected.digest
+        )
+
     @staticmethod
     def _posix_dir_flags() -> int:
         required = ("O_DIRECTORY", "O_NOFOLLOW")
@@ -618,10 +650,6 @@ class ToolRunner:
                 source_stat = os.fstat(existing_fd)
                 if not stat.S_ISREG(source_stat.st_mode):
                     raise OutOfProject(f"unsafe file component: {leaf}")
-                if expected_version is not None and not self._matches_file_version(
-                    existing_fd, expected_version
-                ):
-                    raise SafeJailUnavailable("edit target changed during operation")
             for _ in range(16):
                 candidate = f".protoprompt-write-{secrets.token_hex(16)}.tmp"
                 try:
@@ -658,7 +686,7 @@ class ToolRunner:
                 except OSError as exc:
                     preserve_temporary = True
                     raise SafeJailUnavailable(
-                        "jailed creation commit is uncertain; recovery entry retained"
+                        "jailed creation commit is uncertain; inspect target"
                     ) from exc
                 if temporary_stat is None or not self._same_file(
                     temporary_stat, current_entry
@@ -668,11 +696,20 @@ class ToolRunner:
                     # a target that is not the inode we staged.
                     preserve_temporary = True
                     raise SafeJailUnavailable(
-                        "jailed creation commit is uncertain; recovery entry retained"
+                        "jailed creation commit is uncertain; inspect target"
                     )
                 temporary_name = None
             else:
                 assert source_stat is not None
+                # Verify the complete snapshot immediately before the atomic
+                # exchange.  ``RENAME_EXCHANGE`` itself changes the source
+                # inode's ctime, so a version check after the exchange would
+                # reject every legitimate edit even when its contents never
+                # changed.
+                if expected_version is not None and not self._matches_file_version(
+                    existing_fd, expected_version
+                ):
+                    raise SafeJailUnavailable("edit target changed during operation")
                 # Exchange, rather than an unconditional replace, gives us a
                 # post-commit identity check.  If the final entry changed
                 # after we captured its permissions, swap back rather than
@@ -680,21 +717,28 @@ class ToolRunner:
                 self._renameat2(parent_fd, temporary_name, leaf, 0x02)
 
                 def restore_exchanged_entry() -> tuple[bool, bool]:
-                    """Restore source when its temporary name is still pinned.
+                    """Attempt a bounded reversal while the staged inode is pinned.
 
-                    The final entry may be a substituted inode.  Swapping it
-                    back into the random name is safe only when that name is
-                    still the original source; retain an unknown displaced
-                    inode rather than deleting it in the caller.
+                    A concurrent actor can replace ``leaf`` after the source
+                    descriptor check but before ``RENAME_EXCHANGE``.  In that
+                    case the random name holds the actor's displaced entry,
+                    not ``source_stat``.  Reversing the exact exchange returns
+                    that entry to ``leaf`` and moves our staged inode back to
+                    the random name.  If the pre-reversal identity check
+                    already observes a change, skip the reversal. A later
+                    race also yields an uncertain outcome and retains any
+                    still-observable random entry for recovery.
                     """
                     try:
-                        old_entry = os.stat(
+                        displaced_entry = os.stat(
                             temporary_name, dir_fd=parent_fd, follow_symlinks=False
                         )
                         current_entry = os.stat(
                             leaf, dir_fd=parent_fd, follow_symlinks=False
                         )
-                        if not self._same_file(source_stat, old_entry):
+                        if temporary_stat is None or not self._same_file(
+                            temporary_stat, current_entry
+                        ):
                             return False, False
                         self._renameat2(parent_fd, temporary_name, leaf, 0x02)
                         restored_entry = os.stat(
@@ -703,10 +747,8 @@ class ToolRunner:
                         staged_entry = os.stat(
                             temporary_name, dir_fd=parent_fd, follow_symlinks=False
                         )
-                        if not self._same_file(source_stat, restored_entry):
-                            return False, False
                         return (
-                            True,
+                            self._same_file(displaced_entry, restored_entry),
                             temporary_stat is not None
                             and self._same_file(temporary_stat, staged_entry),
                         )
@@ -714,28 +756,49 @@ class ToolRunner:
                         return False, False
 
                 try:
-                    previous_entry = os.stat(
-                        temporary_name, dir_fd=parent_fd, follow_symlinks=False
-                    )
                     current_entry = os.stat(
                         leaf, dir_fd=parent_fd, follow_symlinks=False
                     )
-                    if temporary_stat is None or not (
-                        self._same_file(source_stat, previous_entry)
-                        and self._same_file(temporary_stat, current_entry)
+                    if temporary_stat is None or not self._same_file(
+                        temporary_stat, current_entry
                     ):
                         raise SafeJailUnavailable(
                             "jailed target changed during atomic replacement"
                         )
-                    if expected_version is not None and not self._matches_file_version(
+                    try:
+                        previous_entry = os.stat(
+                            temporary_name, dir_fd=parent_fd, follow_symlinks=False
+                        )
+                    except FileNotFoundError:
+                        # A missing displaced entry is ambiguous: another
+                        # actor could have replaced ``leaf`` before the
+                        # exchange and then unlinked its own entry from our
+                        # random name.  The source descriptor alone cannot
+                        # prove which pathname entry was exchanged, so never
+                        # claim a verified commit in this state.
+                        raise SafeJailUnavailable(
+                            "jailed displaced target is unobservable during atomic replacement"
+                        )
+                    if not self._same_file(
+                        source_stat, previous_entry
+                    ):
+                        raise SafeJailUnavailable(
+                            "jailed target changed during atomic replacement"
+                        )
+                    # The descriptor remains the source of truth even after
+                    # its pathname is unlinked.  Keep the content check in
+                    # that state: a same-inode writer can have changed the
+                    # model's inspected source before the forward exchange.
+                    if expected_version is not None and not self._matches_file_content_after_exchange(
                         existing_fd, expected_version
                     ):
                         raise SafeJailUnavailable("edit target changed during operation")
                     # The source descriptor now refers to the old inode under
-                    # the temporary name; the temporary descriptor still
-                    # refers to staged content now reachable at ``leaf``.
-                    # Copy security metadata only after identity validation so
-                    # staged content is never made broad prematurely.
+                    # the temporary name when it remains reachable; the
+                    # temporary descriptor always refers to staged content at
+                    # ``leaf``. Copy security metadata only after target
+                    # identity validation so staged content is never made
+                    # broad prematurely.
                     self._copy_posix_security_metadata(existing_fd, temporary_fd)
                     os.fsync(temporary_fd)
                 except Exception as exc:
@@ -746,13 +809,18 @@ class ToolRunner:
                         # evidence and may still name the old inode.
                         preserve_temporary = True
                         raise SafeJailUnavailable(
-                            "jailed replacement commit is uncertain; recovery entry retained"
+                            "jailed replacement outcome is uncertain; inspect target and recovery path: "
+                            f"{temporary_name}"
                         ) from exc
                     if not staged_recovered:
                         # We restored the requested target, but the random
                         # name now holds an inode we did not stage.  It may be
                         # another actor's entry, so preserve it for recovery.
                         preserve_temporary = True
+                        raise SafeJailUnavailable(
+                            "jailed replacement outcome is uncertain; inspect target and recovery path: "
+                            f"{temporary_name}"
+                        ) from exc
                     raise
                 # The old inode is now reachable only through our random
                 # temporary name.  Remove it only after checking its identity

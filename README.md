@@ -14,7 +14,7 @@ embeddable context runtime: RAG, память диалога, профиль п�
 [Примеры](examples/) ·
 [Каталог интеграций](INTEGRATIONS.md) ·
 [Roadmap](ROADMAP.md) ·
-[Launch v0.16](LAUNCH-v0.16.md) ·
+[Launch v0.16.1](LAUNCH-v0.16.1.md) ·
 [Как добавить интеграцию](CONTRIBUTING.md) ·
 [Changelog](CHANGELOG.md)
 
@@ -264,18 +264,18 @@ pip install -e "apps/agent-cli[ollama]"
 pp-agent /path/to/project
 ```
 
-В релизе 0.16 `protoprompt-cli` не публикуется отдельно в PyPI:
+В релизе 0.16.1 `protoprompt-cli` не публикуется отдельно в PyPI:
 соответствующие wheel и sdist прикрепляются к GitHub Release. Для локального
 Ollama setup:
 
 ```bash
-python -m pip install "protoprompt[ollama]==0.16.0"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.0/protoprompt_cli-0.16.0-py3-none-any.whl"
+python -m pip install "protoprompt[ollama]==0.16.1"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.1/protoprompt_cli-0.16.1-py3-none-any.whl"
 ```
 
 Вместо wheel можно после установки соответствующей версии ядра поставить
 source из тега:
-`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.0#subdirectory=apps/agent-cli"`.
+`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.1#subdirectory=apps/agent-cli"`.
 
 Он поддерживает сессии, hot/cold memory, план-режим и подтверждение опасных
 инструментов. Каждый вызов модели собирается через immutable `ContextPlan`:

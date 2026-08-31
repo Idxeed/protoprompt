@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-08-31
+
+### Fixed
+- The Linux `pp-agent` release gate now accepts a legitimate atomic `edit`:
+  `RENAME_EXCHANGE` changes an inode's `ctime`, so optimistic snapshot
+  validation runs before the exchange and a ctime-tolerant content recheck
+  runs when the displaced entry remains observable. A concurrent same-inode
+  write is detected and the exchange is rolled back; if the target entry
+  itself was concurrently replaced, the inverse exchange restores that
+  replacement when its identity remains observable. A missing displaced entry,
+  a second rename, or a post-commit filesystem failure reports an uncertain
+  outcome and a generated recovery path rather than claiming a verified result
+  or final writer ordering.
+- The interactive project chooser rejects a missing path or regular file
+  before launching an agent.
+- The external-symlink grep regression test now distinguishes an echoed query
+  from content that was actually read from an unsafe target.
+
+### Release integrity
+- `v0.16.0` did not publish PyPI or GitHub Release artifacts: its Ubuntu
+  verification gate caught the Linux-only regressions above. `0.16.1` is the
+  corrective patch release; the original tag is retained as an unpublished
+  candidate and is not rewritten.
+
 ## [0.16.0] - 2026-08-31
 
 ### Added
@@ -24,8 +48,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   direct configured REST client, an explicit endpoint and the fixed `PP_*`
   credential contract instead of ambient SDK configuration.
 - The core package, bundled Ollama/PDF reference application, and
-  `protoprompt-cli` GitHub Release artifacts ship in lockstep as `0.16.0`.
-  The CLI is not a separate PyPI upload in this release.
+  `protoprompt-cli` GitHub Release artifacts were prepared to ship in
+  lockstep as `0.16.0`; its gate failure prevented publication. The corrective
+  `0.16.1` release retains that artifact model, with the CLI not uploaded to
+  PyPI separately.
 
 ### Security
 - Jailed tools reject links, hard links and mount/reparse crossings; Linux
