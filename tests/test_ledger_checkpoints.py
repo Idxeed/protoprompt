@@ -164,32 +164,53 @@ async def test_checkpoint_survives_restart_and_composes_only_freshly_resumed_dat
         assert resume.continuation_ref == "restart-continuation"
         assert "restart-continuation" not in json.dumps(resume.explain())
 
+        llm = MockLLM()
         builder = TokenBudgetedContextBuilder(
             InMemStore(),
-            MockLLM(),
+            llm,
             counter=counter,
             max_tokens=500,
             scope=scope,
         )
         composer = LedgerContextComposer(builder, restarted_planner)
+        current_query = "What does the current deployment evidence require?"
         with pytest.raises(LedgerCheckpointError, match="resume task"):
             await composer.plan_checkpoint_messages(
                 resume,
                 ContextInput(
-                    query="unrelated current host request",
+                    query=current_query,
                     system_prompt="The host system contract remains authoritative.",
                     include_rag=False,
                     include_session=False,
                 ),
                 user_message="This request must not reuse the checkpoint lane.",
             )
+        with pytest.raises(LedgerCheckpointError, match="resume task"):
+            await composer.plan_checkpoint_messages(
+                resume,
+                ContextInput(
+                    query=current_query,
+                    system_prompt="The host system contract remains authoritative.",
+                    include_rag=False,
+                    include_session=False,
+                ),
+                user_message="This request must not reuse the checkpoint lane.",
+                recall_task="a different sealed recall task",
+            )
         request = await composer.plan_checkpoint_messages(
             resume,
-            _input(),
+            ContextInput(
+                query=current_query,
+                system_prompt="The host system contract remains authoritative.",
+                include_rag=True,
+                include_session=False,
+            ),
             user_message="What is the safe resume rule?",
+            recall_task=_TASK,
         )
         messages = request.render_messages()
 
+        assert llm.embed_calls[-1]["texts"] == [current_query]
         assert json.loads(messages[2]["content"])["records"] == [{
             "content": content,
             "kind": "fact",

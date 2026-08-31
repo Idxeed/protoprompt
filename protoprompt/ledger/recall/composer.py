@@ -295,6 +295,7 @@ class LedgerContextComposer:
         *,
         final_messages: list[dict] | None = None,
         output_reserve: int | None = None,
+        recall_task: str | None = None,
     ) -> LedgerComposedRequest:
         """Compose a freshly revalidated sealed checkpoint into one request.
 
@@ -302,6 +303,14 @@ class LedgerContextComposer:
         it loaded the durable manifest and re-planned against current Ledger
         state. The stored checkpoint budgets remain authoritative, so this
         API intentionally accepts no Ledger budget override.
+
+        By default, ``inp.query`` remains the task bound to ``resume``,
+        preserving the original API contract.  A host may pass
+        ``recall_task`` to bind the sealed Ledger selection to a stable task
+        while leaving ``inp.query`` available for the current request and its
+        RAG retrieval.  The override is used only for the planner-owned
+        resume-integrity check; it never changes ``ContextInput`` or provider
+        messages.
         """
 
         if not isinstance(inp, ContextInput):
@@ -317,7 +326,7 @@ class LedgerContextComposer:
         )
         recall_plan = self._recall_planner._plan_from_resume(
             resume,
-            task=input_snapshot.query,
+            task=input_snapshot.query if recall_task is None else recall_task,
         )
         return await self._compose_recall_plan(
             recall_plan,
