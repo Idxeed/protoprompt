@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "suite_version": "v0.4",
+  "suite_kind": "ledger_task_episode_resume",
+  "suite_id": "offline-ledger-task-episode-resume-regression",
+  "candidate_id": "protoprompt_ledger_task_episode_resume_v0_17",
+  "contracts": [
+    {
+      "id": "restart_mapping_live_query_rag",
+      "kind": "restart_mapping_live_query_rag"
+    },
+    {
+      "id": "strict_host_episode_typed_enforcement",
+      "kind": "strict_host_episode_typed_enforcement"
+    },
+    {
+      "id": "task_and_parent_scope_isolation",
+      "kind": "task_and_parent_scope_isolation"
+    },
+    {
+      "id": "continuation_and_lifecycle_fail_closed",
+      "kind": "continuation_and_lifecycle_fail_closed"
+    },
+    {
+      "id": "receipt_redaction_and_composer_owned_lane",
+      "kind": "receipt_redaction_and_composer_owned_lane"
+    }
+  ]
+}

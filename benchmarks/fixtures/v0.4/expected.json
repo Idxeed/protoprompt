@@ -1,0 +1,89 @@
+{
+  "report_schema_version": 1,
+  "fixture_sha256": "11178b65593b008a0218927e44cf50d48182f99cc6bb7115121a3e03a16b7c27",
+  "report": {
+    "report_schema_version": 1,
+    "suite_version": "v0.4",
+    "benchmark_kind": "ledger_task_episode_resume",
+    "candidate_id": "protoprompt_ledger_task_episode_resume_v0_17",
+    "fixture_sha256": "11178b65593b008a0218927e44cf50d48182f99cc6bb7115121a3e03a16b7c27",
+    "cases": [
+      {
+        "id": "restart_mapping_live_query_rag",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "host_mapping_reconstructs_after_sqlite_restart": true,
+            "live_query_drives_rag_without_rebinding_descriptor": true,
+            "typed_episode_returns_from_composer_owned_lane": true,
+            "public_receipts_are_content_free": true,
+            "request_receipt_reconciles": true
+          },
+          "passed_checks": 5,
+          "check_count": 5
+        }
+      },
+      {
+        "id": "strict_host_episode_typed_enforcement",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "strict_policy_selects_only_host_assertion_episode": true,
+            "nonhost_and_procedure_records_are_excluded": true,
+            "matching_typed_host_episode_seals": true,
+            "malformed_episode_fails_closed_before_checkpoint": true,
+            "cross_task_episode_fails_closed_before_checkpoint": true
+          },
+          "passed_checks": 5,
+          "check_count": 5
+        }
+      },
+      {
+        "id": "task_and_parent_scope_isolation",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "different_task_refs_derive_distinct_scopes": true,
+            "same_task_ref_in_different_parents_derives_distinct_scopes": true,
+            "task_checkpoint_cross_read_is_rejected": true,
+            "parent_scope_checkpoint_cross_read_is_rejected": true
+          },
+          "passed_checks": 4,
+          "check_count": 4
+        }
+      },
+      {
+        "id": "continuation_and_lifecycle_fail_closed",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "continuation_mismatch_is_rejected_before_composition": true,
+            "lifecycle_change_invalidates_and_blocks_resume": true
+          },
+          "passed_checks": 2,
+          "check_count": 2
+        }
+      },
+      {
+        "id": "receipt_redaction_and_composer_owned_lane",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "all_lookalike_placements_compose": true,
+            "composer_owned_data_lane_remains_fixed": true,
+            "lookalikes_do_not_replace_typed_episode_data": true,
+            "public_receipts_are_redacted": true,
+            "request_receipts_reconcile": true
+          },
+          "passed_checks": 5,
+          "check_count": 5
+        }
+      }
+    ],
+    "summary": {
+      "case_count": 5,
+      "passing_case_count": 5,
+      "all_pass": true
+    }
+  }
+}

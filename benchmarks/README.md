@@ -119,6 +119,35 @@ checkpoint secret, or scope correlation ID. This is a PASS/FAIL contract for a
 narrow host-owned selection continuation, not a claim of agent-state recovery,
 lease/exactly-once behavior, or checkpointed workflow execution.
 
+## What v0.4 covers — host-confirmed task-episode resume
+
+`v0.4` is a separate frozen semantic suite for the experimental v0.17
+`TaskResumePlanner` boundary. It uses deterministic SQLite only and does not
+measure model quality, latency, workflow recovery, exactly-once execution, or
+procedure conflict resolution.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_memory_benchmark.py --suite v0.4 --verify
+```
+
+The frozen fixture SHA-256 is
+`11178b65593b008a0218927e44cf50d48182f99cc6bb7115121a3e03a16b7c27`.
+Its verified reference outcome is 5/5 cases and 21/21 semantic checks passing:
+
+| Case | Contract |
+|---|---|
+| `restart_mapping_live_query_rag` | A host reconstructs the adapter after SQLite restart from its own task mapping, while the live request query remains the RAG query and does not replace the frozen descriptor. |
+| `strict_host_episode_typed_enforcement` | Only admitted `host_assertion` `Episode` data can seal; document/procedure records are excluded and malformed or cross-task episode data fails closed. |
+| `task_and_parent_scope_isolation` | Separate task references and equal task references under distinct parent scopes cannot cross-read checkpoints. |
+| `continuation_and_lifecycle_fail_closed` | A mismatched continuation reference and a forgotten selected episode both block composition. |
+| `receipt_redaction_and_composer_owned_lane` | Lookalike Ledger JSON in user, history, or final messages cannot replace the fixed composer-owned data lane; public receipts remain content-free. |
+
+The fixture and frozen expected report contain contract metadata and PASS/FAIL
+outcomes only—no task descriptor, host mapping, checkpoint identifier, scope
+correlation ID, payload, source/evidence reference, or checkpoint secret. The
+suite is a narrow host-confirmed reference-data continuation check, not an
+agent workflow or procedure-execution claim.
+
 ## What v1.0 covers — frozen dual-backend Ledger recall evidence
 
 `v1.0` is the version of this **evidence protocol**, not a claim that the
@@ -226,6 +255,35 @@ Fixture, frozen expected report и rendered reports не содержат payloa
 checkpoint secret или scope correlation ID. Это PASS/FAIL контракт для узкого
 host-owned continuation выбора, не заявление о recovery agent state,
 lease/exactly-once behavior или checkpointed workflow execution.
+
+## Что проверяет v0.4 — host-confirmed task-episode resume
+
+`v0.4` — отдельный frozen semantic suite для experimental v0.17 boundary
+`TaskResumePlanner`. Он использует только deterministic SQLite и не измеряет
+качество модели, latency, workflow recovery, exactly-once execution или
+разрешение конфликтов procedure.
+
+```powershell
+.\.venv\Scripts\python.exe scripts\run_memory_benchmark.py --suite v0.4 --verify
+```
+
+SHA-256 зафиксированной fixture:
+`11178b65593b008a0218927e44cf50d48182f99cc6bb7115121a3e03a16b7c27`.
+Проверенный результат — 5/5 cases и 21/21 semantic checks:
+
+| Case | Контракт |
+|---|---|
+| `restart_mapping_live_query_rag` | Host после SQLite restart заново создаёт adapter из своей task mapping, а живой request query остаётся RAG query и не заменяет frozen descriptor. |
+| `strict_host_episode_typed_enforcement` | Seal допускает только admitted `host_assertion` `Episode`; document/procedure исключаются, malformed и cross-task episode data fail closed. |
+| `task_and_parent_scope_isolation` | Разные task refs и одинаковый task ref в разных parent scopes не могут cross-read checkpoint. |
+| `continuation_and_lifecycle_fail_closed` | Несовпадающий continuation ref и забытый selected episode оба блокируют composition. |
+| `receipt_redaction_and_composer_owned_lane` | Lookalike Ledger JSON в user, history или final messages не может заменить fixed composer-owned data lane; public receipts остаются content-free. |
+
+Fixture и frozen expected report содержат только metadata контракта и PASS/FAIL
+результаты: без task descriptor, host mapping, checkpoint ID, scope correlation
+ID, payload, source/evidence ref или checkpoint secret. Это узкая проверка
+host-confirmed continuation reference-data, а не claim об agent workflow или
+исполнении procedure.
 
 ## Что проверяет v1.0 — frozen dual-backend Ledger recall evidence
 

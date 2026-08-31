@@ -106,11 +106,12 @@ jobs:
           cache: pip
       - run: python -m pip install --upgrade pip
       - run: python -m pip install .
-      - name: Verify frozen semantic memory and Ledger checkpoint baselines
+      - name: Verify frozen semantic memory and Ledger continuation baselines
         run: |
           python scripts/run_memory_benchmark.py --suite v0.1 --verify
           python scripts/run_memory_benchmark.py --suite v0.2 --verify
           python scripts/run_memory_benchmark.py --suite v0.3 --verify
+          python scripts/run_memory_benchmark.py --suite v0.4 --verify
 
   lint:
     name: lint
@@ -197,6 +198,9 @@ jobs:
                   "benchmarks/ledger_checkpoint_benchmark.py",
                   "benchmarks/fixtures/v0.3/suite.json",
                   "benchmarks/fixtures/v0.3/expected.json",
+                  "benchmarks/ledger_task_resume_benchmark.py",
+                  "benchmarks/fixtures/v0.4/suite.json",
+                  "benchmarks/fixtures/v0.4/expected.json",
                   "benchmarks/ledger_recall_evidence_benchmark.py",
                   "benchmarks/fixtures/v1.0/suite.json",
                   "benchmarks/fixtures/v1.0/expected.json",
