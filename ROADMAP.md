@@ -1,10 +1,11 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.16.1` hardens reference-agent boundary: user-owned state,
-> identity-bound project namespaces, native no-reparse project discovery и
-> fail-closed jailed operations. `0.15.0` остаётся frozen dual-backend semantic
-> evidence для strict Ledger recall. Это усиливает release gate без расширения
-> public API; следующий этап — остальные RC-gates к `1.0.0`.
+> Статус: `0.17.0` добавляет узкую experimental границу host-only
+> task-episode resume: typed `TaskEpisode`, derived task scope, HMAC-sealed
+> Ledger selection и fresh fail-closed composition без подмены текущего RAG
+> query. `0.16.1` остаётся hardening reference-agent boundary, `0.15.0` —
+> frozen dual-backend semantic evidence для strict Ledger recall. Следующий
+> этап — остальные RC-gates к `1.0.0`, а не расширение workflow surface.
 > Обновлён: 2026-08-31.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
@@ -230,6 +231,13 @@ index, summaries и framework-specific state — его projections/caches, а �
   selection: v0.12 хранит opaque host reference и HMAC-sealed selection
   manifest, а после restart требует fresh plan с точным policy/counter/budget
   receipt и тем же selection. Это не checkpoint agent workflow/state.
+- [x] В `0.17.0` добавить узкий host-only `TaskResumePlanner`: только
+  admitted `host_assertion` typed `TaskEpisode` из task scope, производного от
+  полного parent-scope correlation и opaque `task_ref`, могут запечатать и
+  возобновить selection. Host удерживает `{task_ref, descriptor,
+  checkpoint_id}` вне Ledger; descriptor фиксирует recall, а live
+  `ContextInput.query` остаётся текущим RAG запросом. `TaskProcedure` пока
+  только typed reference data и не входит в selection.
 - Добавить controlled consolidation и policy-driven composition для facts,
   episodes, procedures, RAG evidence и current task. Узкий admitted Ledger
   JSON → request bridge выпущен отдельно в `0.11.0`; широкая composition
@@ -425,6 +433,37 @@ authorization layer, PostgreSQL migration toolkit, performance claim или
 универсальный fuzzing service или claim о 10k-record runtime. Отдельный v1
 benchmark и reference hardware manifest остаются необходимы для target
 planning p95.
+
+## 0.17.0 — Host-only task-episode resume
+
+**Цель:** дать приложению узкую, проверяемую continuation boundary для одной
+подтверждённой задачи, не сериализуя agent state и не превращая Ledger в
+workflow engine.
+
+### Выполнено
+
+- [x] `TaskEpisode` и `TaskProcedure` имеют canonical versioned JSON contract;
+  malformed/duplicate/unknown fields, unsupported schema, non-finite values и
+  task mismatch fail closed. Только episode допускается в v0.17 selection.
+- [x] `task_resume_scope()` связывает tenant/user и opaque correlation
+  родительского scope с host-minted `task_ref`; один ref в разных parent
+  thread/kind не может cross-read или resume запись.
+- [x] `TaskResumePlanner` требует ровно host-asserted admitted episode policy,
+  scope-pinned writer/builder и HMAC-sealed continuation ref. До и после
+  composition он заново валидирует selected payload/lifecycle и exact
+  composer-owned JSON lane.
+- [x] Frozen v0.4 SQLite semantic fixture проверяет restart с host mapping,
+  live RAG query, typed/origin boundary, parent/task isolation,
+  continuation/lifecycle rejection и content-free receipts.
+
+### Неподвижная граница
+
+Descriptor не хранится в Ledger checkpoint: после restart host сам
+восстанавливает `{task_ref, descriptor, checkpoint_id}`. Здесь нет automatic
+extraction/admission, browser/model control plane, auto-wiring в Ollama app,
+procedure execution, dependency/conflict planner, tool authority, exactly-once
+semantics, provider conversation snapshot или workflow/agent checkpoint. Это
+не claim о model quality, unlimited context или «бесконечной памяти».
 
 ## v1.0 evidence protocol — dual-backend semantic recall
 

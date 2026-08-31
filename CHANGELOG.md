@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-08-31
+
+### Added
+- Experimental, host-only task-episode resume boundary: `TaskResumePlanner`
+  binds a host-minted `task_ref` to a derived backend scope, a strict Ledger
+  checkpoint, and a fixed host-held task descriptor. The current
+  `ContextInput.query` remains the live request/RAG query instead of silently
+  replacing the frozen recall descriptor.
+- Canonical typed `TaskEpisode` and `TaskProcedure` reference-data contracts,
+  with strict JSON decoding that rejects unknown or duplicate fields,
+  unsupported schemas, non-finite constants, malformed values, and task
+  mismatches. The v0.17 adapter selects `TaskEpisode` only; procedures remain
+  non-executable typed data pending dependency/conflict semantics.
+- A task-specific scope derives from the full parent-scope correlation plus
+  `task_ref`; same task references in different parent thread/kind namespaces
+  cannot cross-read or resume each other.
+- Frozen offline v0.4 semantic benchmark for SQLite task-episode resume:
+  restart reconstruction with live RAG query, strict host-origin/typed
+  selection, parent/task isolation, continuation/lifecycle failure, and
+  content-free receipts with the composer-owned data lane.
+- English and Russian task-resume documentation, including the trusted-host
+  admission flow, restart mapping, and explicit non-goals.
+
+### Security
+- Task resume accepts exactly `host_assertion` `episode` records with immutable
+  admission evidence and at least 0.75 confidence. It re-resolves and decodes
+  selected records before and after request composition, failing closed for
+  stale lifecycle state or malformed/cross-task payloads.
+- The resume adapter validates the exact Ledger data lane owned by
+  `LedgerComposedRequest`; JSON lookalikes in user, history, or final messages
+  cannot substitute selected Ledger data.
+
+### Compatibility
+- The API is additive and experimental; existing composition behavior is
+  unchanged when no explicit host recall task is supplied. No storage-schema
+  migration is required for this boundary.
+- `pp-agent` and the local Ollama/PDF reference app are released in lockstep
+  at 0.17.0, but task resume is deliberately not auto-wired into either app.
+
 ## [0.16.1] - 2026-08-31
 
 ### Fixed

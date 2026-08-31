@@ -39,7 +39,8 @@ widened boundary.
 Each selected record must be a canonical JSON `TaskEpisode`:
 
 - `task_ref`, `goal`, `completed_action_refs`, and `outcome` are required;
-- `next_action` and `lesson` are optional bounded reference data; and
+- `next_action` and `lesson` are semantically optional bounded reference data,
+  but their canonical JSON keys are required and use `null` when absent; and
 - decoding rejects malformed JSON, duplicate or unknown fields, an unsupported
   schema, a wrong payload kind, and a mismatched task reference.
 

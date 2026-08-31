@@ -1,6 +1,6 @@
 [project]
 name = "protoprompt"
-version = "0.16.1"
+version = "0.17.0"
 description = "Reliable agent memory and explainable bounded context for LLM applications"
 requires-python = ">=3.11"
 license = "MIT"

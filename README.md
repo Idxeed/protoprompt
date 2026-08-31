@@ -14,7 +14,7 @@ embeddable context runtime: RAG, память диалога, профиль п�
 [Примеры](examples/) ·
 [Каталог интеграций](INTEGRATIONS.md) ·
 [Roadmap](ROADMAP.md) ·
-[Launch v0.16.1](LAUNCH-v0.16.1.md) ·
+[Launch v0.17.0](LAUNCH-v0.17.0.md) ·
 [Как добавить интеграцию](CONTRIBUTING.md) ·
 [Changelog](CHANGELOG.md)
 
@@ -68,6 +68,15 @@ request, требует strict admission policy и того же scope/counter; 
 `pp-agent` пока не подключают composer автоматически. См. [Bounded recall из
 ledger](docs/ru/ledger-recall.md).
 
+v0.17 добавляет ещё более узкий experimental `TaskResumePlanner`: trusted host
+связывает canonical `TaskEpisode` с отдельным task scope, HMAC-sealed Ledger
+checkpoint и своим durable mapping `{task_ref, descriptor, checkpoint_id}`.
+При resume снова проверяются scope, admission, typed payload и lifecycle, а
+текущий `ContextInput.query` остаётся live RAG query. `TaskProcedure` пока
+является только typed reference data и не выбирается. Это не agent/workflow
+checkpoint, не tool authority и не auto-wiring для `pp-ollama-chat` или
+`pp-agent`. См. [возобновление задачи](docs/ru/task-resume.md).
+
 v0.13 добавляет experimental `PostgresMemoryLedger`: тот же явный sync
 `MemoryWriter` contract и Ledger v6 в выделенной PostgreSQL schema. Backend
 принимает только fresh v6 setup, сериализует записи schema-wide advisory
@@ -85,8 +94,9 @@ v0.15 добавил frozen dual-backend evidence protocol для strict Ledger
 selection: один content-free synthetic fixture обязан дать одинаковую
 семантику на SQLite и PostgreSQL. v0.16 hardens reference-agent boundary:
 user-owned state, identity-bound project namespaces, strict native jail
-operations и явный provider transport. Это не делает claim о качестве модели,
-general recall, latency, throughput или package `1.0.0`.
+operations и явный provider transport. v0.17 добавляет только host-owned
+task-episode resume boundary; это не claim о качестве модели, general recall,
+latency, throughput или package `1.0.0`.
 
 ## Установка
 
@@ -264,18 +274,18 @@ pip install -e "apps/agent-cli[ollama]"
 pp-agent /path/to/project
 ```
 
-В релизе 0.16.1 `protoprompt-cli` не публикуется отдельно в PyPI:
+В релизе 0.17.0 `protoprompt-cli` не публикуется отдельно в PyPI:
 соответствующие wheel и sdist прикрепляются к GitHub Release. Для локального
 Ollama setup:
 
 ```bash
-python -m pip install "protoprompt[ollama]==0.16.1"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.1/protoprompt_cli-0.16.1-py3-none-any.whl"
+python -m pip install "protoprompt[ollama]==0.17.0"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.17.0/protoprompt_cli-0.17.0-py3-none-any.whl"
 ```
 
 Вместо wheel можно после установки соответствующей версии ядра поставить
 source из тега:
-`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.1#subdirectory=apps/agent-cli"`.
+`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.17.0#subdirectory=apps/agent-cli"`.
 
 Он поддерживает сессии, hot/cold memory, план-режим и подтверждение опасных
 инструментов. Каждый вызов модели собирается через immutable `ContextPlan`:
@@ -307,6 +317,7 @@ python scripts/build_docs.py --clean
 python scripts/run_memory_benchmark.py --suite v0.1 --verify
 python scripts/run_memory_benchmark.py --suite v0.2 --verify
 python scripts/run_memory_benchmark.py --suite v0.3 --verify
+python scripts/run_memory_benchmark.py --suite v0.4 --verify
 ```
 
 Отдельный v1 evidence gate проверяет один строгий Ledger fixture сразу на

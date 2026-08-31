@@ -177,8 +177,8 @@ jobs:
                   ".dockerignore",
                   "CHANGELOG.md",
                   "RELEASE_NOTES.md",
-                  "SECURITY_REVIEW-v0.16.1.md",
-                  "LAUNCH-v0.16.1.md",
+                  "SECURITY_REVIEW-v0.17.0.md",
+                  "LAUNCH-v0.17.0.md",
                   "CONTRIBUTING.md",
                   "INTEGRATIONS.md",
                   "ROADMAP.md",
@@ -207,6 +207,8 @@ jobs:
                   "benchmarks/fixtures/v1.0/manifest.json",
                   "docs/en/migration-0.6.md",
                   "docs/ru/migration-0.6.md",
+                  "docs/en/task-resume.md",
+                  "docs/ru/task-resume.md",
               }
               missing = {path for path in expected if f"{root}/{path}" not in names}
               assert not missing, missing
@@ -265,12 +267,12 @@ jobs:
               )
               metadata = email.message_from_bytes(archive.read(metadata_name))
               assert metadata["Name"] == "protoprompt-cli"
-              assert metadata["Version"] == "0.16.1"
+              assert metadata["Version"] == "0.17.0"
               requirements = metadata.get_all("Requires-Dist") or []
               assert any(
                   requirement.startswith("protoprompt")
-                  and ">=0.16.1" in requirement
-                  and "<0.17.0" in requirement
+                  and ">=0.17.0" in requirement
+                  and "<0.18.0" in requirement
                   for requirement in requirements
               ), requirements
 
@@ -294,7 +296,7 @@ jobs:
           smoke_python=/tmp/protoprompt-agent-cli-smoke/bin/python
           "$smoke_python" -m pip install --no-deps dist-core/*.whl dist-agent-cli/*.whl
           cd /tmp
-          test "$(/tmp/protoprompt-agent-cli-smoke/bin/pp-agent --version)" = "0.16.1"
+          test "$(/tmp/protoprompt-agent-cli-smoke/bin/pp-agent --version)" = "0.17.0"
 
   agent-cli-windows:
     name: agent CLI tests (Windows)

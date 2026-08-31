@@ -40,7 +40,8 @@ widened boundary.
 Каждая выбранная запись должна быть canonical JSON `TaskEpisode`:
 
 - обязательны `task_ref`, `goal`, `completed_action_refs` и `outcome`;
-- `next_action` и `lesson` — опциональные bounded reference data;
+- `next_action` и `lesson` — семантически опциональные bounded reference
+  data, но их canonical JSON keys обязательны и при отсутствии имеют `null`;
 - malformed JSON, duplicate/unknown fields, unsupported schema, неверный
   payload kind и несовпадающий task reference отклоняются fail-closed.
 

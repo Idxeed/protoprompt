@@ -8,7 +8,7 @@
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.md) · [v0.16.1 launch kit](LAUNCH-v0.16.1.md)
+[Русская версия](README.md) · [v0.17.0 launch kit](LAUNCH-v0.17.0.md)
 
 **Reliable agent memory under a fixed context budget.** ProtoPrompt is an
 embeddable context runtime for LLM applications. The core combines **RAG over
@@ -62,6 +62,15 @@ scope/counter, and keeps raw `unknown` / `legacy_unknown` out of a composed
 request. Neither `pp-ollama-chat` nor `pp-agent` auto-wires it yet; see
 [Bounded ledger recall](docs/en/ledger-recall.md).
 
+v0.17 adds a still narrower experimental `TaskResumePlanner`: trusted host
+code binds a canonical `TaskEpisode` to a dedicated task scope, an HMAC-sealed
+Ledger checkpoint, and its own durable `{task_ref, descriptor, checkpoint_id}`
+mapping. Resume rechecks scope, admission, typed payload, and lifecycle while
+the current `ContextInput.query` remains the live RAG query. `TaskProcedure`
+is currently typed reference data only and is not selected. This is not an
+agent/workflow checkpoint, tool authority, or automatic wiring for
+`pp-ollama-chat` or `pp-agent`; see [Task-resume memory](docs/en/task-resume.md).
+
 v0.13 adds experimental `PostgresMemoryLedger`: the same explicit synchronous
 `MemoryWriter` contract and Ledger v6 semantics in a dedicated PostgreSQL
 schema. It accepts fresh v6 setup only, serializes writes with a schema-wide
@@ -80,8 +89,9 @@ v0.15 added a frozen dual-backend evidence protocol for strict Ledger
 selection: one content-free synthetic fixture must produce the same semantics
 on SQLite and PostgreSQL. v0.16 hardens the reference-agent boundary with
 user-owned state, identity-bound project namespaces, strict native jail
-operations, and explicit provider transport. It makes no model-quality,
-general-recall, latency, throughput, or package-`1.0.0` claim.
+operations, and explicit provider transport. v0.17 adds only the host-owned
+task-episode resume boundary; it makes no model-quality, general-recall,
+latency, throughput, or package-`1.0.0` claim.
 
 Our path to 1.0 is deliberately narrow: retain information for as long as the
 application needs, but admit only an explainable, policy-approved set of
@@ -277,17 +287,17 @@ pip install -e "apps/agent-cli[ollama]"
 pp-agent /path/to/project
 ```
 
-For 0.16.1, `protoprompt-cli` is not separately uploaded to PyPI. Its matching
+For 0.17.0, `protoprompt-cli` is not separately uploaded to PyPI. Its matching
 wheel and sdist are attached to the GitHub Release; install the matching core
 with the desired backend first:
 
 ```bash
-python -m pip install "protoprompt[ollama]==0.16.1"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.16.1/protoprompt_cli-0.16.1-py3-none-any.whl"
+python -m pip install "protoprompt[ollama]==0.17.0"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.17.0/protoprompt_cli-0.17.0-py3-none-any.whl"
 ```
 
 Alternatively, after installing the matching core, install the tagged source:
-`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.16.1#subdirectory=apps/agent-cli"`.
+`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.17.0#subdirectory=apps/agent-cli"`.
 
 It supports sessions, hot/cold memory, planning mode, and confirmation for
 dangerous tools. Every provider request goes through an immutable `ContextPlan`:
@@ -312,6 +322,7 @@ Run the offline, network-free memory regression gate with:
 python scripts/run_memory_benchmark.py --suite v0.1 --verify
 python scripts/run_memory_benchmark.py --suite v0.2 --verify
 python scripts/run_memory_benchmark.py --suite v0.3 --verify
+python scripts/run_memory_benchmark.py --suite v0.4 --verify
 ```
 
 The separate v1 evidence gate verifies one strict Ledger fixture on both
