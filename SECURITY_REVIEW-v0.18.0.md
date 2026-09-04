@@ -60,6 +60,18 @@ model. The new boundary is deliberately narrow:
   existing Material/MkDocs 2 compatibility advisories are not security test
   results.
 
+## Remote CI evidence (2026-09-04)
+
+The pushed feature branch was verified by GitHub Actions run
+`33904938519` for commit `29813a911c5f7bbdf2f0e7a091858f66713b58c5`:
+<https://github.com/Idxeed/protoprompt/actions/runs/33904938519>.
+The run concluded `success` for every required job: Python 3.11/3.12/3.13,
+Windows CLI, Ollama reference app, docs, lint, wheel/sdist package smoke,
+offline memory benchmark, and PostgreSQL/Redis integration. The docs deploy
+job was skipped because this is not `master`. This is branch-level CI evidence,
+not a public-release approval or a substitute for owner review of the version
+and tag.
+
 Primary regression coverage lives in:
 
 - `tests/test_ledger_task_resume.py`
