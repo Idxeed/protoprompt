@@ -1,0 +1,13 @@
+{
+  "schema_version": 1,
+  "conversation_id": "launch-demo",
+  "task_descriptor": "Resume the approved local product launch demonstration.",
+  "goal": "Continue the approved local launch demonstration from the last host-confirmed state.",
+  "completed_action_refs": [
+    "action:demo-brief-reviewed",
+    "artifact:demo-checklist"
+  ],
+  "outcome": "interrupted",
+  "next_action": "Inspect the current local PDF evidence and summarize the next safe discussion step.",
+  "lesson": "Keep approval, task identity, and action references in host-owned state; use model output only as advice."
+}

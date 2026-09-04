@@ -82,6 +82,34 @@ uploads. Значение по умолчанию — до 10 MiB на файл;
 Фрагменты PDF и памяти рассматриваются как недоверенные справочные данные:
 system prompt запрещает исполнять команды или смену роли из их содержимого.
 
+## Experimental: локальное task-resume демо
+
+Опциональный `--task-resume-demo-seed PATH` добавляет один **host-owned**
+эпизод задачи к одному заранее заданному локальному диалогу. Он показывает
+безопасную reduced reference-модель памяти рядом с live PDF RAG: модель видит
+только goal, aggregate progress, outcome, next action и lesson, но не видит
+`task_ref`, action references, descriptor, checkpoint ID или Ledger source
+IDs.
+
+```powershell
+Copy-Item apps/ollama-chat/examples/task-resume-demo.seed.json ./task-resume-demo.seed.json
+pp-ollama-chat --task-resume-demo-seed ./task-resume-demo.seed.json
+```
+
+Режим работает только с loopback UI и local Ollama; `--allow-network` с ним
+несовместим. В браузере нет API для task creation, admission, checkpoint,
+rebind или resume. PDF, transcript и model output не допускаются в Ledger
+автоматически, а обычный transcript semantic archive для активного demo-task
+не читается и не создаётся. Подробный контракт, хранение, удаление и
+ограничения для клиентской демонстрации — в [документации](../../docs/ru/ollama-task-resume-demo.md).
+
+Для demo-safe контура используйте `llama3.1:8b`, `num_ctx=2048` и одну
+активную генерацию: при включённом seed приложение caps request до 2048,
+отвергает reserve `>=2048` и ставит все model calls в одну локальную очередь.
+Локальное наблюдение на Ryzen 5 5600X / 32 GiB / RX 7600 XT 16 GB / Ollama
+0.33.2 дало 46,6–48,2 токена/с тёплой генерации для `llama3.1:8b`; это не
+универсальный benchmark, sizing promise или требование 14B/vision/голоса.
+
 ## Конфигурация
 
 | Переменная | По умолчанию | Назначение |

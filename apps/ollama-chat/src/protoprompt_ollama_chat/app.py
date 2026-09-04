@@ -19,16 +19,17 @@ import json
 import os
 from pathlib import Path
 import re
+import secrets
 import sqlite3
 import threading
-from typing import Any, AsyncIterator, Callable
+from typing import Any, AsyncIterator, Callable, Iterable, Mapping
 from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import FastAPI, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from protoprompt import (
     ContextInput,
@@ -40,9 +41,15 @@ from protoprompt import (
     as_async,
 )
 from protoprompt.integrations import OllamaClient
+from protoprompt.ledger import TaskResumeReferenceRequest
 from protoprompt.rag import DocumentIndexer, Retriever
 from protoprompt.readers import DocumentReadError, LocalDocumentReader, ReaderLimits
+from protoprompt.scope import MemoryScope
 from protoprompt.store import await_if_needed
+from protoprompt_ollama_chat.task_resume_demo import (
+    TaskResumeDemoHost,
+    TaskResumeDemoSeed,
+)
 
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -67,9 +74,17 @@ MULTIPART_OVERHEAD_BYTES = 256 * 1024
 MAX_CHAT_BODY_BYTES = MAX_MESSAGE_CHARS * 12 + 16 * 1024
 CHAT_MEMORY_KIND = "conversation_memory"
 SSE_QUEUE_MAX_EVENTS = 64
+TASK_RESUME_DEMO_SECRET_BYTES = 32
+TASK_RESUME_DEMO_SEED_MAX_BYTES = 64 * 1024
+TASK_RESUME_DEMO_CONVERSATION_TITLE = "Локальное task-resume демо"
+TASK_RESUME_DEMO_MAX_CONTEXT_TOKENS = 2_048
 
 
 class ChatRequest(BaseModel):
+    """The deliberately small browser contract for one ordinary chat turn."""
+
+    model_config = ConfigDict(extra="forbid")
+
     conversation_id: str = Field(
         min_length=1,
         max_length=80,
@@ -253,6 +268,101 @@ class RuntimeConfig:
                 "OLLAMA_CHAT_MAX_UPLOAD_BYTES", DEFAULT_MAX_UPLOAD_BYTES
             ),
         )
+
+
+def _decode_task_resume_demo_seed(value: object) -> TaskResumeDemoSeed:
+    """Validate the private, host-authored seed file shape.
+
+    This parser exists at the CLI/host boundary only.  Its return value is
+    never serialised to an API response and it is intentionally not accepted
+    by any browser route.
+    """
+
+    if not isinstance(value, dict):
+        raise ValueError("task-resume demo seed must be a JSON object")
+    required = {
+        "schema_version",
+        "conversation_id",
+        "task_descriptor",
+        "goal",
+        "completed_action_refs",
+        "outcome",
+        "next_action",
+        "lesson",
+    }
+    if set(value) != required:
+        missing = required - set(value)
+        unknown = set(value) - required
+        details: list[str] = []
+        if missing:
+            details.append("missing " + ", ".join(sorted(missing)))
+        if unknown:
+            details.append("unknown " + ", ".join(sorted(unknown)))
+        raise ValueError("task-resume demo seed fields are invalid: " + "; ".join(details))
+    schema_version = value["schema_version"]
+    if (
+        isinstance(schema_version, bool)
+        or not isinstance(schema_version, int)
+        or schema_version != 1
+    ):
+        raise ValueError("unsupported task-resume demo seed schema_version")
+    if not isinstance(value["completed_action_refs"], list):
+        raise ValueError("completed_action_refs must be a JSON array")
+    try:
+        seed = TaskResumeDemoSeed(
+            conversation_id=value["conversation_id"],
+            task_descriptor=value["task_descriptor"],
+            goal=value["goal"],
+            completed_action_refs=tuple(value["completed_action_refs"]),
+            outcome=value["outcome"],
+            next_action=value["next_action"],
+            lesson=value["lesson"],
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"task-resume demo seed field values are invalid: {exc}"
+        ) from exc
+    if not CONVERSATION_ID_RE.fullmatch(seed.conversation_id):
+        raise ValueError(
+            "task-resume demo seed conversation_id is not valid for the browser API"
+        )
+    return seed
+
+
+def _load_task_resume_demo_seed(path_value: str | Path) -> TaskResumeDemoSeed:
+    """Read one bounded, duplicate-key-free host seed outside the web API."""
+
+    path = Path(path_value).expanduser()
+    try:
+        with path.open("rb") as source:
+            raw = source.read(TASK_RESUME_DEMO_SEED_MAX_BYTES + 1)
+    except OSError as exc:
+        raise ValueError("cannot read task-resume demo seed") from exc
+    if len(raw) > TASK_RESUME_DEMO_SEED_MAX_BYTES:
+        raise ValueError("task-resume demo seed is too large")
+    try:
+        text = raw.decode("utf-8")
+
+        def reject_duplicates(pairs: list[tuple[str, object]]) -> dict[str, object]:
+            result: dict[str, object] = {}
+            for key, item in pairs:
+                if key in result:
+                    raise ValueError(
+                        f"task-resume demo seed has duplicate field {key!r}"
+                    )
+                result[key] = item
+            return result
+
+        payload = json.loads(
+            text,
+            object_pairs_hook=reject_duplicates,
+            parse_constant=lambda _constant: (_ for _ in ()).throw(
+                ValueError("task-resume demo seed has a non-finite JSON value")
+            ),
+        )
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        raise ValueError("task-resume demo seed is not valid strict JSON") from exc
+    return _decode_task_resume_demo_seed(payload)
 
 
 class ConversationRepository:
@@ -705,12 +815,27 @@ class SourceTrackingRetriever(Retriever):
         return chunks
 
 
-def _sources_from_plan(plan: ContextPlan, candidates: list[Any]) -> tuple[list[dict], int]:
+def _decision_value(decision: object, field: str) -> object:
+    """Read content-free decision metadata from a plan or safe explanation."""
+
+    if isinstance(decision, Mapping):
+        return decision.get(field)
+    return getattr(decision, field, None)
+
+
+def _sources_from_decisions(
+    decisions: Iterable[object],
+    candidates: list[Any],
+) -> tuple[list[dict], int]:
     selected_indices: list[int] = []
-    for decision in plan.decisions:
-        if decision.origin != "rag" or decision.decision not in {"included", "truncated"}:
+    for decision in decisions:
+        if (
+            _decision_value(decision, "origin") != "rag"
+            or _decision_value(decision, "decision") not in {"included", "truncated"}
+        ):
             continue
-        match = re.fullmatch(r"rag\[(\d+)\]", decision.block_id)
+        block_id = _decision_value(decision, "block_id")
+        match = re.fullmatch(r"rag\[(\d+)\]", block_id) if isinstance(block_id, str) else None
         if match is not None:
             selected_indices.append(int(match.group(1)))
 
@@ -733,6 +858,22 @@ def _sources_from_plan(plan: ContextPlan, candidates: list[Any]) -> tuple[list[d
             "score": round(float(chunk.score), 3),
         })
     return sources, memory_block_count
+
+
+def _sources_from_plan(plan: ContextPlan, candidates: list[Any]) -> tuple[list[dict], int]:
+    return _sources_from_decisions(plan.decisions, candidates)
+
+
+def _reference_context_explanation(
+    request: TaskResumeReferenceRequest,
+) -> Mapping[str, object]:
+    """Read only the content-free context receipt from an opaque request."""
+
+    explained = request.explain()
+    context = explained.get("context_plan")
+    if not isinstance(context, Mapping):  # pragma: no cover - guarded by core contract
+        raise RuntimeError("task-resume request lacks a context explanation")
+    return context
 
 
 def _ensure_private_directory(path: Path) -> None:
@@ -771,14 +912,33 @@ class Runtime:
         *,
         config: RuntimeConfig | None = None,
         llm: Any | None = None,
+        task_resume_demo_seed: TaskResumeDemoSeed | None = None,
     ) -> None:
         self.config = config or RuntimeConfig.from_env()
+        if task_resume_demo_seed is not None and not isinstance(
+            task_resume_demo_seed, TaskResumeDemoSeed
+        ):
+            raise TypeError("task_resume_demo_seed must be a TaskResumeDemoSeed or None")
+        if task_resume_demo_seed is not None and self.config.ollama_mode != "local":
+            raise ValueError("task-resume demo requires a local loopback Ollama host")
+        if (
+            task_resume_demo_seed is not None
+            and self.config.output_reserve_tokens >= TASK_RESUME_DEMO_MAX_CONTEXT_TOKENS
+        ):
+            raise ValueError(
+                "task-resume demo requires OLLAMA_CHAT_OUTPUT_RESERVE below 2048"
+            )
         self.data_dir = data_dir
         _ensure_private_directory(self.data_dir)
         self.upload_dir = self.data_dir / "uploads"
         _ensure_private_directory(self.upload_dir)
         self.chat_db_path = self.data_dir / "chat.db"
         self.memory_db_path = self.data_dir / "memory.db"
+        # These paths are meaningful only for the explicit trusted-host demo.
+        # The Ledger never shares a database file with chat/vector state, and
+        # its checkpoint secret remains in a private file outside SQLite.
+        self.task_resume_ledger_path = self.data_dir / "task-resume-ledger.db"
+        self.task_resume_secret_path = self.data_dir / "task-resume-demo.secret"
         _prepare_private_file(self.chat_db_path)
         self.repository = ConversationRepository(self.chat_db_path)
         _prepare_private_file(self.memory_db_path)
@@ -805,7 +965,26 @@ class Runtime:
         )
         self._turn_locks: dict[str, _TurnLockEntry] = {}
         self.document_lock = asyncio.Lock()
+        self._task_resume_demo: TaskResumeDemoHost | None = None
+        self._task_resume_demo_max_tokens: int | None = None
+        self._demo_generation_lock: asyncio.Lock | None = None
+        if task_resume_demo_seed is not None:
+            self._task_resume_demo_max_tokens = min(
+                self.config.request_max_tokens,
+                TASK_RESUME_DEMO_MAX_CONTEXT_TOKENS,
+            )
+            # This is an intentional local queue, not a background worker or
+            # a multi-user scheduler. It keeps a demo-safe 8B contour to one
+            # active model generation per process.
+            self._demo_generation_lock = asyncio.Lock()
+            self._enable_task_resume_demo(task_resume_demo_seed)
         self.secure_local_data()
+
+    @property
+    def request_max_tokens(self) -> int:
+        """Return the active request ceiling, capped in explicit demo mode."""
+
+        return self._task_resume_demo_max_tokens or self.config.request_max_tokens
 
     def secure_local_data(self) -> None:
         """Keep persistent local data owner-readable only on POSIX systems.
@@ -816,7 +995,10 @@ class Runtime:
         """
         if os.name == "nt":
             return
-        for database_path in (self.chat_db_path, self.memory_db_path):
+        database_paths = [self.chat_db_path, self.memory_db_path]
+        if self._task_resume_demo is not None:
+            database_paths.append(self.task_resume_ledger_path)
+        for database_path in database_paths:
             for suffix in ("", "-journal", "-wal", "-shm"):
                 candidate = Path(f"{database_path}{suffix}")
                 if not candidate.is_file():
@@ -827,6 +1009,137 @@ class Runtime:
                     raise RuntimeError(
                         f"cannot restrict local data file {candidate}"
                     ) from exc
+        if self._task_resume_demo is not None and self.task_resume_secret_path.is_file():
+            try:
+                self.task_resume_secret_path.chmod(0o600)
+            except OSError as exc:
+                raise RuntimeError(
+                    f"cannot restrict local data file {self.task_resume_secret_path}"
+                ) from exc
+
+    def _load_or_create_task_resume_demo_secret(self) -> bytes:
+        """Return a stable private checkpoint key without placing it in SQLite."""
+
+        path = self.task_resume_secret_path
+        if path.is_symlink():
+            raise RuntimeError("task-resume demo secret path must not be a symlink")
+        if path.exists():
+            if not path.is_file():
+                raise RuntimeError("task-resume demo secret path is not a regular file")
+            try:
+                secret = path.read_bytes()
+            except OSError as exc:
+                raise RuntimeError("cannot read task-resume demo secret") from exc
+        else:
+            secret = secrets.token_bytes(TASK_RESUME_DEMO_SECRET_BYTES)
+            flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            if hasattr(os, "O_NOFOLLOW"):
+                flags |= os.O_NOFOLLOW
+            try:
+                descriptor = os.open(path, flags, 0o600)
+            except FileExistsError:
+                # A concurrent local startup won the race. Read and validate
+                # the same stable secret instead of replacing it.
+                if path.is_symlink():
+                    raise RuntimeError(
+                        "task-resume demo secret path must not be a symlink"
+                    )
+                try:
+                    secret = path.read_bytes()
+                except OSError as exc:
+                    raise RuntimeError("cannot read task-resume demo secret") from exc
+            except OSError as exc:
+                raise RuntimeError("cannot create task-resume demo secret") from exc
+            else:
+                try:
+                    written = os.write(descriptor, secret)
+                    if written != len(secret):  # pragma: no cover - unusual FS failure
+                        raise RuntimeError("cannot write complete task-resume demo secret")
+                finally:
+                    os.close(descriptor)
+        if len(secret) != TASK_RESUME_DEMO_SECRET_BYTES:
+            raise RuntimeError("task-resume demo secret has an unsupported length")
+        if os.name != "nt":
+            try:
+                path.chmod(0o600)
+            except OSError as exc:
+                raise RuntimeError("cannot restrict task-resume demo secret") from exc
+        return secret
+
+    def _task_resume_builder_factory(
+        self,
+        conversation_id: str,
+        *,
+        captured_retrievers: list[SourceTrackingRetriever] | None = None,
+    ) -> Callable[[MemoryScope], TokenBudgetedContextBuilder]:
+        """Build a scoped Ledger adapter with server-selected, unscoped PDFs.
+
+        The builder itself is pinned to the task-derived Ledger scope.  Its
+        document retriever intentionally remains unscoped and receives only
+        current server-computed PDF ids: otherwise the task scope would hide
+        ordinary PDF RAG.  Transcript archive ids are deliberately empty in
+        demo mode so an automatic chat-memory projection cannot join the
+        trusted Ledger reference lane.
+        """
+
+        def build(scope: MemoryScope) -> TokenBudgetedContextBuilder:
+            retriever = SourceTrackingRetriever(
+                self.store,
+                self.llm,
+                embedding_model=self.config.embed_model,
+                conversation_id=conversation_id,
+                document_ids=self.repository.ready_document_ids(),
+                memory_document_ids=[],
+            )
+            if captured_retrievers is not None:
+                captured_retrievers.append(retriever)
+            return TokenBudgetedContextBuilder(
+                self.store,
+                self.llm,
+                counter=RegexTokenCounter(),
+                max_tokens=self.request_max_tokens,
+                output_reserve=self.config.output_reserve_tokens,
+                retriever=retriever,
+                scope=scope,
+            )
+
+        return build
+
+    def _enable_task_resume_demo(self, seed: TaskResumeDemoSeed) -> None:
+        """Create or restore the one explicit trusted-host demonstration.
+
+        There is no browser route for this lifecycle.  The seed was parsed by
+        host code before Runtime creation and all identifiers stay in the
+        signed mapping/ledger rather than in response state or logs.
+        """
+
+        _prepare_private_file(self.task_resume_ledger_path)
+        host = TaskResumeDemoHost(
+            state_path=self.chat_db_path,
+            ledger_path=self.task_resume_ledger_path,
+            checkpoint_secret=self._load_or_create_task_resume_demo_secret(),
+        )
+        conversation_existed = self.repository.has_conversation(seed.conversation_id)
+        try:
+            active = host.status(seed.conversation_id).active
+            self.repository.create_conversation(
+                seed.conversation_id,
+                title=TASK_RESUME_DEMO_CONVERSATION_TITLE,
+            )
+            if not active:
+                host.seed(
+                    seed,
+                    builder_factory=self._task_resume_builder_factory(
+                        seed.conversation_id
+                    ),
+                )
+        except BaseException:
+            host.close()
+            if not conversation_existed:
+                with suppress(Exception):
+                    self.repository.delete_conversation(seed.conversation_id)
+            raise
+        self._task_resume_demo = host
 
     async def acquire_turn(self, conversation_id: str) -> _TurnLockEntry:
         """Acquire a per-dialog turn lock without retaining old lock entries.
@@ -883,8 +1196,43 @@ class Runtime:
         conversation_id: str,
         message: str,
         history: list[dict],
-    ) -> tuple[ContextPlan, list[dict], int]:
+    ) -> tuple[ContextPlan | TaskResumeReferenceRequest, list[dict], int, bool]:
         async with self.document_lock:
+            inp = ContextInput(
+                query=message,
+                chat_id=conversation_id,
+                system_prompt=DEFAULT_SYSTEM_PROMPT,
+                embedding_model=self.config.embed_model,
+                top_k_rag=5,
+                include_session=False,
+                language="ru",
+            )
+            if self._task_resume_demo is not None:
+                demo_retrievers: list[SourceTrackingRetriever] = []
+                task_request = await self._task_resume_demo.compose_active(
+                    conversation_id,
+                    inp=inp,
+                    builder_factory=self._task_resume_builder_factory(
+                        conversation_id,
+                        captured_retrievers=demo_retrievers,
+                    ),
+                    history=history,
+                    final_messages=[{"role": "user", "content": message}],
+                    output_reserve=self.config.output_reserve_tokens,
+                )
+                if task_request is not None:
+                    if len(demo_retrievers) != 1:  # pragma: no cover - host contract
+                        raise RuntimeError("task-resume demo did not retain one retriever")
+                    context = _reference_context_explanation(task_request)
+                    decisions = context.get("decisions")
+                    if not isinstance(decisions, list):  # pragma: no cover - core contract
+                        raise RuntimeError("task-resume request lacks context decisions")
+                    sources, memory_block_count = _sources_from_decisions(
+                        decisions,
+                        demo_retrievers[0].candidates,
+                    )
+                    return task_request, sources, memory_block_count, True
+
             retriever = SourceTrackingRetriever(
                 self.store,
                 self.llm,
@@ -899,20 +1247,12 @@ class Runtime:
                 self.store,
                 self.llm,
                 counter=RegexTokenCounter(),
-                max_tokens=self.config.request_max_tokens,
+                max_tokens=self.request_max_tokens,
                 output_reserve=self.config.output_reserve_tokens,
                 retriever=retriever,
             )
             plan = await builder.plan_messages(
-                ContextInput(
-                    query=message,
-                    chat_id=conversation_id,
-                    system_prompt=DEFAULT_SYSTEM_PROMPT,
-                    embedding_model=self.config.embed_model,
-                    top_k_rag=5,
-                    include_session=False,
-                    language="ru",
-                ),
+                inp,
                 history=history,
                 final_messages=[{"role": "user", "content": message}],
                 output_reserve=self.config.output_reserve_tokens,
@@ -920,7 +1260,7 @@ class Runtime:
             sources, memory_block_count = _sources_from_plan(
                 plan, retriever.candidates
             )
-            return plan, sources, memory_block_count
+            return plan, sources, memory_block_count, False
 
     async def archive_memory(self, conversation_id: str) -> int:
         """Index one oldest unarchived transcript segment for durable recall.
@@ -1020,12 +1360,16 @@ class Runtime:
             if asyncio.iscoroutine(result):
                 await result
         try:
-            self.secure_local_data()
+            if self._task_resume_demo is not None:
+                self._task_resume_demo.close()
         finally:
             try:
                 self.vector_store_sync.close()
             finally:
-                self.repository.close()
+                try:
+                    self.repository.close()
+                finally:
+                    self.secure_local_data()
 
 
 def _sse(event: str, payload: object) -> bytes:
@@ -1046,19 +1390,32 @@ def _conversation_id(value: str) -> str:
 
 
 def _context_payload(
-    plan: ContextPlan,
+    plan: ContextPlan | TaskResumeReferenceRequest,
     *,
     pdf_block_count: int,
     memory_block_count: int,
 ) -> dict:
     receipt = plan.receipt
-    assert receipt is not None
+    if isinstance(plan, ContextPlan):
+        decisions: Iterable[object] = plan.decisions
+        session_block_count = len(plan.session_blocks)
+    else:
+        context = _reference_context_explanation(plan)
+        raw_decisions = context.get("decisions")
+        if not isinstance(raw_decisions, list):  # pragma: no cover - core contract
+            raise RuntimeError("task-resume request lacks context decisions")
+        decisions = raw_decisions
+        raw_session_count = context.get("session_block_count")
+        if isinstance(raw_session_count, bool) or not isinstance(raw_session_count, int):
+            raise RuntimeError("task-resume request has an invalid session count")
+        session_block_count = raw_session_count
     return {
         "receipt": receipt.explain(),
         "rag_block_count": pdf_block_count,
-        "memory_block_count": memory_block_count + len(plan.session_blocks),
+        "memory_block_count": memory_block_count + session_block_count,
         "dropped_block_count": sum(
-            decision.decision == "excluded" for decision in plan.decisions
+            _decision_value(decision, "decision") == "excluded"
+            for decision in decisions
         ),
     }
 
@@ -1110,11 +1467,30 @@ def create_app(
     *,
     runtime_factory: Callable[[Path], Runtime] | None = None,
     allowed_hosts: tuple[str, ...] | list[str] | None = None,
+    task_resume_demo_seed: TaskResumeDemoSeed | None = None,
 ) -> FastAPI:
     root = Path(data_dir).expanduser() if data_dir is not None else _default_data_dir()
     static_dir = Path(__file__).parent / "static"
-    make_runtime = runtime_factory or Runtime
     accepted_hosts = _allowed_host_set(allowed_hosts)
+    if task_resume_demo_seed is not None and not isinstance(
+        task_resume_demo_seed, TaskResumeDemoSeed
+    ):
+        raise TypeError("task_resume_demo_seed must be a TaskResumeDemoSeed or None")
+    if task_resume_demo_seed is not None and not accepted_hosts.issubset(
+        _LOCAL_ALLOWED_HOSTS
+    ):
+        raise ValueError("task-resume demo requires loopback-only allowed hosts")
+    if task_resume_demo_seed is not None and runtime_factory is not None:
+        raise ValueError(
+            "task_resume_demo_seed cannot be combined with runtime_factory; "
+            "construct the trusted Runtime explicitly instead"
+        )
+
+    if runtime_factory is None:
+        def make_runtime(root_path: Path) -> Runtime:
+            return Runtime(root_path, task_resume_demo_seed=task_resume_demo_seed)
+    else:
+        make_runtime = runtime_factory
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -1146,6 +1522,30 @@ def create_app(
                     "Referrer-Policy": "no-referrer",
                 },
             )
+        demo_runtime = getattr(request.app.state, "runtime", None)
+        demo_enabled = (
+            task_resume_demo_seed is not None
+            or getattr(demo_runtime, "_task_resume_demo", None) is not None
+        )
+        if demo_enabled:
+            client = request.client
+            client_host = client.host if client is not None else ""
+            # ``allowed_hosts`` validates the Host header, but a process
+            # embedding this ASGI app could still bind uvicorn to a network
+            # interface. The explicit demo additionally rejects every
+            # non-loopback TCP peer, so Host-header spoofing cannot turn it
+            # into a remotely reachable task control-plane.
+            if not _loopback_bind(client_host):
+                return JSONResponse(
+                    {"detail": "task-resume demo accepts loopback clients only"},
+                    status_code=403,
+                    headers={
+                        "Cache-Control": "no-store",
+                        "X-Content-Type-Options": "nosniff",
+                        "X-Frame-Options": "DENY",
+                        "Referrer-Policy": "no-referrer",
+                    },
+                )
         response = await call_next(request)
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("X-Frame-Options", "DENY")
@@ -1169,11 +1569,12 @@ def create_app(
 
     @app.get("/api/health")
     async def health(request: Request) -> dict:
-        config = runtime(request).config
+        app_runtime = runtime(request)
+        config = app_runtime.config
         return {
             "ok": True,
             "mode": config.ollama_mode,
-            "request_max_tokens": config.request_max_tokens,
+            "request_max_tokens": app_runtime.request_max_tokens,
             "output_reserve_tokens": config.output_reserve_tokens,
         }
 
@@ -1221,6 +1622,21 @@ def create_app(
         try:
             if not app_runtime.repository.has_conversation(conversation_id):
                 raise HTTPException(status_code=404, detail="Диалог не найден")
+            if app_runtime._task_resume_demo is not None:
+                try:
+                    # The host mapping enters ``closing`` before Ledger
+                    # cleanup. A failed cleanup leaves it non-resumable and
+                    # blocks transcript/vector deletion until this request is
+                    # retried, rather than severing the privacy lifecycle.
+                    app_runtime._task_resume_demo.close_binding(conversation_id)
+                except Exception as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail=(
+                            "Не удалось закрыть task-resume память диалога; "
+                            "повторите попытку."
+                        ),
+                    ) from exc
             memory_document_ids = set(
                 app_runtime.repository.memory_document_ids(conversation_id)
             )
@@ -1443,8 +1859,8 @@ def create_app(
                 {"role": item["role"], "content": item["content"]}
                 for item in history_records
             ]
-            plan, sources, memory_block_count = await app_runtime.plan_chat(
-                conversation_id, message, history
+            plan, sources, memory_block_count, task_resume_active = (
+                await app_runtime.plan_chat(conversation_id, message, history)
             )
             receipt = plan.receipt
             assert receipt is not None
@@ -1487,16 +1903,27 @@ def create_app(
                 answer.append(token)
                 await queue.put(("token", token))
 
+            async def call_model() -> str:
+                return await app_runtime.llm.chat_stream(
+                    plan.render_messages(),
+                    model=body.model,
+                    on_token=on_token,
+                    max_tokens=receipt.output_reserve_tokens,
+                    num_ctx=receipt.max_tokens,
+                )
+
             async def generate() -> None:
                 nonlocal model_completed
                 try:
-                    response_text = await app_runtime.llm.chat_stream(
-                        plan.render_messages(),
-                        model=body.model,
-                        on_token=on_token,
-                        max_tokens=receipt.output_reserve_tokens,
-                        num_ctx=receipt.max_tokens,
-                    )
+                    generation_lock = app_runtime._demo_generation_lock
+                    if generation_lock is None:
+                        response_text = await call_model()
+                    else:
+                        # An explicit demo process deliberately serializes all
+                        # model generations. Awaiting this lock is the bounded
+                        # local queue; it is not a distributed job runner.
+                        async with generation_lock:
+                            response_text = await call_model()
                     if response_text and not answer:
                         await on_token(response_text)
                     model_completed = True
@@ -1532,8 +1959,14 @@ def create_app(
                     app_runtime.repository.append_message(
                         conversation_id, "assistant", final_answer
                     )
-                    with suppress(Exception):
-                        await app_runtime.archive_memory(conversation_id)
+                    # The explicit task-resume demonstration never promotes
+                    # chat/model/PDF content into a second automatic memory
+                    # lane. Its only Ledger ingress is the pre-authored host
+                    # seed; ordinary conversations retain existing archive
+                    # behaviour unchanged.
+                    if not task_resume_active:
+                        with suppress(Exception):
+                            await app_runtime.archive_memory(conversation_id)
                 yield _sse(
                     "done",
                     {
@@ -1573,7 +2006,30 @@ def main() -> None:
         default=[],
         help="required Host name or IP for a non-loopback bind; repeatable",
     )
+    parser.add_argument(
+        "--task-resume-demo-seed",
+        default=None,
+        metavar="PATH",
+        help=(
+            "enable one host-owned task-resume demonstration from a private "
+            "seed JSON file; requires loopback UI and local Ollama"
+        ),
+    )
     args = parser.parse_args()
+    task_resume_demo_seed: TaskResumeDemoSeed | None = None
+    if args.task_resume_demo_seed is not None:
+        if not _loopback_bind(args.host) or args.allow_network:
+            parser.error(
+                "--task-resume-demo-seed requires a loopback bind without --allow-network"
+            )
+        try:
+            task_resume_demo_seed = _load_task_resume_demo_seed(
+                args.task_resume_demo_seed
+            )
+            if RuntimeConfig.from_env().ollama_mode != "local":
+                raise ValueError("task-resume demo requires a local loopback Ollama host")
+        except ValueError as exc:
+            parser.error(f"invalid task-resume demo configuration: {exc}")
     if not _loopback_bind(args.host) and not args.allow_network:
         parser.error("non-loopback bind needs --allow-network")
     if _loopback_bind(args.host):
@@ -1593,7 +2049,11 @@ def main() -> None:
     import uvicorn
 
     uvicorn.run(
-        create_app(args.data_dir, allowed_hosts=allowed_hosts),
+        create_app(
+            args.data_dir,
+            allowed_hosts=allowed_hosts,
+            task_resume_demo_seed=task_resume_demo_seed,
+        ),
         host=args.host,
         port=args.port,
     )
