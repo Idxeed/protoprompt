@@ -914,6 +914,17 @@ def test_recall_policy_and_plan_validate_public_configuration(ledger, scope_a):
         )
     with pytest.raises(ValueError, match="between 0 and 1"):
         LedgerRecallPolicy(minimum_confidence=1.1)
+    full_corpus_policy = LedgerRecallPolicy(
+        policy_id="explicit-full-corpus-v1",
+        active_read_limit=10_000,
+        candidate_limit=10_000,
+    )
+    assert full_corpus_policy.explain()["active_read_limit"] == 10_000
+    assert full_corpus_policy.explain()["candidate_limit"] == 10_000
+    with pytest.raises(ValueError, match="1 to 10000"):
+        LedgerRecallPolicy(active_read_limit=10_001)
+    with pytest.raises(ValueError, match="1 to 10000"):
+        LedgerRecallPolicy(candidate_limit=10_001)
     planner = _planner(_writer(ledger, scope_a))
     with pytest.raises(ValueError, match="task must not be empty"):
         planner.plan(task="  ", token_budget=500)

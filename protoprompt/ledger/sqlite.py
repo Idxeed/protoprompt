@@ -13,10 +13,14 @@ import json
 import re
 import sqlite3
 import threading
-from typing import Any, Iterable, Iterator
+from typing import Any, Iterable, Iterator, Sequence
 import uuid
 
 from protoprompt.ledger._backend import _LedgerCommandBackend
+from protoprompt.ledger.storage_conformance import (
+    LedgerStorageCapabilities,
+    sqlite_v7_storage_capabilities,
+)
 from protoprompt.ledger.types import (
     LEDGER_SCHEMA_VERSION,
     ErasureReceipt,
@@ -34,6 +38,9 @@ from protoprompt.ledger.types import (
     MemoryRelationType,
     MemoryState,
     MemoryTrust,
+    SCOPE_PAYLOAD_PURGE_SCHEMA_VERSION,
+    ScopePayloadPurgeReceipt,
+    ScopePayloadReadback,
     canonical_json,
     coerce_datetime,
     command_hash,
@@ -63,6 +70,7 @@ _LEGACY_EVENT_UPDATE_TRIGGER_NAME = "memory_events_reject_update"
 _EVENT_GUARD_SCHEMA_VERSION = 4
 _ADMISSION_GUARD_SCHEMA_VERSION = 5
 _CHECKPOINT_SCHEMA_VERSION = 6
+_SCOPE_PAYLOAD_PURGE_STORAGE_VERSION = 7
 _RECALL_CHECKPOINT_MANIFEST_SCHEMA_VERSION = 1
 _ADMISSION_METADATA_UPDATE_TRIGGER_NAME = (
     "protoprompt_memory_ledger_admission_metadata_reject_update_v1"
@@ -87,6 +95,15 @@ _ADMISSION_ACTION_EVENTS = {
     MemoryAdmissionAction.QUARANTINE: MemoryEventType.QUARANTINED,
     MemoryAdmissionAction.REJECT: MemoryEventType.FORGOTTEN,
 }
+# Keep each ``IN`` batch safely below SQLite's conservative host-parameter
+# limit after scope parameters are added.  The PostgreSQL adapter inherits the
+# same read path, so this is intentionally a portable bounded batch rather
+# than a SQLite-specific temporary-table trick.
+_ACTIVE_READ_BATCH_SIZE = 400
+# Cache only immutable, content-free admission-validation markers for one
+# bounded active-read window.  A long-lived process can visit many scopes
+# without a write, so this must not become an unbounded per-record registry.
+_ACTIVE_ADMISSION_CACHE_MAX_ENTRIES = 10_000
 _EVENT_UPDATE_TRIGGER_SQL = f"""
 CREATE TRIGGER IF NOT EXISTS {_EVENT_UPDATE_TRIGGER_NAME}
 BEFORE UPDATE ON memory_events
@@ -251,6 +268,22 @@ _SCHEMA_STATEMENTS = (
         source_refs_deleted INTEGER NOT NULL,
         relations_deleted INTEGER NOT NULL,
         PRIMARY KEY (scope_id, scope_json, event_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS memory_scope_payload_purge_receipts (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        command_fingerprint TEXT NOT NULL,
+        records_forgotten INTEGER NOT NULL CHECK (records_forgotten >= 0),
+        payload_rows_deleted INTEGER NOT NULL CHECK (payload_rows_deleted >= 0),
+        source_refs_deleted INTEGER NOT NULL CHECK (source_refs_deleted >= 0),
+        relations_deleted INTEGER NOT NULL CHECK (relations_deleted >= 0),
+        completed_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+        PRIMARY KEY (scope_id, scope_json, operation_key),
+        CHECK (payload_rows_deleted = records_forgotten)
     )
     """,
     """
@@ -546,6 +579,25 @@ _V6_MIGRATION_STATEMENTS = (
     """,
 )
 
+_V7_MIGRATION_STATEMENTS = (
+    """
+    CREATE TABLE IF NOT EXISTS memory_scope_payload_purge_receipts (
+        scope_id TEXT NOT NULL,
+        scope_json TEXT NOT NULL,
+        operation_key TEXT NOT NULL,
+        command_fingerprint TEXT NOT NULL,
+        records_forgotten INTEGER NOT NULL CHECK (records_forgotten >= 0),
+        payload_rows_deleted INTEGER NOT NULL CHECK (payload_rows_deleted >= 0),
+        source_refs_deleted INTEGER NOT NULL CHECK (source_refs_deleted >= 0),
+        relations_deleted INTEGER NOT NULL CHECK (relations_deleted >= 0),
+        completed_at TEXT NOT NULL,
+        schema_version INTEGER NOT NULL CHECK (schema_version = 1),
+        PRIMARY KEY (scope_id, scope_json, operation_key),
+        CHECK (payload_rows_deleted = records_forgotten)
+    )
+    """,
+)
+
 _V1_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     "ledger_schema": frozenset({"component", "version", "applied_at"}),
     "memory_events": frozenset({
@@ -619,6 +671,14 @@ _V6_TABLE_COLUMNS: dict[str, frozenset[str]] = {
     }),
 }
 
+_V7_TABLE_COLUMNS: dict[str, frozenset[str]] = {
+    "memory_scope_payload_purge_receipts": frozenset({
+        "scope_id", "scope_json", "operation_key", "command_fingerprint",
+        "records_forgotten", "payload_rows_deleted", "source_refs_deleted",
+        "relations_deleted", "completed_at", "schema_version",
+    }),
+}
+
 _ALL_LEDGER_TABLE_COLUMNS = (
     _V1_TABLE_COLUMNS
     | _V2_TABLE_COLUMNS
@@ -626,6 +686,7 @@ _ALL_LEDGER_TABLE_COLUMNS = (
     | _V4_TABLE_COLUMNS
     | _V5_TABLE_COLUMNS
     | _V6_TABLE_COLUMNS
+    | _V7_TABLE_COLUMNS
 )
 
 
@@ -783,7 +844,19 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
     migration/setup job before serving traffic.
     """
 
-    MIGRATION_VERSION = 6
+    MIGRATION_VERSION = _SCOPE_PAYLOAD_PURGE_STORAGE_VERSION
+
+    @staticmethod
+    def storage_capabilities() -> LedgerStorageCapabilities:
+        """Return the fixed v1 SQLite receipt without opening a database.
+
+        This is a sealed description of the built-in storage contract, not a
+        capability probe or extension mechanism.  It is available directly on
+        the class so callers need no database path, instance, or setup work to
+        inspect the public operational boundary.
+        """
+
+        return sqlite_v7_storage_capabilities()
 
     def __init__(self, path: str = ":memory:") -> None:
         self._conn = sqlite3.connect(path, check_same_thread=False)
@@ -791,6 +864,11 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
         self._conn.execute("PRAGMA foreign_keys=ON")
         self._lock = threading.RLock()
         self._closed = False
+        # Admission sidecars are immutable after review.  The cache stores
+        # only successful validation markers (never records or payloads) and
+        # is invalidated whenever SQLite reports a local or external change.
+        self._active_admission_cache: set[tuple[str, str, str, str]] = set()
+        self._active_admission_cache_epoch: tuple[int, int] | None = None
 
     def schema_version(self) -> int:
         """Return the installed ledger schema version without mutating it."""
@@ -1353,6 +1431,361 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
                     )
                 return receipts
 
+    def payload_readback(self, scope: MemoryScope) -> ScopePayloadReadback:
+        """Return a content-free payload count for one exact host scope.
+
+        This is deliberately a narrow host API rather than an export: the
+        result contains only a domain-separated scope digest and the number of
+        remaining canonical payload rows.  Corrupt local payload/source
+        sidecars fail closed instead of allowing an adapter to mistake an
+        incomplete check for a successful deletion boundary.
+        """
+
+        scope_id, scope_json = _scope_storage(scope)
+        with self._lock:
+            with self._read_transaction_locked():
+                self._require_ready_locked()
+                return self._scope_payload_readback_locked(scope, scope_id, scope_json)
+
+    def purge_payloads(
+        self,
+        scope: MemoryScope,
+        operation_id: str,
+        *,
+        reason_code: str = "scope_payload_purged",
+        actor: str = "host",
+        occurred_at: datetime | str | None = None,
+    ) -> ScopePayloadPurgeReceipt:
+        """Atomically remove every current canonical payload in one scope.
+
+        The stored aggregate receipt is keyed by a hash of the host-minted
+        operation ID and exact scope.  A successful retry therefore returns
+        the original content-free aggregate result after restart and cannot
+        accidentally erase records created after that first commit.  This is
+        a logical canonical-payload purge: retained lifecycle/audit metadata
+        deliberately remains non-plaintext, and the caller must separately
+        fence later ingress and external projections before claiming a wider
+        deletion guarantee.
+        """
+
+        operation = validate_identifier(operation_id, field="operation_id")
+        reason = validate_identifier(reason_code, field="reason_code")
+        host_actor = _actor(actor)
+        current_time = self._timestamp(occurred_at)
+        scope_id, scope_json = _scope_storage(scope)
+        operation_key = self._scope_payload_purge_operation_key(
+            scope_id,
+            scope_json,
+            operation,
+        )
+        command_fingerprint = self._scope_payload_purge_command_fingerprint(
+            operation_key=operation_key,
+            reason_code=reason,
+            actor=host_actor,
+        )
+        scope_fingerprint = self._scope_payload_scope_fingerprint(scope)
+
+        with self._lock:
+            with self._ready_write_transaction_locked():
+                existing = self._scope_payload_purge_receipt_locked(
+                    scope_fingerprint=scope_fingerprint,
+                    operation_id=operation,
+                    scope_id=scope_id,
+                    scope_json=scope_json,
+                    operation_key=operation_key,
+                    command_fingerprint=command_fingerprint,
+                )
+                if existing is not None:
+                    return existing
+
+                # Prove every affected row can be materialized before the
+                # first lifecycle mutation.  This turns orphaned/tampered
+                # payload or source sidecars into a transaction rollback,
+                # never a misleading partial receipt.
+                self._assert_scope_payload_integrity_locked(scope_id, scope_json)
+                rows = self._conn.execute(
+                    "SELECT p.record_id, r.revision FROM memory_payloads AS p "
+                    "JOIN memory_records AS r ON r.scope_id = p.scope_id "
+                    "AND r.scope_json = p.scope_json AND r.record_id = p.record_id "
+                    "WHERE p.scope_id = ? AND p.scope_json = ? "
+                    "ORDER BY p.record_id",
+                    (scope_id, scope_json),
+                ).fetchall()
+                records: list[MemoryRecord] = []
+                for row in rows:
+                    record_id = str(row["record_id"])
+                    record = self._load_record_locked(scope, record_id)
+                    if record is None or record.revision != int(row["revision"]):
+                        raise LedgerStateError(
+                            "scope payload record changed during purge preflight"
+                        )
+                    if not record.content_available:
+                        raise LedgerStateError(
+                            "payload row could not be materialized during scope purge"
+                        )
+                    records.append(record)
+
+                receipts: list[ErasureReceipt] = []
+                for record in records:
+                    receipts.append(
+                        self._forget_locked(
+                            scope,
+                            record_id=record.record_id,
+                            expected_revision=record.revision,
+                            reason_code=reason,
+                            actor=host_actor,
+                            event_id=self._scope_payload_purge_event_id(
+                                operation_key,
+                                record.record_id,
+                            ),
+                            occurred_at=current_time,
+                            payload_hash=self._scope_payload_purge_record_fingerprint(
+                                operation_key=operation_key,
+                                record_id=record.record_id,
+                                expected_revision=record.revision,
+                                reason_code=reason,
+                                actor=host_actor,
+                            ),
+                        )
+                    )
+
+                payload_rows_deleted = sum(
+                    1 for receipt in receipts if receipt.payload_deleted
+                )
+                if payload_rows_deleted != len(records):
+                    raise LedgerStateError(
+                        "scope payload purge did not delete every selected payload row"
+                    )
+                readback = self._scope_payload_readback_locked(scope, scope_id, scope_json)
+                if not readback.is_empty:
+                    raise LedgerStateError(
+                        "scope payload purge final readback is not empty"
+                    )
+                receipt = ScopePayloadPurgeReceipt(
+                    operation_id=operation,
+                    scope_fingerprint=scope_fingerprint,
+                    records_forgotten=len(receipts),
+                    payload_rows_deleted=payload_rows_deleted,
+                    source_refs_deleted=sum(
+                        item.source_refs_deleted for item in receipts
+                    ),
+                    relations_deleted=sum(item.relations_deleted for item in receipts),
+                    readback=readback,
+                )
+                self._store_scope_payload_purge_receipt_locked(
+                    scope_id=scope_id,
+                    scope_json=scope_json,
+                    operation_key=operation_key,
+                    command_fingerprint=command_fingerprint,
+                    receipt=receipt,
+                    completed_at=current_time,
+                )
+                return receipt
+
+    @staticmethod
+    def _scope_payload_scope_fingerprint(scope: MemoryScope) -> str:
+        """Return a receipt-safe digest for the exact host scope."""
+
+        return command_hash({
+            "operation": "scope_payload_purge_scope_fingerprint_v1",
+            "scope": scope_dict(scope),
+        })
+
+    @staticmethod
+    def _scope_payload_purge_operation_key(
+        scope_id: str,
+        scope_json: str,
+        operation_id: str,
+    ) -> str:
+        """Hash an opaque host operation ID before durable storage."""
+
+        return command_hash({
+            "operation": "scope_payload_purge_operation_key_v1",
+            "scope_id": scope_id,
+            "scope_json": scope_json,
+            "operation_id": operation_id,
+        })
+
+    @staticmethod
+    def _scope_payload_purge_command_fingerprint(
+        *,
+        operation_key: str,
+        reason_code: str,
+        actor: str,
+    ) -> str:
+        """Bind a durable retry key to its immutable host command metadata."""
+
+        return command_hash({
+            "operation": "scope_payload_purge_v1",
+            "operation_key": operation_key,
+            "reason_code": reason_code,
+            "actor": actor,
+            "schema_version": SCOPE_PAYLOAD_PURGE_SCHEMA_VERSION,
+        })
+
+    @staticmethod
+    def _scope_payload_purge_event_id(operation_key: str, record_id: str) -> str:
+        """Derive one opaque per-record lifecycle event ID for a purge."""
+
+        return "scope-purge-" + command_hash({
+            "operation": "scope_payload_purge_event_v1",
+            "operation_key": operation_key,
+            "record_id": record_id,
+        })
+
+    @staticmethod
+    def _scope_payload_purge_record_fingerprint(
+        *,
+        operation_key: str,
+        record_id: str,
+        expected_revision: int,
+        reason_code: str,
+        actor: str,
+    ) -> str:
+        """Fingerprint a per-record purge transition without payload data."""
+
+        return command_hash({
+            "operation": "scope_payload_purge_record_v1",
+            "operation_key": operation_key,
+            "record_id": record_id,
+            "expected_revision": expected_revision,
+            "reason_code": reason_code,
+            "actor": actor,
+        })
+
+    def _scope_payload_readback_locked(
+        self,
+        scope: MemoryScope,
+        scope_id: str,
+        scope_json: str,
+    ) -> ScopePayloadReadback:
+        """Count canonical payload rows after validating local sidecars."""
+
+        self._assert_scope_payload_integrity_locked(scope_id, scope_json)
+        row = self._conn.execute(
+            "SELECT COUNT(*) AS payload_record_count FROM memory_payloads "
+            "WHERE scope_id = ? AND scope_json = ?",
+            (scope_id, scope_json),
+        ).fetchone()
+        return ScopePayloadReadback(
+            scope_fingerprint=self._scope_payload_scope_fingerprint(scope),
+            payload_record_count=int(row["payload_record_count"]),
+        )
+
+    def _assert_scope_payload_integrity_locked(
+        self,
+        scope_id: str,
+        scope_json: str,
+    ) -> None:
+        """Reject malformed target payload/source sidecars before a receipt."""
+
+        orphan_payload = self._conn.execute(
+            "SELECT 1 FROM memory_payloads AS p LEFT JOIN memory_records AS r "
+            "ON r.scope_id = p.scope_id AND r.scope_json = p.scope_json "
+            "AND r.record_id = p.record_id WHERE p.scope_id = ? "
+            "AND p.scope_json = ? AND r.record_id IS NULL LIMIT 1",
+            (scope_id, scope_json),
+        ).fetchone()
+        if orphan_payload is not None:
+            raise LedgerStateError("scope payload row is orphaned")
+        orphan_source = self._conn.execute(
+            "SELECT 1 FROM memory_sources AS s LEFT JOIN memory_payloads AS p "
+            "ON p.scope_id = s.scope_id AND p.scope_json = s.scope_json "
+            "AND p.record_id = s.record_id WHERE s.scope_id = ? "
+            "AND s.scope_json = ? AND p.record_id IS NULL LIMIT 1",
+            (scope_id, scope_json),
+        ).fetchone()
+        if orphan_source is not None:
+            raise LedgerStateError("scope payload source row is orphaned")
+        missing_origin = self._conn.execute(
+            "SELECT 1 FROM memory_payloads AS p LEFT JOIN "
+            "memory_record_admission_metadata AS m ON m.scope_id = p.scope_id "
+            "AND m.scope_json = p.scope_json AND m.record_id = p.record_id "
+            "WHERE p.scope_id = ? AND p.scope_json = ? AND m.record_id IS NULL LIMIT 1",
+            (scope_id, scope_json),
+        ).fetchone()
+        if missing_origin is not None:
+            raise LedgerStateError(
+                "payload-bearing memory record is missing admission origin metadata"
+            )
+
+    def _scope_payload_purge_receipt_locked(
+        self,
+        *,
+        scope_fingerprint: str,
+        operation_id: str,
+        scope_id: str,
+        scope_json: str,
+        operation_key: str,
+        command_fingerprint: str,
+    ) -> ScopePayloadPurgeReceipt | None:
+        """Load one immutable aggregate retry receipt or reject command drift."""
+
+        row = self._conn.execute(
+            "SELECT command_fingerprint, records_forgotten, payload_rows_deleted, "
+            "source_refs_deleted, relations_deleted, completed_at, schema_version "
+            "FROM memory_scope_payload_purge_receipts WHERE scope_id = ? "
+            "AND scope_json = ? AND operation_key = ?",
+            (scope_id, scope_json, operation_key),
+        ).fetchone()
+        if row is None:
+            return None
+        if str(row["command_fingerprint"]) != command_fingerprint:
+            raise LedgerConflictError(
+                "operation_id was already used for a different scope payload purge command"
+            )
+        try:
+            parse_timestamp(str(row["completed_at"]), field="scope purge completed_at")
+            if int(row["schema_version"]) != SCOPE_PAYLOAD_PURGE_SCHEMA_VERSION:
+                raise ValueError("unsupported schema_version")
+            readback = ScopePayloadReadback(
+                scope_fingerprint=scope_fingerprint,
+                payload_record_count=0,
+            )
+            return ScopePayloadPurgeReceipt(
+                operation_id=operation_id,
+                scope_fingerprint=scope_fingerprint,
+                records_forgotten=int(row["records_forgotten"]),
+                payload_rows_deleted=int(row["payload_rows_deleted"]),
+                source_refs_deleted=int(row["source_refs_deleted"]),
+                relations_deleted=int(row["relations_deleted"]),
+                readback=readback,
+            )
+        except (TypeError, ValueError) as exc:
+            raise LedgerStateError("scope payload purge receipt is malformed") from exc
+
+    def _store_scope_payload_purge_receipt_locked(
+        self,
+        *,
+        scope_id: str,
+        scope_json: str,
+        operation_key: str,
+        command_fingerprint: str,
+        receipt: ScopePayloadPurgeReceipt,
+        completed_at: datetime,
+    ) -> None:
+        """Persist the final aggregate receipt as the last purge mutation."""
+
+        self._conn.execute(
+            "INSERT INTO memory_scope_payload_purge_receipts "
+            "(scope_id, scope_json, operation_key, command_fingerprint, "
+            "records_forgotten, payload_rows_deleted, source_refs_deleted, "
+            "relations_deleted, completed_at, schema_version) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                scope_id,
+                scope_json,
+                operation_key,
+                command_fingerprint,
+                receipt.records_forgotten,
+                receipt.payload_rows_deleted,
+                receipt.source_refs_deleted,
+                receipt.relations_deleted,
+                format_timestamp(completed_at),
+                receipt.schema_version,
+            ),
+        )
+
     @staticmethod
     def _forget_command_hash(
         *,
@@ -1662,6 +2095,58 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
             with self._read_transaction_locked():
                 return self._list_active_locked(scope, instant=instant, limit=limit)
 
+    def _load_active_markers(
+        self,
+        scope: MemoryScope,
+        *,
+        now: datetime | str | None,
+        limit: int,
+        record_ids: Iterable[str],
+    ) -> list[MemoryRecord]:
+        """Re-read named active records for a private recall resolve boundary.
+
+        Unlike :meth:`list_active`, this private helper intentionally does not
+        enumerate unrelated active memory.  Callers must already hold sealed
+        record markers and it applies the same exact-scope lifecycle and
+        admission-audit checks to every returned record.
+        """
+
+        if isinstance(record_ids, (str, bytes)):
+            raise TypeError("record_ids must be an iterable of record identifiers")
+        self._validate_active_limit(limit)
+        identities = tuple(
+            validate_identifier(record_id, field="record_id")
+            for record_id in record_ids
+        )
+        instant = self._timestamp(now)
+        _scope_storage(scope)
+        with self._lock:
+            self._require_ready_locked()
+            # An empty sealed selection cannot expose stale memory, so it has
+            # no active-window membership to prove.  Preserve the ready/scope
+            # boundary above while avoiding an otherwise unrelated top-N ID
+            # scan for a legitimate empty recall context.
+            if not identities:
+                return []
+            with self._read_transaction_locked():
+                # A plan is tied not just to selected records but to the
+                # bounded active snapshot from which it was chosen.  Check
+                # current top-N membership without deserializing unrelated
+                # payloads, so a newer active record cannot silently push a
+                # sealed selection outside the policy window.
+                visible_ids = self._active_window_record_ids_locked(
+                    scope,
+                    instant=instant,
+                    limit=limit,
+                )
+                if not set(identities).issubset(visible_ids):
+                    return []
+                return self._active_records_for_ids_locked(
+                    scope,
+                    instant=instant,
+                    record_ids=identities,
+                )
+
     def _validate_active_snapshot(
         self,
         scope: MemoryScope,
@@ -1687,7 +2172,20 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
         _scope_storage(scope)
         with self._lock:
             with self._ready_write_transaction_locked():
-                records = self._list_active_locked(scope, instant=instant, limit=limit)
+                visible_ids = self._active_window_record_ids_locked(
+                    scope,
+                    instant=instant,
+                    limit=limit,
+                )
+                if not {
+                    selection[0] for selection in normalized_selections
+                }.issubset(visible_ids):
+                    return False
+                records = self._active_records_for_ids_locked(
+                    scope,
+                    instant=instant,
+                    record_ids=tuple(selection[0] for selection in normalized_selections),
+                )
                 current_by_id = {record.record_id: record for record in records}
                 return all(
                     (
@@ -2070,8 +2568,8 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
 
     @staticmethod
     def _validate_active_limit(limit: int) -> None:
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
-            raise ValueError("limit must be an integer from 1 to 1000")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 10_000:
+            raise ValueError("limit must be an integer from 1 to 10000")
 
     def _list_active_locked(
         self,
@@ -2081,6 +2579,48 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
         limit: int,
     ) -> list[MemoryRecord]:
         """Load one active-memory snapshot while the caller owns a transaction."""
+
+        scope_id, scope_json = _scope_storage(scope)
+        rows = self._conn.execute(
+            "SELECT r.*, p.content, p.source_refs_json, p.evidence_refs_json, m.origin "
+            "FROM memory_records AS r "
+            "JOIN memory_payloads AS p ON "
+            "p.scope_id = r.scope_id AND p.scope_json = r.scope_json "
+            "AND p.record_id = r.record_id "
+            "LEFT JOIN memory_record_admission_metadata AS m ON "
+            "m.scope_id = r.scope_id AND m.scope_json = r.scope_json "
+            "AND m.record_id = r.record_id "
+            "WHERE r.scope_id = ? AND r.scope_json = ? AND r.state = ? "
+            "AND r.trust = ? "
+            "AND (r.valid_from IS NULL OR r.valid_from <= ?) "
+            "AND (r.valid_until IS NULL OR r.valid_until > ?) "
+            "ORDER BY r.updated_at DESC, r.record_id ASC LIMIT ?",
+            (
+                scope_id,
+                scope_json,
+                MemoryState.ACTIVE.value,
+                MemoryTrust.HOST_CONFIRMED.value,
+                format_timestamp(instant),
+                format_timestamp(instant),
+                limit,
+            ),
+        ).fetchall()
+        return self._active_records_from_rows_locked(scope, rows, instant=instant)
+
+    def _active_window_record_ids_locked(
+        self,
+        scope: MemoryScope,
+        *,
+        instant: datetime,
+        limit: int,
+    ) -> set[str]:
+        """Return the current bounded active-window IDs without payload decode.
+
+        This preserves the selection-window boundary used by the prior full
+        snapshot validation while keeping resolve's reread limited to its
+        sealed markers.  It deliberately shares the exact active/payload
+        predicate and order used by :meth:`_list_active_locked`.
+        """
 
         scope_id, scope_json = _scope_storage(scope)
         rows = self._conn.execute(
@@ -2103,14 +2643,228 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
                 limit,
             ),
         ).fetchall()
+        return {str(row["record_id"]) for row in rows}
+
+    def _active_records_for_ids_locked(
+        self,
+        scope: MemoryScope,
+        *,
+        instant: datetime,
+        record_ids: tuple[str, ...],
+    ) -> list[MemoryRecord]:
+        """Load only named active records for final selection validation.
+
+        A resolve operation needs to re-read and validate its sealed selected
+        markers, not deserialize every unrelated record in the planning window.
+        Each named row remains subject to the same lifecycle, payload, origin,
+        relation, and immutable-admission-audit checks as ``list_active``.
+        """
+
+        if not record_ids:
+            return []
+        scope_id, scope_json = _scope_storage(scope)
+        rows: list[sqlite3.Row] = []
+        for batch in self._record_id_batches(record_ids):
+            placeholders = ", ".join("?" for _ in batch)
+            rows.extend(
+                self._conn.execute(
+                    "SELECT r.*, p.content, p.source_refs_json, p.evidence_refs_json, m.origin "
+                    "FROM memory_records AS r "
+                    "JOIN memory_payloads AS p ON "
+                    "p.scope_id = r.scope_id AND p.scope_json = r.scope_json "
+                    "AND p.record_id = r.record_id "
+                    "LEFT JOIN memory_record_admission_metadata AS m ON "
+                    "m.scope_id = r.scope_id AND m.scope_json = r.scope_json "
+                    "AND m.record_id = r.record_id "
+                    "WHERE r.scope_id = ? AND r.scope_json = ? AND r.state = ? "
+                    "AND r.trust = ? "
+                    "AND (r.valid_from IS NULL OR r.valid_from <= ?) "
+                    "AND (r.valid_until IS NULL OR r.valid_until > ?) "
+                    "AND r.record_id IN ("
+                    + placeholders
+                    + ") ORDER BY r.updated_at DESC, r.record_id ASC",
+                    (
+                        scope_id,
+                        scope_json,
+                        MemoryState.ACTIVE.value,
+                        MemoryTrust.HOST_CONFIRMED.value,
+                        format_timestamp(instant),
+                        format_timestamp(instant),
+                        *batch,
+                    ),
+                ).fetchall()
+            )
+        return self._active_records_from_rows_locked(scope, rows, instant=instant)
+
+    def _active_records_from_rows_locked(
+        self,
+        scope: MemoryScope,
+        rows: Sequence[sqlite3.Row],
+        *,
+        instant: datetime,
+    ) -> list[MemoryRecord]:
+        """Decode an already-filtered active-row snapshot with strict sidecars."""
+
+        cache_enabled = self._refresh_active_admission_cache_locked()
+        scope_id, scope_json = _scope_storage(scope)
+        relation_rows = self._relation_rows_for_records_locked(
+            scope,
+            tuple(str(row["record_id"]) for row in rows),
+        )
+        # Fetch all audit sidecars in bounded batches before constructing the
+        # public snapshot.  The subsequent per-record check still parses every
+        # audit and validates it against its lifecycle event, exactly as the
+        # former one-query-per-record path did.
+        concrete_markers = tuple(
+            (str(row["record_id"]), str(row["origin"]))
+            for row in rows
+            if row["origin"] not in {
+                MemoryOrigin.UNKNOWN.value,
+                MemoryOrigin.LEGACY_UNKNOWN.value,
+            }
+        )
+        concrete_record_ids = tuple(record_id for record_id, _ in concrete_markers)
+        cache_miss_ids = tuple(
+            record_id
+            for record_id, origin in concrete_markers
+            if not cache_enabled
+            or (
+                scope_id,
+                scope_json,
+                record_id,
+                origin,
+            )
+            not in self._active_admission_cache
+        )
+        # Resolve cache capacity *before* selecting the raw audit rows.  A
+        # mid-loop eviction could otherwise turn a key that was a hit during
+        # this snapshot into a miss after its sidecar rows were omitted.
+        if (
+            cache_enabled
+            and len(self._active_admission_cache) + len(cache_miss_ids)
+            > _ACTIVE_ADMISSION_CACHE_MAX_ENTRIES
+        ):
+            self._active_admission_cache.clear()
+            cache_miss_ids = concrete_record_ids
+            if len(concrete_record_ids) > _ACTIVE_ADMISSION_CACHE_MAX_ENTRIES:
+                # One snapshot larger than the bounded cache is still fully
+                # validated, but is intentionally not retained at all.
+                cache_enabled = False
+        audit_rows = self._admission_audit_rows_for_records_locked(
+            scope,
+            cache_miss_ids,
+        )
         records: list[MemoryRecord] = []
         for row in rows:
-            record = self._load_record_locked(scope, str(row["record_id"]))
-            if record is None or not record.is_recallable(now=instant):
+            record_id = str(row["record_id"])
+            record = self._memory_record_from_row_locked(
+                scope,
+                row,
+                relation_rows.get(record_id, ()),
+            )
+            if not record.is_recallable(now=instant):
                 continue
-            self._assert_active_admission_verified_locked(scope, record)
+            if record.origin not in {MemoryOrigin.UNKNOWN, MemoryOrigin.LEGACY_UNKNOWN}:
+                cache_key = (scope_id, scope_json, record.record_id, record.origin.value)
+                if not cache_enabled or cache_key not in self._active_admission_cache:
+                    self._assert_active_admission_verified_rows_locked(
+                        scope,
+                        record,
+                        audit_rows.get(record.record_id, ()),
+                    )
+                    if cache_enabled:
+                        self._active_admission_cache.add(cache_key)
             records.append(record)
         return records
+
+    def _refresh_active_admission_cache_locked(self) -> bool:
+        """Invalidate SQLite-only immutable-audit markers on any DB change.
+
+        ``PRAGMA data_version`` observes committed writes from other SQLite
+        connections. ``total_changes`` additionally catches controlled or
+        test-only direct writes on this connection. PostgreSQL intentionally
+        keeps the uncached strict-audit path inherited from this engine: its
+        adapter does not expose either SQLite invalidation signal.
+        """
+
+        if not isinstance(self._conn, sqlite3.Connection):
+            return False
+        row = self._conn.execute("PRAGMA data_version").fetchone()
+        epoch = (int(row[0]), self._conn.total_changes)
+        if self._active_admission_cache_epoch != epoch:
+            self._active_admission_cache.clear()
+            self._active_admission_cache_epoch = epoch
+        return True
+
+    @staticmethod
+    def _record_id_batches(record_ids: tuple[str, ...]) -> Iterator[tuple[str, ...]]:
+        """Yield bounded opaque record-ID batches for portable SQL ``IN`` reads."""
+
+        for start in range(0, len(record_ids), _ACTIVE_READ_BATCH_SIZE):
+            yield record_ids[start : start + _ACTIVE_READ_BATCH_SIZE]
+
+    def _relation_rows_for_records_locked(
+        self,
+        scope: MemoryScope,
+        record_ids: tuple[str, ...],
+    ) -> dict[str, list[sqlite3.Row]]:
+        """Load relations for an active snapshot without a per-record query."""
+
+        if not record_ids:
+            return {}
+        scope_id, scope_json = _scope_storage(scope)
+        result: dict[str, list[sqlite3.Row]] = {}
+        for batch in self._record_id_batches(record_ids):
+            placeholders = ", ".join("?" for _ in batch)
+            rows = self._conn.execute(
+                "SELECT from_record_id, relation, to_record_id FROM memory_relations "
+                "WHERE scope_id = ? AND scope_json = ? AND from_record_id IN ("
+                + placeholders
+                + ") ORDER BY from_record_id, relation, to_record_id",
+                (scope_id, scope_json, *batch),
+            ).fetchall()
+            for row in rows:
+                result.setdefault(str(row["from_record_id"]), []).append(row)
+        return result
+
+    def _admission_audit_rows_for_records_locked(
+        self,
+        scope: MemoryScope,
+        record_ids: tuple[str, ...],
+    ) -> dict[str, list[sqlite3.Row]]:
+        """Load audit/event sidecars for a snapshot in bounded batches.
+
+        Rows remain raw here.  They are decoded at the original per-record
+        admission boundary below so corrupt sidecars still fail closed rather
+        than being reduced to an SQL ``EXISTS`` shortcut.
+        """
+
+        if not record_ids:
+            return {}
+        scope_id, scope_json = _scope_storage(scope)
+        result: dict[str, list[sqlite3.Row]] = {}
+        for batch in self._record_id_batches(record_ids):
+            placeholders = ", ".join("?" for _ in batch)
+            rows = self._conn.execute(
+                "SELECT a.event_id, a.record_id, a.candidate_revision, a.origin, "
+                "a.policy_id, a.policy_version, a.policy_fingerprint, a.action, "
+                "a.reason_code, e.record_id AS event_record_id, e.event_type, "
+                "e.revision AS event_revision, e.occurred_at, e.actor, "
+                "e.reason_code AS event_reason_code, e.payload_hash AS event_payload_hash, "
+                "m.origin AS record_origin FROM memory_review_audits AS a "
+                "JOIN memory_events AS e ON e.scope_id = a.scope_id "
+                "AND e.scope_json = a.scope_json AND e.event_id = a.event_id "
+                "LEFT JOIN memory_record_admission_metadata AS m ON "
+                "m.scope_id = a.scope_id AND m.scope_json = a.scope_json "
+                "AND m.record_id = a.record_id WHERE a.scope_id = ? "
+                "AND a.scope_json = ? AND a.record_id IN ("
+                + placeholders
+                + ") ORDER BY a.record_id, e.sequence",
+                (scope_id, scope_json, *batch),
+            ).fetchall()
+            for row in rows:
+                result.setdefault(str(row["record_id"]), []).append(row)
+        return result
 
     def events(self, scope: MemoryScope, record_id: str) -> list[MemoryEvent]:
         """Return content-free operational history in sequence order."""
@@ -2201,10 +2955,23 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
 
         if record.origin in {MemoryOrigin.UNKNOWN, MemoryOrigin.LEGACY_UNKNOWN}:
             return
-        audits = [
-            self._admission_audit_from_row(scope, row)
-            for row in self._admission_audit_rows_for_record_locked(scope, record.record_id)
-        ]
+        self._assert_active_admission_verified_rows_locked(
+            scope,
+            record,
+            self._admission_audit_rows_for_record_locked(scope, record.record_id),
+        )
+
+    def _assert_active_admission_verified_rows_locked(
+        self,
+        scope: MemoryScope,
+        record: MemoryRecord,
+        rows: Sequence[sqlite3.Row],
+    ) -> None:
+        """Decode an active record's complete admission audit set and fail closed."""
+
+        if record.origin in {MemoryOrigin.UNKNOWN, MemoryOrigin.LEGACY_UNKNOWN}:
+            return
+        audits = [self._admission_audit_from_row(scope, row) for row in rows]
         if not any(
             audit.action is MemoryAdmissionAction.ALLOW
             and audit.origin is record.origin
@@ -3448,6 +4215,16 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
             "ORDER BY relation, to_record_id",
             (scope_id, scope_json, record_id),
         ).fetchall()
+        return self._memory_record_from_row_locked(scope, row, relation_rows)
+
+    def _memory_record_from_row_locked(
+        self,
+        scope: MemoryScope,
+        row: sqlite3.Row,
+        relation_rows: Sequence[sqlite3.Row],
+    ) -> MemoryRecord:
+        """Decode one joined record row shared by point and batched active reads."""
+
         source_refs = (
             tuple(json.loads(str(row["source_refs_json"])))
             if row["source_refs_json"] is not None
@@ -3541,6 +4318,8 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
             statements += _V5_MIGRATION_STATEMENTS
         if current <= 5:
             statements += _V6_MIGRATION_STATEMENTS
+        if current <= 6:
+            statements += _V7_MIGRATION_STATEMENTS
         return statements
 
     @staticmethod
@@ -3554,6 +4333,7 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
                 "add v5 admission provenance and review audit tables",
                 "add v6 sealed recall checkpoint manifests",
+                "add v7 durable exact-scope payload-purge receipts",
             ]
         if current == 2:
             return [
@@ -3561,20 +4341,28 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
                 "add v5 admission provenance and review audit tables",
                 "add v6 sealed recall checkpoint manifests",
+                "add v7 durable exact-scope payload-purge receipts",
             ]
         if current == 3:
             return [
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
                 "add v5 admission provenance and review audit tables",
                 "add v6 sealed recall checkpoint manifests",
+                "add v7 durable exact-scope payload-purge receipts",
             ]
         if current == 4:
             return [
                 "add v5 admission provenance and review audit tables",
                 "add v6 sealed recall checkpoint manifests",
+                "add v7 durable exact-scope payload-purge receipts",
             ]
         if current == 5:
-            return ["add v6 sealed recall checkpoint manifests"]
+            return [
+                "add v6 sealed recall checkpoint manifests",
+                "add v7 durable exact-scope payload-purge receipts",
+            ]
+        if current == 6:
+            return ["add v7 durable exact-scope payload-purge receipts"]
         return []
 
     def _backfill_legacy_admission_metadata_locked(self) -> None:
@@ -3759,6 +4547,7 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
                 set(objects).intersection(
                     set(_V5_TABLE_COLUMNS)
                     | set(_V6_TABLE_COLUMNS)
+                    | set(_V7_TABLE_COLUMNS)
                     | {
                         name
                         for name, introduced in _INDEX_INTRODUCED_VERSION.items()
@@ -3776,6 +4565,7 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
             unexpected_v6 = sorted(
                 set(objects).intersection(
                     set(_V6_TABLE_COLUMNS)
+                    | set(_V7_TABLE_COLUMNS)
                     | {
                         name
                         for name, introduced in _INDEX_INTRODUCED_VERSION.items()
@@ -3785,8 +4575,15 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
             )
             if unexpected_v6:
                 raise LedgerStateError(
-                    "ledger schema v5 unexpectedly contains v6 checkpoint objects: "
+                    "ledger schema v5 unexpectedly contains future Ledger objects: "
                     + ", ".join(unexpected_v6)
+                )
+        elif current < 7:
+            unexpected_v7 = sorted(set(objects).intersection(set(_V7_TABLE_COLUMNS)))
+            if unexpected_v7:
+                raise LedgerStateError(
+                    "ledger schema v6 unexpectedly contains v7 scope-purge objects: "
+                    + ", ".join(unexpected_v7)
                 )
         for table_name in _ALL_LEDGER_TABLE_COLUMNS:
             existing = objects.get(table_name)
@@ -3805,6 +4602,8 @@ class SqliteMemoryLedger(_LedgerCommandBackend):
             required.update(_V5_TABLE_COLUMNS)
         if current >= 6:
             required.update(_V6_TABLE_COLUMNS)
+        if current >= 7:
+            required.update(_V7_TABLE_COLUMNS)
         for table_name, expected_columns in _ALL_LEDGER_TABLE_COLUMNS.items():
             if table_name not in table_names:
                 continue

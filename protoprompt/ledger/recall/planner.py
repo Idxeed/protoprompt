@@ -71,6 +71,13 @@ def _validate_task(value: str) -> str:
 
 
 def _terms(value: str) -> frozenset[str]:
+    # For ASCII, ``casefold`` is a one-to-one lowercase transformation and
+    # ``findall`` returns the same whole matches as the former Python-level
+    # ``finditer(...).group(0).casefold()`` loop.  Keep all non-ASCII input on
+    # that original path: Unicode casefolding can expand or otherwise alter
+    # characters before the lexical term boundary is evaluated.
+    if value.isascii():
+        return frozenset(_TERM_RE.findall(value.casefold()))
     return frozenset(match.group(0).casefold() for match in _TERM_RE.finditer(value))
 
 
@@ -95,6 +102,31 @@ def _render_data(records: list[MemoryRecord]) -> str:
     # The envelope is data, not an XML/HTML prompt wrapper.  Escape delimiter-
     # shaped characters anyway so a record cannot visibly close a downstream
     # wrapper that embeds this serialized data verbatim.
+    return (
+        rendered.replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+
+
+def _render_record_data(record: MemoryRecord) -> str:
+    """Render one record in the exact JSON shape embedded by ``_render_data``.
+
+    This is deliberately kept separate from the final envelope renderer.  The
+    built-in ``RegexTokenCounter`` tokenizes JSON as independent word and
+    punctuation tokens, so a record item's count plus the comma delimiter is
+    exactly composable.  Other counters retain the conservative full-envelope
+    accounting path below because their tokenization may merge across a JSON
+    boundary.
+    """
+
+    rendered = json.dumps(
+        {"content": record.content, "kind": record.kind.value},
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
     return (
         rendered.replace("<", "\\u003c")
         .replace(">", "\\u003e")
@@ -491,23 +523,52 @@ class LedgerRecallPlanner:
         selections: list[_RecallSelection] = []
         used_tokens = empty_tokens
         used_bytes = empty_bytes
+        # ``RegexTokenCounter`` is our owned, exact punctuation-aware counter.
+        # Its JSON token count is additive across a comma-delimited record
+        # array; an arbitrary third-party counter can merge tokens across the
+        # boundary, so it deliberately keeps the former full-render path.
+        incremental_regex_accounting = type(self._counter) is RegexTokenCounter
+        comma_tokens = _counter_count(self._counter, ",") if incremental_regex_accounting else 0
 
         for candidate in scored:
-            prospective = [*selected_records, candidate.record]
-            try:
-                rendered = _render_data(prospective)
-                prospective_bytes = _utf8_size(rendered)
-            except UnicodeEncodeError:
-                decisions.append(
-                    LedgerRecallDecision(
-                        kind=candidate.record.kind,
-                        decision="excluded",
-                        reason="non_utf8_content",
-                        score=candidate.score,
+            if incremental_regex_accounting:
+                try:
+                    rendered_record = _render_record_data(candidate.record)
+                    record_bytes = _utf8_size(rendered_record)
+                except UnicodeEncodeError:
+                    decisions.append(
+                        LedgerRecallDecision(
+                            kind=candidate.record.kind,
+                            decision="excluded",
+                            reason="non_utf8_content",
+                            score=candidate.score,
+                        )
                     )
+                    continue
+                separator_tokens = comma_tokens if selected_records else 0
+                separator_bytes = 1 if selected_records else 0
+                prospective_tokens = (
+                    used_tokens
+                    + separator_tokens
+                    + _counter_count(self._counter, rendered_record)
                 )
-                continue
-            prospective_tokens = _counter_count(self._counter, rendered)
+                prospective_bytes = used_bytes + separator_bytes + record_bytes
+            else:
+                prospective = [*selected_records, candidate.record]
+                try:
+                    rendered = _render_data(prospective)
+                    prospective_bytes = _utf8_size(rendered)
+                except UnicodeEncodeError:
+                    decisions.append(
+                        LedgerRecallDecision(
+                            kind=candidate.record.kind,
+                            decision="excluded",
+                            reason="non_utf8_content",
+                            score=candidate.score,
+                        )
+                    )
+                    continue
+                prospective_tokens = _counter_count(self._counter, rendered)
             # A deterministic third-party tokenizer need not be monotonic
             # across two distinct JSON strings (for example due to boundary
             # merges). The prospective full-envelope count governs budgets;
@@ -561,6 +622,20 @@ class LedgerRecallPlanner:
             )
             used_tokens = prospective_tokens
             used_bytes = prospective_bytes
+
+        if incremental_regex_accounting:
+            # Keep the planner's exact full-envelope contract as the final
+            # authority.  This one bounded check makes a future change to the
+            # owned regex counter fail closed rather than silently changing
+            # token/byte receipts.
+            rendered_selection = _render_data(selected_records)
+            if (
+                used_tokens != _counter_count(self._counter, rendered_selection)
+                or used_bytes != _utf8_size(rendered_selection)
+            ):
+                raise RuntimeError(
+                    "incremental regex accounting did not reconcile with the ledger data envelope"
+                )
 
         selection_snapshot = tuple(selections)
         policy_fingerprint = _policy_signature(self._policy)
@@ -628,9 +703,10 @@ class LedgerRecallPlanner:
 
         resolved_records = self._resolve_records(
             plan,
-            self._writer.list_active(
+            self._writer._load_active_markers(
                 now=instant,
                 limit=self._policy.active_read_limit,
+                record_ids=tuple(selection.record_id for selection in plan._selections),
             ),
             instant=instant,
         )

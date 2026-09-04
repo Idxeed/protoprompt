@@ -74,8 +74,9 @@ def _candidate(
 
 
 def _drop_v5_and_v6_objects(connection: sqlite3.Connection) -> None:
-    """Stage a genuine pre-v5 fixture from a freshly created v6 Ledger file."""
+    """Stage a genuine pre-v5 fixture from a freshly created current Ledger file."""
 
+    connection.execute("DROP TABLE IF EXISTS memory_scope_payload_purge_receipts")
     connection.execute("DROP INDEX IF EXISTS idx_memory_recall_checkpoint_selection_record")
     connection.execute("DROP TABLE IF EXISTS memory_recall_checkpoint_selections")
     connection.execute("DROP TABLE IF EXISTS memory_recall_checkpoints")
@@ -100,7 +101,7 @@ def test_setup_is_explicit_and_dry_run_does_not_create_schema(tmp_path, scope_a)
         assert store.dry_run_setup() == {
             "component": "memory_ledger",
             "from_version": 0,
-            "to_version": 6,
+            "to_version": 7,
             "changes_required": True,
             "actions": ["create isolated memory-ledger tables"],
         }
@@ -114,7 +115,7 @@ def test_setup_is_explicit_and_dry_run_does_not_create_schema(tmp_path, scope_a)
         assert store.schema_version() == 0
 
         store.setup()
-        assert store.schema_version() == 6
+        assert store.schema_version() == 7
         assert store.dry_run_setup()["changes_required"] is False
     finally:
         store.close()
@@ -203,7 +204,7 @@ def test_explicit_v1_to_v6_migration_adds_erasure_source_admission_and_checkpoin
         assert upgraded.dry_run_setup() == {
             "component": "memory_ledger",
             "from_version": 1,
-            "to_version": 6,
+            "to_version": 7,
             "changes_required": True,
             "actions": [
                 "add v2 erasure receipts and replay tombstones",
@@ -211,10 +212,11 @@ def test_explicit_v1_to_v6_migration_adds_erasure_source_admission_and_checkpoin
                 "add v4 source-revocation barriers and scrub legacy event fingerprints",
                 "add v5 admission provenance and review audit tables",
                 "add v6 sealed recall checkpoint manifests",
+                "add v7 durable exact-scope payload-purge receipts",
             ],
         }
         upgraded.setup()
-        assert upgraded.schema_version() == 6
+        assert upgraded.schema_version() == 7
     finally:
         upgraded.close()
 
@@ -234,6 +236,10 @@ def test_explicit_v1_to_v6_migration_adds_erasure_source_admission_and_checkpoin
         ).fetchone() is not None
         assert connection.execute(
             "SELECT name FROM sqlite_master WHERE type = 'table' "
+            "AND name = 'memory_scope_payload_purge_receipts'"
+        ).fetchone() is not None
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table' "
             "AND name = 'memory_source_revocation_tombstones'"
         ).fetchone() is not None
         assert connection.execute(
@@ -250,6 +256,82 @@ def test_explicit_v1_to_v6_migration_adds_erasure_source_admission_and_checkpoin
         ).fetchone() is not None
     finally:
         connection.close()
+
+
+def test_explicit_v6_to_v7_migration_adds_durable_scope_payload_purge_receipts(tmp_path, scope_a):
+    """A pre-purge v6 file requires one explicit additive setup step."""
+
+    path = tmp_path / "v6-ledger.db"
+    original = SqliteMemoryLedger(str(path))
+    try:
+        original.setup()
+        candidate = _candidate(
+            _writer(original, scope_a),
+            record_id="v6-survives-upgrade",
+            content="Payload survives the explicit v6 to v7 migration.",
+            event_id="v6-observed",
+        )
+        assert candidate.content_available
+    finally:
+        original.close()
+
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("DROP TABLE memory_scope_payload_purge_receipts")
+        connection.execute(
+            "UPDATE ledger_schema SET version = 6 WHERE component = 'memory_ledger'"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    upgraded = SqliteMemoryLedger(str(path))
+    try:
+        assert upgraded.dry_run_setup() == {
+            "component": "memory_ledger",
+            "from_version": 6,
+            "to_version": 7,
+            "changes_required": True,
+            "actions": ["add v7 durable exact-scope payload-purge receipts"],
+        }
+        upgraded.setup()
+        restored = upgraded.get(scope_a, "v6-survives-upgrade")
+        assert restored is not None
+        assert restored.content == "Payload survives the explicit v6 to v7 migration."
+        assert upgraded.schema_version() == 7
+    finally:
+        upgraded.close()
+
+
+def test_v6_to_v7_migration_rejects_an_incompatible_scope_purge_receipt_table(tmp_path):
+    """Setup must not adopt a lookalike receipt table after a v6 reopen."""
+
+    path = tmp_path / "v6-incompatible-scope-purge-table.db"
+    fresh = SqliteMemoryLedger(str(path))
+    fresh.setup()
+    fresh.close()
+
+    connection = sqlite3.connect(path)
+    try:
+        connection.execute("DROP TABLE memory_scope_payload_purge_receipts")
+        connection.execute(
+            "CREATE TABLE memory_scope_payload_purge_receipts (foreign_value TEXT)"
+        )
+        connection.execute(
+            "UPDATE ledger_schema SET version = 6 WHERE component = 'memory_ledger'"
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    upgraded = SqliteMemoryLedger(str(path))
+    try:
+        with pytest.raises(LedgerStateError, match="memory_scope_payload_purge_receipts"):
+            upgraded.dry_run_setup()
+        with pytest.raises(LedgerStateError, match="memory_scope_payload_purge_receipts"):
+            upgraded.setup()
+    finally:
+        upgraded.close()
 
 
 def test_v3_to_v6_migration_scrubs_legacy_fingerprints_through_its_old_guard(
@@ -299,9 +381,10 @@ def test_v3_to_v6_migration_scrubs_legacy_fingerprints_through_its_old_guard(
             "add v4 source-revocation barriers and scrub legacy event fingerprints",
             "add v5 admission provenance and review audit tables",
             "add v6 sealed recall checkpoint manifests",
+            "add v7 durable exact-scope payload-purge receipts",
         ]
         upgraded.setup()
-        assert upgraded.schema_version() == 6
+        assert upgraded.schema_version() == 7
     finally:
         upgraded.close()
 
@@ -674,13 +757,17 @@ def test_default_reader_defensively_filters_a_record_that_stops_being_recallable
         expected_revision=candidate.revision,
         event_id="evt-reader-race-confirm",
     )
-    original_load = ledger._load_record_locked
+    original_decode = ledger._memory_record_from_row_locked
 
-    def return_nonrecallable_snapshot(scope, record_id):
-        record = original_load(scope, record_id)
-        return replace(record, state=MemoryState.RETRACTED) if record is not None else None
+    def return_nonrecallable_snapshot(scope, row, relation_rows):
+        record = original_decode(scope, row, relation_rows)
+        return replace(record, state=MemoryState.RETRACTED)
 
-    monkeypatch.setattr(ledger, "_load_record_locked", return_nonrecallable_snapshot)
+    monkeypatch.setattr(
+        ledger,
+        "_memory_record_from_row_locked",
+        return_nonrecallable_snapshot,
+    )
     assert writer.list_active() == []
 
 
@@ -1544,7 +1631,7 @@ def test_projection_persists_and_event_rows_cannot_be_updated(tmp_path, scope_a)
 
     second = SqliteMemoryLedger(str(path))
     try:
-        assert second.schema_version() == 6
+        assert second.schema_version() == 7
         persisted = second.get(scope_a, active.record_id)
         assert persisted is not None
         assert persisted.content == "persist sentinel"

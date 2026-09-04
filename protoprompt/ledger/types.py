@@ -20,6 +20,7 @@ from protoprompt.scope import MemoryScope
 
 
 LEDGER_SCHEMA_VERSION = 1
+SCOPE_PAYLOAD_PURGE_SCHEMA_VERSION = 1
 MAX_CONTENT_CHARS = 16_000
 MAX_REFERENCE_COUNT = 32
 MAX_REFERENCE_CHARS = 512
@@ -264,6 +265,16 @@ def command_hash(payload: Mapping[str, Any]) -> str:
         digest_size=32,
         person=b"pp-ledger-cmd",
     ).hexdigest()
+
+
+def _is_64_hex_digest(value: object) -> bool:
+    """Return whether ``value`` is one canonical 32-byte hexadecimal digest."""
+
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -601,4 +612,113 @@ class ErasureReceipt:
             "source_refs_deleted": self.source_refs_deleted,
             "relations_deleted": self.relations_deleted,
             "events_deleted": self.events_deleted,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ScopePayloadReadback:
+    """Content-free payload-presence result for one exact writer scope.
+
+    The receipt says only how many live ``memory_payloads`` rows remain at the
+    read boundary.  It deliberately contains neither a record ID nor a source,
+    evidence reference, content hash, plaintext, or raw scope field.  The
+    deterministic scope fingerprint lets a host reconcile a readback with the
+    same scope after a restart without turning the receipt into a scope export.
+    """
+
+    scope_fingerprint: str
+    payload_record_count: int
+    schema_version: int = SCOPE_PAYLOAD_PURGE_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        if not _is_64_hex_digest(self.scope_fingerprint):
+            raise ValueError("scope_fingerprint must be a 64-character digest")
+        if isinstance(self.payload_record_count, bool) or not isinstance(
+            self.payload_record_count,
+            int,
+        ) or self.payload_record_count < 0:
+            raise ValueError("payload_record_count must be a non-negative integer")
+        if (
+            isinstance(self.schema_version, bool)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != SCOPE_PAYLOAD_PURGE_SCHEMA_VERSION
+        ):
+            raise ValueError("unsupported scope payload readback schema_version")
+
+    @property
+    def is_empty(self) -> bool:
+        """Whether this exact scope had no payload-bearing records at read time."""
+
+        return self.payload_record_count == 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "scope_fingerprint": self.scope_fingerprint,
+            "payload_record_count": self.payload_record_count,
+            "no_payload_bearing_records": self.is_empty,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class ScopePayloadPurgeReceipt:
+    """Content-free aggregate result of one exact-scope payload purge.
+
+    This is the non-destructive counterpart to per-record ``forget``.  It
+    reports only aggregate counts and a final :class:`ScopePayloadReadback`.
+    The caller's opaque operation ID is included so a host can correlate a
+    retry, but it must be host-minted and is not a memory payload.
+    """
+
+    operation_id: str
+    scope_fingerprint: str
+    records_forgotten: int
+    payload_rows_deleted: int
+    source_refs_deleted: int
+    relations_deleted: int
+    readback: ScopePayloadReadback
+    schema_version: int = SCOPE_PAYLOAD_PURGE_SCHEMA_VERSION
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "operation_id",
+            validate_identifier(self.operation_id, field="operation_id"),
+        )
+        if not _is_64_hex_digest(self.scope_fingerprint):
+            raise ValueError("scope_fingerprint must be a 64-character digest")
+        for field_name in (
+            "records_forgotten",
+            "payload_rows_deleted",
+            "source_refs_deleted",
+            "relations_deleted",
+        ):
+            value = getattr(self, field_name)
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{field_name} must be a non-negative integer")
+        if self.payload_rows_deleted != self.records_forgotten:
+            raise ValueError("payload_rows_deleted must equal records_forgotten")
+        if not isinstance(self.readback, ScopePayloadReadback):
+            raise TypeError("readback must be a ScopePayloadReadback")
+        if self.readback.scope_fingerprint != self.scope_fingerprint:
+            raise ValueError("readback scope_fingerprint does not match receipt")
+        if not self.readback.is_empty:
+            raise ValueError("scope payload purge receipt requires an empty readback")
+        if (
+            isinstance(self.schema_version, bool)
+            or not isinstance(self.schema_version, int)
+            or self.schema_version != SCOPE_PAYLOAD_PURGE_SCHEMA_VERSION
+        ):
+            raise ValueError("unsupported scope payload purge receipt schema_version")
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "operation_id": self.operation_id,
+            "scope_fingerprint": self.scope_fingerprint,
+            "records_forgotten": self.records_forgotten,
+            "payload_rows_deleted": self.payload_rows_deleted,
+            "source_refs_deleted": self.source_refs_deleted,
+            "relations_deleted": self.relations_deleted,
+            "readback": self.readback.to_dict(),
         }

@@ -666,3 +666,119 @@ def assert_checkpoint_reopen_resume_and_selected_record_invalidation(
             restarted_planner.resume_checkpoint(checkpoint_id, task=task)
     finally:
         restarted.close()
+
+
+def assert_scope_payload_purge_durable_retry_and_scope_isolation(
+    factory: LedgerFactory,
+) -> None:
+    """Prove the public exact-scope purge receipt is durable and sealed.
+
+    ``factory`` must reopen the same durable backend.  The test deliberately
+    uses only :class:`MemoryWriter` methods: no database path, table, raw SQL,
+    or backend-private state is needed to establish the host contract.
+
+    A completed operation is a sealed historical transaction, not a standing
+    deletion rule.  Consequently, a retry must return the original receipt
+    after restart and must not remove a record written after that first
+    commit.  A host that needs to prevent later ingress still owns that
+    application-level fence.
+    """
+
+    operation_id = "conformance-scope-purge-durable-retry"
+    primary_scope = MemoryScope(
+        tenant="conformance",
+        user="alice",
+        thread="scope-purge-primary",
+    )
+    sibling_scope = MemoryScope(
+        tenant="conformance",
+        user="bob",
+        thread="scope-purge-primary",
+    )
+    shared_record_id = "scope-purge-shared-record"
+
+    first = _opened(factory)
+    try:
+        primary = _writer(first, primary_scope)
+        sibling = _writer(first, sibling_scope)
+        primary_record = primary.propose(
+            kind=MemoryKind.FACT,
+            content="Primary exact-scope payload is removed by the purge.",
+            source_ref="conformance:scope-purge-primary",
+            record_id=shared_record_id,
+            event_id="scope-purge-primary-observed",
+        )
+        sibling_record = sibling.propose(
+            kind=MemoryKind.FACT,
+            content="Sibling exact-scope payload must survive the purge.",
+            source_ref="conformance:scope-purge-sibling",
+            record_id=shared_record_id,
+            event_id="scope-purge-sibling-observed",
+        )
+
+        primary_before = primary.payload_readback()
+        sibling_before = sibling.payload_readback()
+        assert primary_before.payload_record_count == 1
+        assert sibling_before.payload_record_count == 1
+        assert primary_before.scope_fingerprint != sibling_before.scope_fingerprint
+
+        first_receipt = primary.purge_payloads(operation_id)
+        assert first_receipt.records_forgotten == 1
+        assert first_receipt.payload_rows_deleted == 1
+        assert first_receipt.readback == primary.payload_readback()
+        assert first_receipt.readback.is_empty
+
+        primary_after = primary.get(primary_record.record_id)
+        assert primary_after is not None
+        assert primary_after.state is MemoryState.RETRACTED
+        assert primary_after.content is None
+        assert primary_after.content_available is False
+
+        sibling_after = sibling.get(sibling_record.record_id)
+        assert sibling_after is not None
+        assert sibling_after.content == "Sibling exact-scope payload must survive the purge."
+        assert sibling.payload_readback().payload_record_count == 1
+
+        # A same-process retry is already an immutable historical receipt.
+        assert primary.purge_payloads(operation_id) == first_receipt
+    finally:
+        first.close()
+
+    restarted = _opened(factory)
+    try:
+        primary = _writer(restarted, primary_scope)
+        sibling = _writer(restarted, sibling_scope)
+        assert primary.payload_readback().is_empty
+        sibling_after_restart = sibling.get(shared_record_id)
+        assert sibling_after_restart is not None
+        assert sibling_after_restart.content == (
+            "Sibling exact-scope payload must survive the purge."
+        )
+
+        later = primary.propose(
+            kind=MemoryKind.FACT,
+            content="Later payload must not be selected by an old receipt.",
+            source_ref="conformance:scope-purge-later",
+            record_id="scope-purge-later-record",
+            event_id="scope-purge-later-observed",
+        )
+        assert primary.payload_readback().payload_record_count == 1
+
+        retry = primary.purge_payloads(operation_id)
+        assert retry == first_receipt
+        # The receipt's readback is sealed at its original transaction, while
+        # the public live readback correctly observes the later write.
+        assert retry.readback.is_empty
+        assert primary.payload_readback().payload_record_count == 1
+        later_after = primary.get(later.record_id)
+        assert later_after is not None
+        assert later_after.content == "Later payload must not be selected by an old receipt."
+
+        with pytest.raises(LedgerConflictError, match="operation_id"):
+            primary.purge_payloads(
+                operation_id,
+                reason_code="conformance-scope-purge-command-drift",
+            )
+        assert primary.payload_readback().payload_record_count == 1
+    finally:
+        restarted.close()

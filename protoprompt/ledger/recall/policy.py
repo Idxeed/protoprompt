@@ -14,6 +14,13 @@ _DEFAULT_KINDS = (
     MemoryKind.PREFERENCE,
 )
 
+# A recall plan remains deliberately bounded even when a host elects to scan
+# the full 10k evidence corpus.  Defaults stay conservative (1,000 active
+# records / 100 candidates); 10k is an explicit policy choice for the raw
+# performance protocol and any host that has budgeted for it.
+MAX_ACTIVE_READ_LIMIT = 10_000
+MAX_CANDIDATE_LIMIT = 10_000
+
 
 def _finite_non_negative(value: float, *, field: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (float, int)):
@@ -59,7 +66,7 @@ class LedgerRecallPolicy:
     allowed_origins: tuple[MemoryOrigin | str, ...] | None = None
 
     def __post_init__(self) -> None:
-        if self.schema_version != 1:
+        if type(self.schema_version) is not int or self.schema_version != 1:
             raise ValueError("unsupported ledger recall policy schema version")
         object.__setattr__(
             self,
@@ -82,12 +89,20 @@ class LedgerRecallPolicy:
         object.__setattr__(
             self,
             "active_read_limit",
-            _positive_int(self.active_read_limit, field="active_read_limit", maximum=1000),
+            _positive_int(
+                self.active_read_limit,
+                field="active_read_limit",
+                maximum=MAX_ACTIVE_READ_LIMIT,
+            ),
         )
         object.__setattr__(
             self,
             "candidate_limit",
-            _positive_int(self.candidate_limit, field="candidate_limit", maximum=1000),
+            _positive_int(
+                self.candidate_limit,
+                field="candidate_limit",
+                maximum=MAX_CANDIDATE_LIMIT,
+            ),
         )
         if self.candidate_limit > self.active_read_limit:
             raise ValueError("candidate_limit must not exceed active_read_limit")

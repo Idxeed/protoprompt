@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from protoprompt.injector import ContextBuilder
@@ -7,6 +9,24 @@ from protoprompt.store.memory import InMemStore
 from protoprompt.tokens import ProviderTokenCounter, RegexTokenCounter, TokenCounter
 
 from _mocks import MockLLM
+
+
+def _pre_fast_path_count(text: str) -> int:
+    """Mirror the former Unicode-aware loop for equivalence coverage."""
+
+    word = re.compile(r"\w+|[^\w\s]", re.UNICODE)
+    cyrillic = re.compile(r"[\u0400-\u04FF]")
+    cjk = re.compile(r"[\u4E00-\u9FFF\u3040-\u30FF\uAC00-\uD7AF]")
+    total = 0
+    for match in word.finditer(text):
+        chunk = match.group(0)
+        if cjk.search(chunk):
+            total += max(1, int(len(chunk) * 1.5))
+        elif cyrillic.search(chunk):
+            total += max(1, int(len(chunk) * 0.6 * 1.3))
+        else:
+            total += 1
+    return total
 
 
 def test_regex_counter_is_protocol():
@@ -22,6 +42,21 @@ def test_regex_counter_ascii():
     n = RegexTokenCounter().count("hello world foo bar")
     assert n > 0
     assert n <= 5
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "plain ASCII words and 12345",
+        "JSON: {\"kind\":\"fact\",\"content\":\"hello\"}",
+        "punctuation !?.,;:-_()[]{}<>/\\\\\"'",
+        "tabs\tnewlines\nand\x00controls",
+    ],
+)
+def test_regex_counter_ascii_fast_path_is_identical_to_the_prior_loop(text: str):
+    """The ASCII specialization must retain the exact pre-optimization count."""
+
+    assert RegexTokenCounter().count(text) == _pre_fast_path_count(text)
 
 
 def test_regex_counter_cyrillic_denser():

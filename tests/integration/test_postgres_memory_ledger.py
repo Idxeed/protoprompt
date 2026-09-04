@@ -1,4 +1,4 @@
-"""Live PostgreSQL conformance and tamper-boundary tests for Ledger v6.
+"""Live PostgreSQL conformance and tamper-boundary tests for Ledger v7.
 
 The PostgreSQL Ledger deliberately has the same synchronous, scope-pinned
 host contract as SQLite, but owns an isolated schema and must independently
@@ -35,15 +35,6 @@ from protoprompt.ledger.recall import (
 )
 from protoprompt.scope import MemoryScope
 from protoprompt.tokens import RegexTokenCounter
-from ledger_conformance.core import (
-    assert_admission_boundary_and_strict_recall,
-    assert_candidate_confirmation_and_content_free_events,
-    assert_checkpoint_reopen_resume_and_selected_record_invalidation,
-    assert_exact_scope_isolation_and_scoped_forget,
-    assert_idempotent_retries_and_conflicting_event_reuse,
-    assert_lifecycle_forget_source_and_hard_erase,
-    assert_restart_and_setup_persistence,
-)
 from ledger_conformance.property import (
     OPAQUE_TEXT,
     RECALL_BYTE_SLACK,
@@ -53,6 +44,14 @@ from ledger_conformance.property import (
     assert_recall_budget_packing_property,
     assert_scoped_deletion_property,
     run_lifecycle_state_machine,
+)
+from ledger_conformance.v1 import (
+    LEDGER_STORAGE_CONFORMANCE_V1_CHECK_IDS,
+    run_ledger_storage_conformance_v1,
+)
+from ledger_conformance.scope_payload_purge import (
+    SCOPE_PAYLOAD_PURGE_CONFORMANCE_V1_CHECK_IDS,
+    run_scope_payload_purge_conformance_v1,
 )
 
 
@@ -191,19 +190,30 @@ def _close(ledger: Any) -> None:
     )
 
 
-def test_postgres_memory_ledger_v6_conformance(dsn: str, schema: str) -> None:
-    """Run the backend-neutral public Ledger conformance suite once."""
+def test_postgres_memory_ledger_v7_conformance(dsn: str, schema: str) -> None:
+    """Run the named storage v1 profile against the live PostgreSQL backend."""
 
     def factory() -> Any:
         return _backend(dsn, schema)
 
-    assert_candidate_confirmation_and_content_free_events(factory)
-    assert_admission_boundary_and_strict_recall(factory)
-    assert_exact_scope_isolation_and_scoped_forget(factory)
-    assert_idempotent_retries_and_conflicting_event_reuse(factory)
-    assert_lifecycle_forget_source_and_hard_erase(factory)
-    assert_restart_and_setup_persistence(factory)
-    assert_checkpoint_reopen_resume_and_selected_record_invalidation(factory)
+    assert PostgresMemoryLedger is not None
+    report = run_ledger_storage_conformance_v1(
+        factory,
+        capabilities=PostgresMemoryLedger.storage_capabilities(),
+    )
+    assert report["status"] == "passed"
+    assert report["check_ids"] == list(LEDGER_STORAGE_CONFORMANCE_V1_CHECK_IDS)
+
+
+def test_postgres_scope_payload_purge_conformance(dsn: str, schema: str) -> None:
+    """Run the same public durable-purge contract when a live DSN is present."""
+
+    def factory() -> Any:
+        return _backend(dsn, schema)
+
+    report = run_scope_payload_purge_conformance_v1(factory)
+    assert report["status"] == "passed"
+    assert report["check_ids"] == list(SCOPE_PAYLOAD_PURGE_CONFORMANCE_V1_CHECK_IDS)
 
 
 @given(scope_seed=OPAQUE_TEXT, differing_field=SCOPE_FIELD, content=OPAQUE_TEXT)
@@ -342,7 +352,7 @@ def test_postgres_setup_is_explicit_and_dedicated_to_its_schema(
     dsn: str,
     schema: str,
 ) -> None:
-    """No implicit DDL, no shared/system schema, and idempotent fresh v6 setup."""
+    """No implicit DDL, no shared/system schema, and idempotent fresh v7 setup."""
 
     ledger = _backend(dsn, schema)
     scope = MemoryScope(tenant="acme", user="alice", thread="setup")
@@ -365,7 +375,7 @@ def test_postgres_setup_is_explicit_and_dedicated_to_its_schema(
 
         ledger.setup()
         ledger.setup()
-        assert ledger.schema_version() == 6
+        assert ledger.schema_version() == 7
         assert ledger.dry_run_setup()["changes_required"] is False
     finally:
         _close(ledger)
@@ -524,8 +534,8 @@ def test_postgres_guard_security_attributes_are_validated_and_repaired(
         _close(ledger)
 
 
-def test_postgres_refuses_pre_v6_ledger_schemas(dsn: str, schema: str) -> None:
-    """This backend starts at fresh v6; it must not guess a SQLite migration."""
+def test_postgres_refuses_pre_v7_ledger_schemas(dsn: str, schema: str) -> None:
+    """This backend starts at fresh v7; it must not guess a SQLite migration."""
 
     quoted_schema = _quoted_identifier(schema)
     with _raw_connection(dsn) as connection:
@@ -537,11 +547,11 @@ def test_postgres_refuses_pre_v6_ledger_schemas(dsn: str, schema: str) -> None:
         connection.execute(
             f"INSERT INTO {quoted_schema}.ledger_schema (component, version, applied_at) "
             "VALUES (%s, %s, %s)",
-            ("memory_ledger", 5, "2037-01-01T00:00:00+00:00"),
+            ("memory_ledger", 6, "2037-01-01T00:00:00+00:00"),
         )
     ledger = _backend(dsn, schema)
     try:
-        assert ledger.schema_version() == 5
+        assert ledger.schema_version() == 6
         with pytest.raises(LedgerStateError, match="unsupported"):
             ledger.dry_run_setup()
         with pytest.raises(LedgerStateError, match="unsupported"):
@@ -579,7 +589,7 @@ def test_postgres_catalog_validator_rejects_guard_and_index_tampering(
         with pytest.raises(LedgerStateError, match="guard function"):
             writer.get(candidate.record_id)
 
-        # A validated v6 schema can repair only its own no-op guard, matching
+        # A validated v7 schema can repair only its own no-op guard, matching
         # SQLite's explicit setup-repair boundary.
         ledger.setup()
         with _raw_connection(dsn) as connection:

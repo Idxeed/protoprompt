@@ -109,7 +109,10 @@ class MemoryAdmissionPolicy:
     minimum_confidence: float = 1.0
 
     def __post_init__(self) -> None:
-        if self.schema_version != _POLICY_SCHEMA_VERSION:
+        if (
+            type(self.schema_version) is not int
+            or self.schema_version != _POLICY_SCHEMA_VERSION
+        ):
             raise ValueError("unsupported memory admission policy schema version")
         object.__setattr__(
             self,

@@ -1,4 +1,4 @@
-"""PostgreSQL v6 implementation of the experimental Memory Ledger.
+"""PostgreSQL v7 implementation of the experimental Memory Ledger.
 
 The public Ledger command surface is synchronous because ``MemoryWriter``,
 admission, recall, and the composed-request boundary are synchronous at their
@@ -27,6 +27,10 @@ from protoprompt.ledger.sqlite import (
     _LEDGER_INDEX_SIGNATURES,
     _SCHEMA_STATEMENTS,
     SqliteMemoryLedger,
+)
+from protoprompt.ledger.storage_conformance import (
+    LedgerStorageCapabilities,
+    postgres_v7_storage_capabilities,
 )
 from protoprompt.ledger.types import (
     LedgerConflictError,
@@ -162,6 +166,15 @@ _PG_EXPECTED_CONSTRAINTS = {
             "foreign key (scope_id, scope_json, checkpoint_id) references memory_recall_checkpoints(scope_id, scope_json, checkpoint_id) on delete cascade",
         ),
     },
+    "memory_scope_payload_purge_receipts": {
+        ("p", "primary key (scope_id, scope_json, operation_key)"),
+        ("c", "check (records_forgotten >= 0)"),
+        ("c", "check (payload_rows_deleted >= 0)"),
+        ("c", "check (source_refs_deleted >= 0)"),
+        ("c", "check (relations_deleted >= 0)"),
+        ("c", "check (schema_version = 1)"),
+        ("c", "check (payload_rows_deleted = records_forgotten)"),
+    },
 }
 _PG_NULLABLE_COLUMNS = {
     "memory_events": frozenset({"related_record_id", "reason_code", "content_hash"}),
@@ -187,6 +200,8 @@ _PG_INTEGER_COLUMNS = frozenset(
         "used_tokens",
         "used_bytes",
         "selected_count",
+        "records_forgotten",
+        "payload_rows_deleted",
     }
 )
 _PG_EVENT_FUNCTION_BODY = """
@@ -270,7 +285,7 @@ def _index_signature(definition: str) -> str:
 
 
 def _postgres_schema_statements() -> tuple[str, ...]:
-    """Translate the v6 table shape, not SQLite's schema-validation model."""
+    """Translate the v7 table shape, not SQLite's schema-validation model."""
 
     statements: list[str] = []
     for statement in _SCHEMA_STATEMENTS:
@@ -363,9 +378,9 @@ class _PostgresConnection:
 
 
 class _PostgresLedgerEngine(SqliteMemoryLedger):
-    """Private PostgreSQL execution engine for the existing v6 command logic."""
+    """Private PostgreSQL execution engine for the existing v7 command logic."""
 
-    MIGRATION_VERSION = 6
+    MIGRATION_VERSION = 7
 
     def __init__(self, conninfo: str, *, schema: str) -> None:
         if not isinstance(conninfo, str) or not conninfo.strip():
@@ -408,7 +423,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
         )
 
     def _set_fresh_ddl_search_path_locked(self) -> None:
-        """Use the Ledger schema first only for validated fresh v6 DDL."""
+        """Use the Ledger schema first only for validated fresh v7 DDL."""
 
         self._conn.execute(
             f"SET LOCAL search_path TO {self._quoted_schema}, pg_catalog"
@@ -433,7 +448,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
             return self._schema_version_locked()
 
     def dry_run_setup(self) -> dict[str, Any]:
-        """Describe the explicit fresh v6 setup without mutating PostgreSQL."""
+        """Describe the explicit fresh v7 setup without mutating PostgreSQL."""
 
         with self._lock:
             self._ensure_open_locked()
@@ -445,7 +460,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
             )
             if current not in {0, self.MIGRATION_VERSION}:
                 raise LedgerStateError(
-                    "PostgreSQL Ledger supports an explicit fresh v6 setup only; "
+                    "PostgreSQL Ledger supports an explicit fresh v7 setup only; "
                     f"found schema v{current}"
                 )
             return {
@@ -454,14 +469,14 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
                 "to_version": self.MIGRATION_VERSION,
                 "changes_required": current != self.MIGRATION_VERSION,
                 "actions": (
-                    ["create isolated PostgreSQL memory-ledger v6 tables and guards"]
+                    ["create isolated PostgreSQL memory-ledger v7 tables and guards"]
                     if current == 0
                     else []
                 ),
             }
 
     def setup(self) -> None:
-        """Create or validate the isolated PostgreSQL Ledger v6 schema."""
+        """Create or validate the isolated PostgreSQL Ledger v7 schema."""
 
         with self._lock:
             self._ensure_open_locked()
@@ -481,13 +496,13 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
                 )
                 if current not in {0, self.MIGRATION_VERSION}:
                     raise LedgerStateError(
-                        "PostgreSQL Ledger supports an explicit fresh v6 setup only; "
+                        "PostgreSQL Ledger supports an explicit fresh v7 setup only; "
                         f"found schema v{current}"
                     )
                 if current == 0:
                     # _assert_schema_compatible_locked has already proved the
                     # dedicated schema has no objects that could shadow this
-                    # unqualified inherited SQLite-v6 DDL.
+                    # unqualified inherited SQLite-v7 DDL.
                     self._set_fresh_ddl_search_path_locked()
                     for statement in _postgres_schema_statements():
                         self._conn.execute(statement)
@@ -558,7 +573,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
                 "SELECT pg_catalog.pg_advisory_xact_lock("
                 "pg_catalog.hashtextextended(?, 0)) "
                 "AS ledger_write_lock",
-                (f"protoprompt:ledger:v6:{self._schema}",),
+                (f"protoprompt:ledger:v7:{self._schema}",),
             )
         except BaseException as exc:
             self._conn.rollback()
@@ -957,7 +972,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
             if fresh_objects:
                 raise LedgerStateError(
                     "refusing PostgreSQL Ledger setup because the dedicated schema "
-                    "must be empty before fresh v6 setup; found "
+                    "must be empty before fresh v7 setup; found "
                     + ", ".join(fresh_objects[:5])
                     + (" ..." if len(fresh_objects) > 5 else "")
                 )
@@ -995,7 +1010,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
             table_columns = columns.get(table_name, {})
             if set(table_columns) != set(expected_columns):
                 raise LedgerStateError(
-                    f"PostgreSQL Ledger table {table_name!r} does not match v6 columns"
+                    f"PostgreSQL Ledger table {table_name!r} does not match v7 columns"
                 )
             for column_name, row in table_columns.items():
                 expected_type = (
@@ -1015,7 +1030,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
                     or str(row["is_generated"]) != "NEVER"
                 ):
                     raise LedgerStateError(
-                        f"PostgreSQL Ledger column {table_name}.{column_name} does not match v6"
+                        f"PostgreSQL Ledger column {table_name}.{column_name} does not match v7"
                     )
                 default = row["column_default"]
                 if table_name == "memory_events" and column_name == "sequence":
@@ -1107,7 +1122,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
             or bool(event_sequence["cycles"])
         ):
             raise LedgerStateError(
-                "PostgreSQL Ledger event sequence does not match the v6 BIGSERIAL contract"
+                "PostgreSQL Ledger event sequence does not match the v7 BIGSERIAL contract"
             )
 
         ledger_inheritance_links: list[tuple[str, str, str, str]] = []
@@ -1176,7 +1191,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
         for table_name, expected_constraints in _PG_EXPECTED_CONSTRAINTS.items():
             if constraints.get(table_name, Counter()) != Counter(expected_constraints):
                 raise LedgerStateError(
-                    f"PostgreSQL Ledger constraints for {table_name!r} do not match v6"
+                    f"PostgreSQL Ledger constraints for {table_name!r} do not match v7"
                 )
 
         explicit_indexes = {
@@ -1186,7 +1201,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
             and str(row["table_name"]) in reserved_tables
         }
         if set(explicit_indexes) != set(_PG_EXPECTED_INDEXES):
-            raise LedgerStateError("PostgreSQL Ledger explicit index set does not match v6")
+            raise LedgerStateError("PostgreSQL Ledger explicit index set does not match v7")
         for index_name, (expected_table, expected_signature) in _PG_EXPECTED_INDEXES.items():
             row = explicit_indexes[index_name]
             if (
@@ -1197,7 +1212,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
                 or not bool(row["is_ready"])
             ):
                 raise LedgerStateError(
-                    f"PostgreSQL Ledger index {index_name!r} does not match v6"
+                    f"PostgreSQL Ledger index {index_name!r} does not match v7"
                 )
 
         functions_by_name: dict[str, list[Any]] = {}
@@ -1356,7 +1371,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
 
 
 class PostgresMemoryLedger(_LedgerCommandBackend):
-    """Explicit-setup PostgreSQL backend for the experimental v6 Ledger.
+    """Explicit-setup PostgreSQL backend for the experimental v7 Ledger.
 
     ``conninfo`` is a normal psycopg connection string. ``schema`` is owned by
     this Ledger instance; no DDL runs at import time or when the module is
@@ -1372,6 +1387,17 @@ class PostgresMemoryLedger(_LedgerCommandBackend):
 
     def __init__(self, conninfo: str, *, schema: str = "protoprompt_ledger") -> None:
         self._engine = _PostgresLedgerEngine(conninfo, schema=schema)
+
+    @staticmethod
+    def storage_capabilities() -> LedgerStorageCapabilities:
+        """Return the fixed v1 storage receipt without opening PostgreSQL.
+
+        This is deliberately a descriptor, not a plugin protocol or a probe of
+        a particular database.  It is available on the class so callers do not
+        need credentials or a connection merely to inspect the public contract.
+        """
+
+        return postgres_v7_storage_capabilities()
 
     @property
     def schema(self) -> str:

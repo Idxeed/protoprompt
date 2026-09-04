@@ -83,8 +83,9 @@ def _document_candidate(
 
 
 def _stage_v4_schema(connection: sqlite3.Connection) -> None:
-    """Remove every v5/v6-only object to model an exact pre-admission Ledger."""
+    """Remove every post-v4 object to model an exact pre-admission Ledger."""
 
+    connection.execute("DROP TABLE IF EXISTS memory_scope_payload_purge_receipts")
     connection.execute("DROP INDEX IF EXISTS idx_memory_recall_checkpoint_selection_record")
     connection.execute("DROP TABLE IF EXISTS memory_recall_checkpoint_selections")
     connection.execute("DROP TABLE IF EXISTS memory_recall_checkpoints")
@@ -523,11 +524,12 @@ def test_v4_to_v6_migration_backfills_only_live_payloads_as_legacy_unknown(tmp_p
         expected_dry_run = {
             "component": "memory_ledger",
             "from_version": 4,
-            "to_version": 6,
+                "to_version": 7,
             "changes_required": True,
             "actions": [
                 "add v5 admission provenance and review audit tables",
                 "add v6 sealed recall checkpoint manifests",
+                "add v7 durable exact-scope payload-purge receipts",
             ],
         }
         backup_path = tmp_path / "v4-before-admission-upgrade.backup.db"
@@ -556,7 +558,7 @@ def test_v4_to_v6_migration_backfills_only_live_payloads_as_legacy_unknown(tmp_p
             connection.close()
 
         upgraded.setup()
-        assert upgraded.schema_version() == 6
+        assert upgraded.schema_version() == 7
         connection = sqlite3.connect(path)
         try:
             assert connection.execute(

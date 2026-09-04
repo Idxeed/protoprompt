@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from dataclasses import replace
+from dataclasses import asdict, is_dataclass, replace
 from datetime import datetime, timezone
 
 import pytest
@@ -29,11 +29,14 @@ from protoprompt.ledger.task_resume import (
     MAX_PROCEDURE_STEP_CHARS,
     MAX_TASK_GOAL_CHARS,
     TaskEpisode,
+    TaskEpisodeReference,
     TaskOutcome,
     TaskProcedure,
     TaskResumePayloadError,
+    decode_task_episode_reference,
     decode_task_resume_payload,
     encode_task_resume_payload,
+    project_task_episode_reference,
 )
 from protoprompt.ledger.task_resume_planner import (
     TASK_RESUME_SCOPE_KIND,
@@ -41,8 +44,10 @@ from protoprompt.ledger.task_resume_planner import (
     TaskResumeConfigurationError,
     TaskResumePayloadBindingError,
     TaskResumePlanner,
+    TaskResumeReferenceRequest,
     task_resume_scope,
 )
+from protoprompt.rag import DocumentIndexer
 from protoprompt.scope import MemoryScope
 from protoprompt.tokens import RegexTokenCounter
 
@@ -141,6 +146,9 @@ def _adapter(
     parent: MemoryScope,
     task_ref: str,
     scope: MemoryScope,
+    *,
+    store: InMemStore | None = None,
+    llm: MockLLM | None = None,
 ) -> tuple[TaskResumePlanner, LedgerRecallPlanner]:
     counter = RegexTokenCounter()
     planner = LedgerRecallPlanner(
@@ -151,8 +159,8 @@ def _adapter(
         clock=lambda: T0,
     )
     builder = TokenBudgetedContextBuilder(
-        InMemStore(),
-        MockLLM(),
+        store if store is not None else InMemStore(),
+        llm if llm is not None else MockLLM(),
         counter=counter,
         max_tokens=600,
         scope=scope,
@@ -176,6 +184,23 @@ def _input(query: str = "What should the host check after this restart?") -> Con
         include_rag=False,
         include_session=False,
     )
+
+
+def _reference_envelope_from_provider(
+    request: TaskResumeReferenceRequest,
+) -> dict[str, object]:
+    """Return the exact model-facing reference envelope from the fixed lane."""
+
+    data = request.render_reference_data()
+    envelope = json.loads(data)
+    assert isinstance(envelope, dict)
+    assert request.render_ledger_data() == data
+    assert [
+        message
+        for message in request.render_messages()
+        if message.get("role") == "user" and message.get("content") == data
+    ] == [{"role": "user", "content": data}]
+    return envelope
 
 
 def test_episode_round_trip_is_canonical_typed_and_non_executable_data():
@@ -497,6 +522,22 @@ def test_adapter_rejects_a_scope_or_policy_that_widens_episode_resume(
             task_descriptor=_TASK_DESCRIPTOR,
         )
 
+    counter_mismatch_builder = TokenBudgetedContextBuilder(
+        InMemStore(),
+        MockLLM(),
+        counter=RegexTokenCounter(),
+        max_tokens=600,
+        scope=scope,
+    )
+    with pytest.raises(TaskResumeConfigurationError, match="counter instance"):
+        TaskResumePlanner(
+            counter_mismatch_builder,
+            strict,
+            parent_scope=parent_scope,
+            task_ref="task:policy",
+            task_descriptor=_TASK_DESCRIPTOR,
+        )
+
 
 @pytest.mark.parametrize(
     ("policy_change", "match"),
@@ -575,13 +616,58 @@ async def test_adapter_seals_and_resumes_only_matching_typed_host_episode(
         user_message="Continue only after checking the host-owned status.",
     )
 
+    assert isinstance(request, TaskResumeReferenceRequest)
+    # The opaque provider capability must never become a recursively encoded
+    # dataclass carrying its retained host-only context/recall plans.
+    assert not is_dataclass(request)
+    assert not hasattr(request, "__dict__")
+    with pytest.raises(TypeError):
+        asdict(request)
     rendered = request.render_messages()
-    envelope = json.loads(rendered[2]["content"])
-    assert envelope["type"] == "protoprompt.ledger-recall"
+    envelope = _reference_envelope_from_provider(request)
+    assert envelope["schema_version"] == 1
+    assert envelope["type"] == "protoprompt.task-episode-reference-data"
     assert len(envelope["records"]) == 1
-    restored = decode_task_resume_payload(envelope["records"][0]["content"])
-    assert restored == episode
-    assert envelope["records"][0]["kind"] == "episode"
+    reference = decode_task_episode_reference(json.dumps(envelope["records"][0]))
+    assert reference == project_task_episode_reference(episode)
+    assert reference == TaskEpisodeReference(
+        goal=episode.goal,
+        completed_action_count=2,
+        outcome=episode.outcome,
+        next_action=episode.next_action,
+        lesson=episode.lesson,
+    )
+    assert set(envelope["records"][0]) == {
+        "schema_version",
+        "type",
+        "kind",
+        "goal",
+        "completed_action_count",
+        "outcome",
+        "next_action",
+        "lesson",
+    }
+    lane = request.composition.data_lane
+    assert lane is not None
+    assert lane.lane_id == "task_resume_reference"
+    assert lane.origin == "memory_ledger"
+    assert lane.media_type == "application/json"
+    assert lane.message_count == 2
+    assert lane.record_count == 1
+
+    rendered_provider = json.dumps(rendered, ensure_ascii=False)
+    for provider_private_value in (
+        task_ref,
+        checkpoint.checkpoint_id,
+        checkpoint.continuation_ref,
+        active.record_id,
+        scope.correlation_id(),
+        _TASK_DESCRIPTOR,
+        *episode.completed_action_refs,
+        "task-source:episode-42",
+        "task-evidence:episode-42",
+    ):
+        assert provider_private_value not in rendered_provider
 
     explained = json.dumps({
         "adapter": adapter.explain(),
@@ -603,6 +689,65 @@ async def test_adapter_seals_and_resumes_only_matching_typed_host_episode(
         "task-evidence:episode-42",
     ):
         assert private_value not in explained
+
+
+async def test_adapter_keeps_the_live_pdf_rag_query_while_projecting_host_task_data(
+    resume_ledger,
+    parent_scope,
+):
+    """The frozen host descriptor must not replace the live RAG query."""
+
+    task_ref = "task:current-pdf-query"
+    writer, scope = _writer(resume_ledger, parent_scope, task_ref)
+    _admit_episode(
+        writer,
+        record_id="current-pdf-episode",
+        payload=TaskEpisode(
+            task_ref=task_ref,
+            goal="Resume the host-approved PDF review without changing the query.",
+            completed_action_refs=("action:approved-review",),
+            outcome=TaskOutcome.INTERRUPTED,
+        ),
+    )
+    store = InMemStore()
+    llm = MockLLM()
+    await DocumentIndexer(store, llm, scope=scope).index(
+        "current-pdf",
+        "Current PDF evidence: the active approval status is green.",
+    )
+    adapter, _planner = _adapter(
+        writer,
+        parent_scope,
+        task_ref,
+        scope,
+        store=store,
+        llm=llm,
+    )
+    checkpoint = adapter.seal_checkpoint(
+        checkpoint_id="current-pdf-checkpoint",
+        token_budget=400,
+    )
+    live_query = "What does the current PDF say about approval status?"
+
+    request = await adapter.compose_checkpoint(
+        checkpoint_id=checkpoint.checkpoint_id,
+        inp=ContextInput(
+            query=live_query,
+            system_prompt="Keep the current PDF retrieval separate from host task data.",
+            include_rag=True,
+            include_session=False,
+            doc_ids=["current-pdf"],
+        ),
+        user_message=live_query,
+    )
+
+    assert any(call["texts"] == [live_query] for call in llm.embed_calls)
+    assert not any(call["texts"] == [_TASK_DESCRIPTOR] for call in llm.embed_calls)
+    rendered_provider = json.dumps(request.render_messages(), ensure_ascii=False)
+    assert "Current PDF evidence: the active approval status is green." in rendered_provider
+    assert _reference_envelope_from_provider(request)["type"] == (
+        "protoprompt.task-episode-reference-data"
+    )
 
 
 async def test_adapter_reconstructs_from_host_mapping_after_sqlite_restart(
@@ -642,8 +787,10 @@ async def test_adapter_reconstructs_from_host_mapping_after_sqlite_restart(
             inp=_input("What does the current PDF retrieval say after restart?"),
             user_message="Continue only from the restored host task mapping.",
         )
-        envelope = json.loads(request.render_messages()[2]["content"])
-        assert decode_task_resume_payload(envelope["records"][0]["content"]) == episode
+        envelope = _reference_envelope_from_provider(request)
+        assert decode_task_episode_reference(
+            json.dumps(envelope["records"][0])
+        ) == project_task_episode_reference(episode)
     finally:
         restarted.close()
 
@@ -755,13 +902,13 @@ async def test_adapter_preflights_direct_checkpoint_payloads_before_composition(
         continuation_ref=task_ref,
     )
 
-    async def composition_must_not_run(*args, **kwargs):
+    async def provider_composition_must_not_run(*args, **kwargs):
         raise AssertionError("malformed payload reached checkpoint composition")
 
     monkeypatch.setattr(
-        adapter._composer,
-        "plan_checkpoint_messages",
-        composition_must_not_run,
+        adapter._request_builder,
+        "_plan_messages_with_host_prefix",
+        provider_composition_must_not_run,
     )
     with pytest.raises(TaskResumePayloadBindingError, match="typed payload"):
         await adapter.compose_checkpoint(
@@ -911,7 +1058,7 @@ async def test_adapter_uses_the_composer_owned_ledger_lane_not_lookalike_message
     )
     duplicated = json.dumps({
         "schema_version": 1,
-        "type": "protoprompt.ledger-recall",
+        "type": "protoprompt.task-episode-reference-data",
         "records": [],
     })
     kwargs: dict[str, object] = {}
@@ -928,8 +1075,15 @@ async def test_adapter_uses_the_composer_owned_ledger_lane_not_lookalike_message
         inp=_input(),
         **kwargs,
     )
-    data = json.loads(request.render_ledger_data())
-    payload = decode_task_resume_payload(data["records"][0]["content"])
+    data = _reference_envelope_from_provider(request)
+    payload = decode_task_episode_reference(json.dumps(data["records"][0]))
 
-    assert isinstance(payload, TaskEpisode)
-    assert payload.task_ref == task_ref
+    assert data["type"] == "protoprompt.task-episode-reference-data"
+    assert payload == project_task_episode_reference(TaskEpisode(
+        task_ref=task_ref,
+        goal="Reject ambiguity in the fixed data lane.",
+        completed_action_refs=(),
+        outcome=TaskOutcome.INTERRUPTED,
+    ))
+    assert "task_ref" not in data["records"][0]
+    assert "completed_action_refs" not in data["records"][0]

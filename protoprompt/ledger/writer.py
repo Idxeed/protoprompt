@@ -18,6 +18,8 @@ from protoprompt.ledger.types import (
     MemoryOrigin,
     MemoryKind,
     MemoryRecord,
+    ScopePayloadPurgeReceipt,
+    ScopePayloadReadback,
     coerce_datetime,
     scope_dict,
     utc_now,
@@ -325,6 +327,37 @@ class MemoryWriter:
             occurred_at=self._clock(),
         )
 
+    def payload_readback(self) -> ScopePayloadReadback:
+        """Return the content-free canonical-payload count for this scope.
+
+        The scope is pinned when the trusted host constructs the writer; a
+        model or browser caller cannot broaden this readback into a neighbour.
+        """
+
+        return self._ledger.payload_readback(self._scope)
+
+    def purge_payloads(
+        self,
+        operation_id: str,
+        *,
+        reason_code: str = "scope_payload_purged",
+    ) -> ScopePayloadPurgeReceipt:
+        """Atomically purge all current canonical payloads in this scope.
+
+        ``operation_id`` must be host-minted and stable across an ambiguous
+        retry.  The durable receipt proves the completed transaction only;
+        the surrounding adapter still owns an ingress/deletion fence for
+        later writes and any external projection.
+        """
+
+        return self._ledger.purge_payloads(
+            self._scope,
+            operation_id,
+            reason_code=reason_code,
+            actor=self._actor,
+            occurred_at=self._clock(),
+        )
+
     def erase(
         self,
         record_id: str,
@@ -377,6 +410,27 @@ class MemoryWriter:
             now=self._clock() if now is None else now,
             limit=limit,
             selections=selections,
+        )
+
+    def _load_active_markers(
+        self,
+        *,
+        now: datetime | str | None,
+        limit: int,
+        record_ids: Iterable[str],
+    ) -> list[MemoryRecord]:
+        """Re-read sealed recall markers without enumerating unrelated memory.
+
+        This is reserved for the matching Ledger planner's resolve boundary.
+        It preserves exact-scope lifecycle and admission checks while avoiding
+        an N-record deserialization for a small sealed selection.
+        """
+
+        return self._ledger._load_active_markers(
+            self._scope,
+            now=self._clock() if now is None else now,
+            limit=limit,
+            record_ids=record_ids,
         )
 
     def _create_recall_checkpoint(

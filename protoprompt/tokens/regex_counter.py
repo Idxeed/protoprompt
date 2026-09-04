@@ -32,6 +32,14 @@ class RegexTokenCounter:
     def count(self, text: str) -> int:
         if not text:
             return 0
+        # Every ASCII token takes the existing ``else`` branch below: neither
+        # the CJK nor Cyrillic density adjustment can apply.  Keep that common
+        # path in the regex engine instead of performing two Unicode searches
+        # for every word and punctuation token.  This is deliberately an
+        # exact specialization, not a different estimate; ``_WORD_RE`` still
+        # defines the token boundaries.
+        if text.isascii():
+            return sum(1 for _ in _WORD_RE.finditer(text))
         tokens = 0
         for match in _WORD_RE.finditer(text):
             chunk = match.group(0)
