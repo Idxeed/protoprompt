@@ -7,6 +7,76 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Experimental v1-candidate exact-scope canonical payload purge for the
+  scope-pinned `MemoryWriter`: `payload_readback()` and durable
+  `purge_payloads(operation_id)` cover all payload-bearing lifecycle states in
+  one transaction, retain only content-free lifecycle/audit evidence, and
+  replay the original aggregate receipt after an ambiguous restart. SQLite
+  v6→v7 migration, process-death recovery, exact-scope isolation, stale-review,
+  checkpoint invalidation, and storage-conformance coverage are local evidence
+  only; external projections, future ingress, physical WAL/backup erasure, and
+  live PostgreSQL recovery remain outside this claim.
+- Experimental provider-safe task-resume projection: a selected raw
+  `TaskEpisode` is validated host-side, then reduced to a fixed
+  `TaskEpisodeReference` lane containing only goal, aggregate completed-action
+  count, outcome, next action, and lesson. `TaskResumeReferenceRequest` is an
+  opaque host capability rather than a serializable dataclass request.
+- Optional local-only Ollama/PDF task-resume demonstration. A private
+  host-authored seed creates one reviewed `host_assertion` episode and an
+  HMAC-authenticated conversation mapping in additive `chat.db` tables; its
+  Ledger file and checkpoint secret remain separate from normal vector/chat
+  storage. The demo keeps live PDF RAG but excludes automatic transcript
+  archive recall/admission for its active mapped conversation. Its local
+  demo-safe profile caps `num_ctx` at 2048 and serializes model generation
+  through one in-process queue.
+- Frozen offline v0.5 task-episode projection benchmark (three cases, fifteen
+  semantic checks) alongside the unchanged v0.4 task-resume fixture.
+- Local v0.6.1 cutover evidence: a frozen legacy SQLite source-shape fixture
+  and test prove that a separate v6 Ledger setup does not mutate or
+  auto-admit old vector/session/profile data; rollback selects the preserved
+  source rather than downgrading a Ledger schema. English and Russian operator
+  guides document the corresponding SQLite and fresh-schema PostgreSQL paths.
+- A v1-candidate `MemoryPolicy` contract: one immutable, content-free wrapper
+  pairs explicit admission and recall policies while rejecting a recall lane
+  that is weaker than its paired admission rule. It is additive; no existing
+  writer, legacy store, or adapter is auto-wired.
+- A sealed v1-candidate Ledger storage-conformance receipt for the two
+  built-ins. SQLite v7 and PostgreSQL v7 expose one named strict-host semantic
+  profile with content-free reports, while preserving their distinct migration
+  and backup responsibilities; this is not a public storage-plugin API.
+- Local-only held-out quality/conflict evidence scaffold: a frozen synthetic
+  fixture, hash-bound scorer, and strict operator-supplied bounded-selection
+  run schema for the future delayed-recall and contradiction targets. No
+  baseline/candidate empirical result is checked in or claimed.
+- A local-only raw 10k-performance protocol with a fixed corpus, explicit
+  scratch-directory attestation, one cold reopen before discarded warm-up,
+  thirty retained p50/p95 samples, and a strict reference-manifest boundary.
+  Verification-only diagnostics cannot become a reference or universal runtime
+  claim.
+
+### Changed
+- The owned `RegexTokenCounter` and strict lexical planner now take
+  exact-preserving ASCII fast paths; Unicode behavior, selected plans, and
+  token/byte receipts remain unchanged. This is an implementation improvement,
+  not a 10k runtime claim.
+- `TaskResumePlanner.compose_checkpoint()` returns the provider-safe
+  `TaskResumeReferenceRequest`. Its compatibility `render_ledger_data()`
+  accessor now returns the reduced reference projection, never a raw Ledger
+  task payload. Builder and recall planner must share one exact token-counter
+  instance.
+
+### Security
+- Raw task references, action references, descriptors, checkpoints, scopes,
+  Ledger record/provenance identifiers, and secrets are structurally absent
+  from the new provider lane and from the app's SSE/browser contract.
+- Local demo mode rejects remote Ollama, non-loopback web clients, network
+  binding, browser control-plane fields/routes, tampered state mappings, and
+  close-vs-compose races. Deletion moves a mapping to non-resumable `closing`
+  before Ledger source cleanup.
+- `MemoryPolicy` requires audited, concrete-origin recall and rejects origins,
+  kinds, or confidence thresholds that would widen beyond paired admission.
+
 ## [0.17.0] - 2026-08-31
 
 ### Added

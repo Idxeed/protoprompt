@@ -25,6 +25,27 @@ Optional reports are written only when an explicit path is passed:
 `expected.json` and exits non-zero on any regression. The CI job runs that
 command. It does not make a network request.
 
+## Raw local performance protocol
+
+The versioned suites below remain semantic gates and deliberately do not make
+latency or throughput claims. The separate 10k-corpus raw measurement scaffold
+uses warm-up/repetitions, p50/p95, and an operator-reviewed hardware/software
+manifest; it writes no baseline or universal performance claim. See
+[`PERFORMANCE_PROTOCOL.md`](PERFORMANCE_PROTOCOL.md) for the exact local-only
+procedure, explicit 10k full-corpus policy opt-in, and reference-evidence
+boundary.
+
+## Held-out quality/conflict protocol
+
+[`heldout_quality_conflict_protocol.py`](heldout_quality_conflict_protocol.py)
+is a separate local-only scaffold for the two memory-first roadmap goals:
+delayed target selection and contradictory-fact avoidance. It scores only two
+explicit operator-attested bounded fact-selection runs against a frozen
+synthetic fixture; it does not call a model or fabricate a baseline/candidate
+result. See [`HELDOUT_QUALITY_CONFLICT_PROTOCOL.md`](HELDOUT_QUALITY_CONFLICT_PROTOCOL.md)
+for the fixture hashes, exact scoring, run templates, and the distinction
+between reproducible fixture data and a genuinely held-out evaluation.
+
 ## What v0.1 covers
 
 | Case | Contract |

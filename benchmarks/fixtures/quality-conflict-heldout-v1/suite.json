@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "protocol_id": "protoprompt-local-heldout-quality-conflict-v1",
+  "fixture_id": "protoprompt-synthetic-heldout-quality-conflict-v1",
+  "fixture_version": "v1",
+  "generator_id": "protoprompt-synthetic-bounded-fact-generator-v1",
+  "generator_seed": "quality-conflict-v1-fixed-seed",
+  "delayed_recall": {
+    "case_count": 20,
+    "history_turns": 64,
+    "filler_fact_count": 8,
+    "fact_token_cost": 8,
+    "token_budget": 24
+  },
+  "conflict": {
+    "case_count": 50,
+    "evidence_fact_count": 4,
+    "fact_token_cost": 8,
+    "token_budget": 16
+  }
+}

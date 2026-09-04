@@ -112,6 +112,7 @@ jobs:
           python scripts/run_memory_benchmark.py --suite v0.2 --verify
           python scripts/run_memory_benchmark.py --suite v0.3 --verify
           python scripts/run_memory_benchmark.py --suite v0.4 --verify
+          python scripts/run_memory_benchmark.py --suite v0.5 --verify
 
   lint:
     name: lint
@@ -201,6 +202,9 @@ jobs:
                   "benchmarks/ledger_task_resume_benchmark.py",
                   "benchmarks/fixtures/v0.4/suite.json",
                   "benchmarks/fixtures/v0.4/expected.json",
+                  "benchmarks/ledger_task_resume_projection_benchmark.py",
+                  "benchmarks/fixtures/v0.5/suite.json",
+                  "benchmarks/fixtures/v0.5/expected.json",
                   "benchmarks/ledger_recall_evidence_benchmark.py",
                   "benchmarks/fixtures/v1.0/suite.json",
                   "benchmarks/fixtures/v1.0/expected.json",

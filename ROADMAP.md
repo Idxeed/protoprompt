@@ -1,11 +1,13 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: `0.17.0` добавляет узкую experimental границу host-only
-> task-episode resume: typed `TaskEpisode`, derived task scope, HMAC-sealed
-> Ledger selection и fresh fail-closed composition без подмены текущего RAG
-> query. `0.16.1` остаётся hardening reference-agent boundary, `0.15.0` —
-> frozen dual-backend semantic evidence для strict Ledger recall. Следующий
-> этап — остальные RC-gates к `1.0.0`, а не расширение workflow surface.
+> Статус: опубликованный `0.17.0` добавил узкую experimental границу
+> host-only task-episode resume. Локальная рабочая линия `0.18.0` исправляет
+> provider boundary: raw episode сворачивается в fixed safe projection и
+> подключается только к explicit loopback/local-Ollama demo host без browser
+> control plane. `0.16.1` остаётся hardening reference-agent boundary,
+> `0.15.0` — frozen dual-backend semantic evidence для strict Ledger recall.
+> Следующий этап — остальные RC-gates к `1.0.0`, а не расширение workflow
+> surface.
 > Обновлён: 2026-08-31.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
@@ -434,6 +436,80 @@ authorization layer, PostgreSQL migration toolkit, performance claim или
 benchmark и reference hardware manifest остаются необходимы для target
 planning p95.
 
+## 0.19.0 — Non-destructive v0.6 cutover evidence
+
+**Цель:** проверить операторский путь от legacy v0.6 stores к отдельному
+Ledger, не выдавая source data за автоматически подтверждённую память и не
+делая destructive downgrade.
+
+### Выполнено
+
+- [x] Зафиксирован source-shape fixture из опубликованного `v0.6.1`:
+  SQLite `chunks`, session metadata и profile JSON. Local test создаёт
+  отдельный v6 Ledger, подтверждает отсутствие auto-import/admission и
+  сравнивает source bytes/catalog до и после.
+- [x] Rollback проверяется как выбор сохранённого source/copy: современный
+  vector/profile reader открывает rollback copy, а исходный v0.6 файл не
+  меняется. Не заявляется in-place schema downgrade.
+- [x] Добавлены EN/RU operator guides с отдельным SQLite target, explicit
+  re-ingestion/review, PostgreSQL fresh-schema cutover и явной границей:
+  v0.6 не содержал текущего Ollama/PDF app database.
+
+### Неподвижная граница
+
+Это evidence для legacy core SQLite shape, а не универсальный production
+migrator и не automatic conversion profile/session/PDF/model data в Ledger.
+Managed PostgreSQL restore/cutover, real deployment backup proof и application-
+specific migration остаются RC-gates.
+
+## 0.18.0 — Safe task projection and local-only demo
+
+**Цель:** исправить provider-facing boundary task-resume и доказать его в
+одном узком локальном Ollama/PDF demo, не добавляя workflow surface,
+browser control plane или automatic admission.
+
+### Выполнено
+
+- [x] Raw `TaskEpisode` перед provider composition валидируется в exact task
+  scope и односторонне превращается в `TaskEpisodeReference`: только goal,
+  aggregate `completed_action_count`, outcome, next action и lesson. Raw
+  `task_ref`, action refs, descriptor, checkpoint, scope, record/provenance
+  IDs и secrets структурно не попадают в provider lane.
+- [x] `TaskResumeReferenceRequest` — opaque non-dataclass capability: обычная
+  dataclass/FastAPI serialization не может рекурсивно вынести private recall/
+  context internals в HTTP response. Builder и recall planner обязаны иметь
+  один counter instance.
+- [x] Additive signed mapping в app-owned `chat.db` связывает local
+  conversation с parent scope, task ref, frozen descriptor и checkpoint;
+  HMAC key domain-separated от host secret, который хранится вне SQLite.
+  Tamper/cross-conversation/state-schema drift fail closed.
+- [x] Host seed допускает ровно один `host_assertion` `episode` через review
+  gate, создаёт HMAC checkpoint и rollback-ит unbound record при ошибке.
+  PDF/chat/model text никогда не становятся Ledger record автоматически.
+- [x] Explicit `--task-resume-demo-seed` сохраняет live PDF RAG query, но для
+  active mapping исключает ordinary transcript archive. Browser имеет только
+  normal chat contract; extra control-plane fields запрещены.
+- [x] Demo process caps `num_ctx` at 2048, требует output reserve `<2048` и
+  serializes all local generations through one in-process queue. Local
+  reference observation для `llama3.1:8b` на Ryzen 5 5600X / RX 7600 XT 16 GB
+  фиксируется только как hardware-specific demo measurement, не как
+  throughput/quality/sizing claim.
+- [x] Demo допускает только loopback browser peer/Host и local Ollama; delete
+  сначала переводит mapping в `closing`, затем забывает Ledger source и лишь
+  потом удаляет mapping/conversation. Race close-vs-compose повторно
+  сверяется перед возвратом provider request.
+- [x] Frozen `v0.4` fixture/expected сохранён, добавлен отдельный `v0.5`
+  projection benchmark (3 cases / 15 checks) для identifier redaction,
+  receipt/lookalike integrity и binding/lifecycle failures.
+
+### Неподвижная граница
+
+Это local demonstration, не shared deployment: нет remote Ollama, network
+bind, auth, multi-tenant semantics, task CRUD/rebind/review API, tool
+authority, exactly-once, background recovery или claim о «бесконечной
+памяти». Visible goal/lesson/next action остаются untrusted model reference
+data; host сам отвечает за их содержание и реальные действия.
+
 ## 0.17.0 — Host-only task-episode resume
 
 **Цель:** дать приложению узкую, проверяемую continuation boundary для одной
@@ -459,11 +535,44 @@ workflow engine.
 ### Неподвижная граница
 
 Descriptor не хранится в Ledger checkpoint: после restart host сам
-восстанавливает `{task_ref, descriptor, checkpoint_id}`. Здесь нет automatic
-extraction/admission, browser/model control plane, auto-wiring в Ollama app,
-procedure execution, dependency/conflict planner, tool authority, exactly-once
-semantics, provider conversation snapshot или workflow/agent checkpoint. Это
-не claim о model quality, unlimited context или «бесконечной памяти».
+восстанавливает `{task_ref, descriptor, checkpoint_id}`. В `0.17.0` не было
+auto-wiring в Ollama app; `0.18.0` добавляет только отдельный host-seeded
+local-only demo поверх более строгой provider-safe projection. Нет automatic
+extraction/admission, browser/model control plane, procedure execution,
+dependency/conflict planner, tool authority, exactly-once semantics, provider
+conversation snapshot или workflow/agent checkpoint. Это не claim о model
+quality, unlimited context или «бесконечной памяти».
+
+## 0.20.0 — Fault recovery and bounded concurrency evidence
+
+Это local conformance milestone для RC, а не package release, managed-database
+recovery claim или замена независимому deployment review.
+
+### Выполнено
+
+- [x] SQLite process-death matrix намеренно завершает worker через `os._exit()`
+  между несколькими DML одной write transaction для `observe`, lifecycle
+  transition, `forget_by_source`, hard erase и checkpoint invalidation. После
+  reopen проверяется точное pre-commit состояние и idempotent retry без
+  partial event/payload/tombstone/receipt/checkpoint sidecars.
+- [x] Schema v7 добавляет durable, content-free receipt для
+  `MemoryWriter.purge_payloads()`: exact writer scope, все canonical
+  payload-bearing lifecycle states, final empty readback и immutable retry
+  result после restart. SQLite failure matrix покрывает crash до payload delete,
+  перед final receipt insert и после commit; старый receipt не удаляет payload,
+  созданный позже.
+- [x] SQLite multi-process restart/concurrency matrix проверяет duplicate
+  retry, independent record и одинаковые IDs в sibling scope без lingering
+  writer lock или partial sidecars. Это bounded local evidence, не общий
+  throughput/SLA claim.
+
+### Остаётся обязательным
+
+- [ ] Повторить scope-purge crash/reconnect/retry guarantees и bounded
+  multiwriter stress на disposable реальном PostgreSQL; контрактный test может
+  collect/skip без DSN, но это не доказательство.
+- [ ] Добавить PostgreSQL concurrency/restart matrix в release evidence. Это
+  не доказывает managed PostgreSQL PITR, backup или replica erasure.
 
 ## v1.0 evidence protocol — dual-backend semantic recall
 
@@ -482,10 +591,16 @@ semantics, provider conversation snapshot или workflow/agent checkpoint. Эт
 - [x] Проверять tenant/user/thread isolation, source-revocation erasure,
   whole-record token/UTF-8 byte budgets, receipt reconciliation и
   content-free `explain()` в этой fixed matrix.
-- [ ] Добавить отдельный raw performance protocol (10k corpus, warm-up,
+- [x] Добавить отдельный raw performance protocol (10k corpus, warm-up,
   repetitions, p50/p95, reference hardware/software manifest) до любого
-  runtime claim.
-- [ ] Добавить held-out quality/conflict protocol до целей `+15 pp` и `≤2%`.
+  runtime claim. Протокол и verification-only diagnostic run существуют;
+  reference baseline ещё не зафиксирован, а текущий diagnostic p95 не проходит
+  target 50 ms, поэтому runtime claim не сделан.
+- [x] Добавить local-only held-out quality/conflict protocol до целей `+15 pp`
+  и `≤2%`: versioned synthetic fixture, canonical hashes и strict scorer
+  принимают только две operator-attested bounded-selection runs. Это пока
+  protocol scaffold, а не empirical baseline/candidate result и не оценка
+  model answer quality.
 
 ## 1.0.0 release candidates — Stabilize, don't expand
 
@@ -496,6 +611,14 @@ semantics, provider conversation snapshot или workflow/agent checkpoint. Эт
 
 - Зафиксировать stable public APIs: `ContextPlan`, `MemoryRecord`,
   `MemoryEvent`, `MemoryWriter`, `MemoryPolicy` и storage conformance contract.
+- [x] Добавить additive v1-candidate `MemoryPolicy`, который content-free
+  связывает explicit admission и recall и отвергает recall слабее paired
+  admission. Existing standalone policies остаются experimental до полного
+  API freeze.
+- [x] Добавить sealed v1-candidate storage-conformance receipt для built-in
+  SQLite/PostgreSQL: один named strict-host semantic profile, content-free
+  report и явные различия migration/backup. Это не public backend plugin API
+  и не доказательство managed PostgreSQL recovery/PITR.
 - Явно отделить stable API от experimental/research: old `WorkingMemory`,
   policy experiments и non-core adapters не получают гарантию 1.x молча.
 - Провести stress, concurrency и crash-recovery tests SQLite/Postgres.

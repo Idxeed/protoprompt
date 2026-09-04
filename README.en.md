@@ -71,9 +71,28 @@ is currently typed reference data only and is not selected. This is not an
 agent/workflow checkpoint, tool authority, or automatic wiring for
 `pp-ollama-chat` or `pp-agent`; see [Task-resume memory](docs/en/task-resume.md).
 
-v0.13 adds experimental `PostgresMemoryLedger`: the same explicit synchronous
-`MemoryWriter` contract and Ledger v6 semantics in a dedicated PostgreSQL
-schema. It accepts fresh v6 setup only, serializes writes with a schema-wide
+The current unpublished local-only `0.18` line fixes that feature's provider
+boundary: a raw episode is first reduced to a fixed projection with no host
+control-plane IDs. In the reference Ollama/PDF app it is available only from a
+private host seed, loopback client, local Ollama, `num_ctx=2048`, and one local
+generation queue. It is not a network service, automatic admission, or an
+"infinite memory" claim; see the [local task-resume demo](docs/en/ollama-task-resume-demo.md).
+
+The same unpublished line begins the v1 policy freeze with additive
+`MemoryPolicy`: one immutable content-free wrapper pairs explicit admission
+and recall policies and rejects a recall configuration that is weaker than its
+paired admission rule. It does not auto-wire legacy stores or adapters; see
+the [memory policy contract](docs/en/memory-policy.md).
+
+It also exposes a sealed v1-candidate storage receipt for the built-in Ledger
+backends. SQLite and PostgreSQL share one named strict-host semantic profile,
+but retain their different migration and backup responsibilities; this is not
+a general storage-plugin API or a managed-recovery claim. See [Ledger storage
+conformance](docs/en/ledger-storage-conformance.md).
+
+`PostgresMemoryLedger` is experimental: it retains the same explicit synchronous
+`MemoryWriter` contract and current Ledger v7 semantics in a dedicated PostgreSQL
+schema. It accepts fresh v7 setup only, serializes writes with a schema-wide
 advisory lock and a five-second retry boundary, and fails closed on storage
 layout drift. It does not automatically migrate SQLite or old PostgreSQL
 Ledgers, promise throughput, or turn Ledger into agent-state recovery, a

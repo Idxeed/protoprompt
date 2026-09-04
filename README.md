@@ -45,7 +45,7 @@ LLM обычно нужна не просто история чата, а нес
 | RAG | чанкинг, индексация, top-k поиск, фильтры, reranking и provenance |
 | Память сессии | эвристическое или LLM-сжатие длинных диалогов |
 | Профиль | извлечение, merge, optimistic locking и SQLite-хранилище |
-| Memory Ledger *(experimental)* | scoped lifecycle, host admission, immutable provenance/audit, atomic source revocation и проверяемая очистка live rows; SQLite и optional fresh-v6 PostgreSQL backend |
+| Memory Ledger *(experimental)* | scoped lifecycle, host admission, immutable provenance/audit, atomic source revocation и проверяемая очистка live rows; SQLite и optional fresh-v7 PostgreSQL backend |
 | Bounded ledger recall *(experimental)* | local deterministic selection active memory в JSON data lane; opt-in admitted-only composition в exact request, sealed strict-recall resume без agent/provider state, token/byte receipt и final stale check |
 | Токен-бюджет | жёсткий лимит, приоритеты слоёв, `ContextPlan`/receipt и объяснение обрезки |
 | Хранилища | in-memory, SQLite, ChromaDB, Qdrant, pgvector, Elasticsearch/OpenSearch и Redis services |
@@ -77,9 +77,28 @@ checkpoint и своим durable mapping `{task_ref, descriptor, checkpoint_id}`
 checkpoint, не tool authority и не auto-wiring для `pp-ollama-chat` или
 `pp-agent`. См. [возобновление задачи](docs/ru/task-resume.md).
 
-v0.13 добавляет experimental `PostgresMemoryLedger`: тот же явный sync
-`MemoryWriter` contract и Ledger v6 в выделенной PostgreSQL schema. Backend
-принимает только fresh v6 setup, сериализует записи schema-wide advisory
+Текущая непубликованная local-only линия `0.18` исправляет именно
+provider-facing границу этой возможности: raw episode сначала превращается в
+фиксированную reduced projection без host control-plane IDs. В reference
+Ollama/PDF app это доступно только через private host seed, loopback client,
+local Ollama, `num_ctx=2048` и одну локальную очередь генерации. Это не
+network service, не auto-admission и не claim о «бесконечной памяти»; см.
+[локальное task-resume демо](docs/ru/ollama-task-resume-demo.md).
+
+Та же непубликованная линия начинает v1 policy freeze с additive
+`MemoryPolicy`: один immutable content-free wrapper связывает explicit
+admission и recall policies и отклоняет recall configuration, которая слабее
+paired admission rule. Он не auto-wire-ит legacy stores или adapters; см.
+[контракт политики памяти](docs/ru/memory-policy.md).
+
+Она же даёт sealed v1-candidate storage receipt для built-in Ledger backend-ов.
+SQLite и PostgreSQL имеют один named strict-host semantic profile, но сохраняют
+разные обязанности по migration и backup; это не general storage-plugin API и
+не claim о managed recovery. См. [storage conformance Ledger](docs/ru/ledger-storage-conformance.md).
+
+`PostgresMemoryLedger` — experimental: он сохраняет тот же явный sync
+`MemoryWriter` contract и текущую семантику Ledger v7 в выделенной PostgreSQL schema. Backend
+принимает только fresh v7 setup, сериализует записи schema-wide advisory
 lock-ом с 5-секундной границей retry и fail-closed валидирует storage layout.
 Он не переносит автоматически SQLite/старые PostgreSQL Ledger, не обещает
 throughput и не превращает Ledger в agent state, workflow engine или

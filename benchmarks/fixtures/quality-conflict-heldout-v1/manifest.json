@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "protocol_id": "protoprompt-local-heldout-quality-conflict-v1",
+  "suite_kind": "heldout_quality_conflict",
+  "suite_version": "v1",
+  "fixture_file": "suite.json",
+  "fixture_sha256": "1e30d3a167f7c211a32bfce14f6ff80b20fde946ba8836cdba9c4fdb18093cb5",
+  "scoring_file": "scoring.json",
+  "scoring_sha256": "1384d39a6630c0074385a00b26d6d878cc76f1c1ff697659b73b10402eb24e6d",
+  "fixture_corpus_sha256": "dd112136a82dc4f2fc7d9cb138bad3429b5a7fbaf5a7cdf1bbad2fd7da9e3221"
+}

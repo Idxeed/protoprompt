@@ -43,6 +43,11 @@ from benchmarks.ledger_task_resume_benchmark import (
     run_ledger_task_resume_suite,
     validate_ledger_task_resume_suite,
 )
+from benchmarks.ledger_task_resume_projection_benchmark import (
+    render_ledger_task_resume_projection_markdown,
+    run_ledger_task_resume_projection_suite,
+    validate_ledger_task_resume_projection_suite,
+)
 from benchmarks.ledger_recall_evidence_benchmark import (
     LedgerRecallEvidenceBackendError,
     render_ledger_recall_evidence_markdown,
@@ -179,6 +184,9 @@ def _validate_suite(suite: Mapping[str, Any]) -> None:
         return
     if suite.get("suite_kind") == "ledger_task_episode_resume":
         validate_ledger_task_resume_suite(suite)
+        return
+    if suite.get("suite_kind") == "ledger_task_episode_projection":
+        validate_ledger_task_resume_projection_suite(suite)
         return
     if suite.get("suite_kind") == "ledger_dual_backend_recall":
         validate_ledger_recall_evidence_suite(suite)
@@ -926,6 +934,11 @@ async def run_suite(
             suite,
             fixture_sha256=fixture_sha256(suite),
         )
+    if suite.get("suite_kind") == "ledger_task_episode_projection":
+        return await run_ledger_task_resume_projection_suite(
+            suite,
+            fixture_sha256=fixture_sha256(suite),
+        )
     if suite.get("suite_kind") == "ledger_dual_backend_recall":
         return run_ledger_recall_evidence_suite(
             suite,
@@ -1103,6 +1116,8 @@ def render_markdown(report: Mapping[str, Any]) -> str:
         return render_ledger_checkpoint_markdown(report)
     if report.get("benchmark_kind") == "ledger_task_episode_resume":
         return render_ledger_task_resume_markdown(report)
+    if report.get("benchmark_kind") == "ledger_task_episode_projection":
+        return render_ledger_task_resume_projection_markdown(report)
     if report.get("benchmark_kind") == "ledger_dual_backend_recall":
         return render_ledger_recall_evidence_markdown(report)
     lines = [
@@ -1192,6 +1207,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "ledger_context_composition",
                 "ledger_sealed_checkpoint",
                 "ledger_task_episode_resume",
+                "ledger_task_episode_projection",
                 "ledger_dual_backend_recall",
             }:
                 assert_candidate_not_worse_than_reference(report)

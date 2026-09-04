@@ -58,8 +58,13 @@ nav:
       - Token budget: concepts/budget.md
   - Memory:
       - Experimental memory ledger: memory-ledger.md
+      - Exact-scope payload purge (v1 candidate): ledger-scope-payload-purge.md
+      - Memory policy contract (v1 candidate): memory-policy.md
+      - Ledger storage conformance (v1 candidate): ledger-storage-conformance.md
       - Bounded ledger recall: ledger-recall.md
+      - Strict recall candidate projection RFC (v7 proposal): rfc-v7-strict-recall-projection.md
       - Task-resume memory (experimental): task-resume.md
+      - Local Ollama task-resume demo (experimental): ollama-task-resume-demo.md
       - RAG retrieval: rag.md
       - User profile: profile.md
       - Secrets: secrets.md
@@ -77,5 +82,6 @@ nav:
   - Providers and frameworks: providers-frameworks.md
   - Migrating 0.3 → 0.4: migration-0.4.md
   - Migrating 0.3 → 0.6: migration-0.6.md
+  - Migrating 0.6 → 1.0 Ledger line: migration-0.6-to-1.0.md
   - Changelog: changelog.md
   - License: license.md

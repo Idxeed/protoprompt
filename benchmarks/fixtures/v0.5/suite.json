@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "suite_version": "v0.5",
+  "suite_kind": "ledger_task_episode_projection",
+  "suite_id": "offline-ledger-task-episode-projection-regression",
+  "candidate_id": "protoprompt_ledger_task_episode_projection_v0_18",
+  "contracts": [
+    {
+      "id": "model_safe_projection_omits_host_identifiers",
+      "kind": "model_safe_projection_omits_host_identifiers"
+    },
+    {
+      "id": "projection_receipt_and_lookalike_integrity",
+      "kind": "projection_receipt_and_lookalike_integrity"
+    },
+    {
+      "id": "binding_and_lifecycle_fail_closed",
+      "kind": "binding_and_lifecycle_fail_closed"
+    }
+  ]
+}

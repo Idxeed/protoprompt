@@ -3,7 +3,10 @@
 `TaskResumePlanner` is a deliberately narrow, host-only adapter for resuming
 one task from durable Ledger memory. It builds on [bounded Ledger
 recall](ledger-recall.md); it is not a workflow engine, an agent checkpoint,
-or an Ollama integration.
+or a browser/task-control-plane API. The reference Ollama application has a
+separate, local-only demonstration host described in [Local Ollama
+task-resume demo](ollama-task-resume-demo.md); it does not widen this core
+contract.
 
 The adapter selects only host-confirmed, typed `TaskEpisode` records in one
 task-specific scope, seals that selection as a durable Ledger checkpoint, and
@@ -34,7 +37,9 @@ this task. `parent_scope` must have a non-empty tenant and user.
 The host must use that **exact** derived scope for both its
 `MemoryWriter`/`LedgerRecallPlanner` and its `TokenBudgetedContextBuilder`.
 `TaskResumePlanner` checks this at construction and rejects a mismatched or
-widened boundary.
+widened boundary. The recall planner and request builder must also share the
+same **counter instance**: the selected checkpoint, its reduced reference
+lane, and the final provider receipt are one accounting contract.
 
 Each selected record must be a canonical JSON `TaskEpisode`:
 
@@ -189,6 +194,39 @@ checkpoint-integrity work. `ContextInput.query` remains the current request's
 query, including live RAG retrieval. A current question can therefore be about
 a PDF without silently rebinding the checkpoint's task selection.
 
+## Provider-safe projection
+
+The raw selected `TaskEpisode` is host-only. Before the provider request is
+assembled, `TaskResumePlanner` validates it against the task boundary and
+projects it into a fixed `TaskEpisodeReference` shape:
+
+```json
+{
+  "schema_version": 1,
+  "type": "protoprompt.task-episode-reference",
+  "kind": "episode",
+  "goal": "...",
+  "completed_action_count": 2,
+  "outcome": "interrupted",
+  "next_action": "...",
+  "lesson": "..."
+}
+```
+
+The provider lane has a fixed envelope and contains only these reduced fields.
+`task_ref`, individual `completed_action_refs`, descriptor, checkpoint ID,
+scope, record ID, source/evidence references, and the host checkpoint secret
+are structurally absent. The aggregate count preserves progress without
+revealing action identifiers. The text fields are still **untrusted reference
+data**, never tool instructions or authority.
+
+`compose_checkpoint()` returns an opaque `TaskResumeReferenceRequest`, not a
+generic serializable context object. Send `request.render_messages()` directly
+from trusted host code. Do not use dataclass/framework serialization on that
+capability and do not return it from a web route. For compatibility,
+`render_ledger_data()` now returns the same reduced projection as
+`render_reference_data()`; it never returns the raw Ledger episode.
+
 ## Fresh validation and recovery
 
 Each composition resolves the durable checkpoint through the public resume
@@ -212,14 +250,15 @@ checkpoint alone. The host's durable mapping is specifically:
 `TaskResumePlanner.explain()`, checkpoint receipts, and composed-request
 receipts are content-free. They do not disclose task references, descriptors,
 scope, checkpoint identity, record IDs, source/evidence references, or Ledger
-payloads. The transient `LedgerComposedRequest` itself necessarily contains
-provider messages with the selected reference data; keep it host-side and send
-it promptly rather than retaining it as durable state.
+payloads. The transient `TaskResumeReferenceRequest` contains only the
+provider-safe projection plus private host internals; keep it host-side and
+send it promptly rather than retaining it as durable state.
 
 ## Explicit non-goals
 
-This experimental adapter provides no automatic wiring to the reference Ollama
-app or any Ollama control plane. It also does not provide:
+This experimental adapter provides no general Ollama/browser control plane.
+The optional local demo is deliberately host-seeded and has no task-management
+route. The adapter also does not provide:
 
 - automatic extraction, admission, confirmation, or task handoff;
 - procedure execution, dependency/conflict semantics, or workflow planning;

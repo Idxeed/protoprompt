@@ -1,0 +1,19 @@
+{
+  "schema_version": 2,
+  "protocol_id": "protoprompt-local-ledger-raw-performance-v1",
+  "manifest_class": "operator_verified_reference",
+  "operator_verified": false,
+  "hardware": {
+    "cpu_model": "REPLACE_WITH_EXACT_CPU_MODEL",
+    "physical_memory_gib": 0,
+    "storage": "REPLACE_WITH_LOCAL_STORAGE_DESCRIPTION",
+    "power_profile": "REPLACE_WITH_POWER_OR_PERFORMANCE_PROFILE"
+  },
+  "software": {
+    "operating_system": "REPLACE_WITH_OPERATING_SYSTEM_AND_BUILD",
+    "python": "REPLACE_WITH_PYTHON_IMPLEMENTATION_AND_VERSION",
+    "sqlite": "REPLACE_WITH_SQLITE_VERSION",
+    "protoprompt_version": "REPLACE_WITH_PROTOPROMPT_VERSION",
+    "source_revision": "REPLACE_WITH_EXACT_COMMIT_OR_REVIEWED_WORKTREE_ID"
+  }
+}

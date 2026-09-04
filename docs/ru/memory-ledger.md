@@ -11,6 +11,10 @@ v0.10 превращает долговременную память из без
 sealed recall-checkpoint manifest для этого явного lane, но не сериализует
 agent state и не подключает Ledger к приложению автоматически.
 
+Schema v7 добавляет host-only durable receipt точной очистки canonical payload;
+его намеренные ограничения и обязательная application-side deletion fence
+описаны в [очистке payload точного scope](ledger-scope-payload-purge.md).
+
 Такое разделение принципиально: текст из PDF, tool result, транскрипта или
 LLM extraction не может стать доверенным фактом с system-priority лишь потому,
 что его сохранили.
@@ -80,7 +84,7 @@ ledger недоверенному коду.
 Ledger, что и `SqliteMemoryLedger`, но это отдельно provisioned backend.
 Установите `protoprompt[postgres]`, запустите его явные `dry_run_setup()` и
 `setup()` из migration job и выделите пустую PostgreSQL schema только для него.
-Он принимает лишь свежую schema v6: старый PostgreSQL Ledger не мигрируется, а
+Он принимает лишь свежую schema v7: старый PostgreSQL Ledger не мигрируется, а
 SQLite Ledger file не импортируется.
 
 Каждая запись в этой schema получает transaction-scoped advisory lock, чтобы
@@ -233,8 +237,9 @@ ledger-owned table/index definitions и отклоняют внешние indexe
    payload-bearing records до v5 как `legacy_unknown`; он не придумывает
    современный origin или review audit. Active records до v5 остаются
    recallable ради совместимости. Schema v6 добавляет sealed
-   recall-checkpoint manifests и private selection sidecars; он не создаёт
-   checkpoint задним числом из старого plan.
+   recall-checkpoint manifests и private selection sidecars; schema v7 —
+   durable receipt точной очистки payload. Ни одна из миграций не создаёт
+   checkpoint или deletion request задним числом из старого plan.
 3. В strict deployment сначала inventory этих legacy active records,
    quarantine через trusted lifecycle code и re-ingest/review через concrete
    v5 origin; нельзя заявлять, что migrated legacy record прошёл v0.10
@@ -243,10 +248,10 @@ ledger-owned table/index definitions и отклоняют внешние indexe
    adapter/importer.
 5. Для rollback верните traffic к старым компонентам только через restore
    backup до upgrade в отдельную БД. Старый код отклоняет новые schemas,
-   включая v6, поэтому не делайте in-place или destructive downgrade общей БД.
+   включая v7, поэтому не делайте in-place или destructive downgrade общей БД.
 
-`dry_run_setup()` и `setup()` проверяют schema-v6 checkpoint sidecars и их
-relational shape. Они не могут аутентифицировать HMAC manifest-а: стабильный
+`dry_run_setup()` и `setup()` проверяют schema-v6 checkpoint sidecars и layout
+durable receipt schema v7. Они не могут аутентифицировать HMAC manifest-а: стабильный
 `checkpoint_secret` намеренно остаётся вне SQLite; seal проверяет строгий
 `LedgerRecallPlanner.resume_checkpoint()`, у которого есть этот host secret.
 

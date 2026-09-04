@@ -31,7 +31,7 @@ ledger = PostgresMemoryLedger(
     schema="app_memory_ledger",
 )
 print(ledger.dry_run_setup())  # inspection only; no DDL
-ledger.setup()                 # explicit, idempotent fresh-v6 setup
+ledger.setup()                 # explicit, idempotent fresh-v7 setup
 ledger.close()
 ```
 
@@ -59,9 +59,9 @@ are supported; a non-deterministic ICU collation makes setup and later
 validation fail closed. Do not expose the adapter's internal database
 connection to plugin code or run arbitrary SQL through it.
 
-This backend accepts **only a fresh v6 Ledger schema**. It does not migrate an
+This backend accepts **only a fresh v7 Ledger schema**. It does not migrate an
 old PostgreSQL Ledger schema, import an SQLite Ledger file, or perform a
-destructive downgrade. A found v1–v5 or partial layout is an operator stop,
+destructive downgrade. A found v1–v6 or partial layout is an operator stop,
 not a best-effort upgrade. Preserve the old system, export/re-ingest through a
 reviewed host flow if needed, and cut traffic over only after validation.
 

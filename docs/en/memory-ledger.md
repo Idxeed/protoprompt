@@ -11,6 +11,10 @@ globally or change legacy paths. v0.12 schema v6 adds an optional sealed
 recall-checkpoint manifest for that explicit lane; it still does not serialize
 agent state or wire Ledger into an application automatically.
 
+Schema v7 adds a host-only, exact-scope canonical payload-purge receipt; see
+[exact-scope payload purge](ledger-scope-payload-purge.md) for its deliberate
+limits and required application-side deletion fence.
+
 That separation is intentional. A PDF, tool result, transcript, or model
 extraction must never become a trusted system-priority fact simply because it
 was persisted.
@@ -80,7 +84,7 @@ object to untrusted code.
 surface as `SqliteMemoryLedger`, but it is a separately provisioned backend.
 Install `protoprompt[postgres]`, run its explicit `dry_run_setup()` and
 `setup()` from a migration job, and assign it an otherwise empty dedicated
-PostgreSQL schema. It accepts fresh schema v6 only: it does not migrate an old
+PostgreSQL schema. It accepts fresh schema v7 only: it does not migrate an old
 PostgreSQL Ledger or import a SQLite Ledger file.
 
 Each write in that schema takes a transaction-scoped advisory lock so that
@@ -237,8 +241,9 @@ running them.
    payload-bearing pre-v5 records as `legacy_unknown`; it never invents a
    modern origin or review audit. Pre-v5 active records remain recallable for
    compatibility. Schema v6 adds sealed recall-checkpoint manifests and their
-   private selection sidecars; it does not backfill a checkpoint from an old
-   plan.
+   private selection sidecars; schema v7 adds durable exact-scope payload-purge
+   receipts. Neither migration backfills a checkpoint or invents a deletion
+   request from an old plan.
 3. A strict deployment must inventory those legacy active records, quarantine
    them through trusted lifecycle code, and re-ingest/review the data through
    a concrete v5 origin before enabling recall. Do not claim that a migrated
@@ -247,11 +252,11 @@ running them.
    adapter or importer.
 5. Roll back application traffic only by restoring a pre-upgrade backup into a
    separate database and returning traffic to the old components. Older code
-   rejects newer schemas, including v6, so do not attempt an in-place or
+   rejects newer schemas, including v7, so do not attempt an in-place or
    destructive downgrade of a shared database.
 
 Both `dry_run_setup()` and `setup()` validate the schema-v6 checkpoint sidecars
-and their relational shape. They cannot authenticate a manifest HMAC because
+and schema-v7 durable-receipt layout. They cannot authenticate a manifest HMAC because
 the stable `checkpoint_secret` deliberately remains outside SQLite; a strict
 `LedgerRecallPlanner.resume_checkpoint()` holding that host secret performs
 the authenticity check.

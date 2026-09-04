@@ -1,0 +1,63 @@
+{
+  "report_schema_version": 1,
+  "fixture_sha256": "877faf73e4abcfc727ffba86db57b1fd70336d9bb8c3e532b5901ac6b47742fe",
+  "report": {
+    "report_schema_version": 1,
+    "suite_version": "v0.5",
+    "benchmark_kind": "ledger_task_episode_projection",
+    "candidate_id": "protoprompt_ledger_task_episode_projection_v0_18",
+    "fixture_sha256": "877faf73e4abcfc727ffba86db57b1fd70336d9bb8c3e532b5901ac6b47742fe",
+    "cases": [
+      {
+        "id": "model_safe_projection_omits_host_identifiers",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "projection_envelope_is_exact_and_typed": true,
+            "host_identifiers_are_absent_from_provider_messages": true,
+            "raw_identifier_fields_are_not_provider_fields": true,
+            "aggregate_progress_matches_raw_episode": true,
+            "provider_request_receipt_reconciles": true
+          },
+          "passed_checks": 5,
+          "check_count": 5
+        }
+      },
+      {
+        "id": "projection_receipt_and_lookalike_integrity",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "projection_data_is_exact_canonical_reduced_envelope": true,
+            "fixed_projection_lane_receipt_matches_data": true,
+            "all_lookalike_placements_preserve_owned_projection": true,
+            "projection_receipts_are_content_free": true,
+            "provider_request_receipts_reconcile": true
+          },
+          "passed_checks": 5,
+          "check_count": 5
+        }
+      },
+      {
+        "id": "binding_and_lifecycle_fail_closed",
+        "result": {
+          "status": "ok",
+          "checks": {
+            "continuation_binding_rejects_before_provider_planning": true,
+            "lifecycle_change_invalidates_projection_resume": true,
+            "malformed_raw_episode_fails_before_projection": true,
+            "failed_paths_never_build_provider_messages": true,
+            "failure_errors_remain_content_free": true
+          },
+          "passed_checks": 5,
+          "check_count": 5
+        }
+      }
+    ],
+    "summary": {
+      "case_count": 3,
+      "passing_case_count": 3,
+      "all_pass": true
+    }
+  }
+}

@@ -39,9 +39,12 @@ from protoprompt.ledger.recall import (
 )
 from protoprompt.ledger.task_resume import (
     TaskEpisode,
+    TaskEpisodeReference,
     TaskOutcome,
     TaskProcedure,
+    decode_task_episode_reference,
     decode_task_resume_payload,
+    project_task_episode_reference,
 )
 from protoprompt.ledger.task_resume_planner import (
     TaskResumeBindingError,
@@ -295,25 +298,42 @@ def _case_result(case_id: str, checks: Mapping[str, bool]) -> dict[str, Any]:
     }
 
 
-def _payload_from_request(request) -> TaskEpisode | None:
+def _projection_from_request(request) -> TaskEpisodeReference | None:
+    """Read only the adapter-owned, provider-safe episode projection.
+
+    The v0.4 report remains frozen around the semantic fact that one typed
+    episode reaches the composer-owned lane.  The adapter now deliberately
+    projects that raw host record before provider composition, so this helper
+    checks the equivalent reduced contract instead of decoding the raw Ledger
+    payload from provider-facing data.
+    """
+
     try:
-        envelope = json.loads(request.render_ledger_data())
+        envelope = json.loads(request.render_reference_data())
     except (ValueError, json.JSONDecodeError):
         return None
-    records = envelope.get("records") if isinstance(envelope, dict) else None
+    if (
+        not isinstance(envelope, dict)
+        or envelope.get("schema_version") != 1
+        or envelope.get("type") != "protoprompt.task-episode-reference-data"
+    ):
+        return None
+    records = envelope.get("records")
     if not isinstance(records, list) or len(records) != 1:
         return None
     record = records[0]
-    if not isinstance(record, dict) or record.get("kind") != MemoryKind.EPISODE.value:
-        return None
-    content = record.get("content")
-    if not isinstance(content, str):
+    if not isinstance(record, dict):
         return None
     try:
-        decoded = decode_task_resume_payload(content)
+        decoded = decode_task_episode_reference(json.dumps(
+            record,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ))
     except (TypeError, ValueError):
         return None
-    return decoded if isinstance(decoded, TaskEpisode) else None
+    return decoded
 
 
 def _public_receipt_text(adapter, checkpoint, request) -> str:
@@ -391,7 +411,7 @@ async def _restart_mapping_live_query_rag(case_id: str) -> dict[str, Any]:
                 user_message="Continue only from the host mapping and current evidence.",
             )
             messages = request.render_messages()
-            payload = _payload_from_request(request)
+            projection = _projection_from_request(request)
             public_receipts = _public_receipt_text(adapter, checkpoint, request)
             return _case_result(case_id, {
                 "host_mapping_reconstructs_after_sqlite_restart": (
@@ -410,7 +430,9 @@ async def _restart_mapping_live_query_rag(case_id: str) -> dict[str, Any]:
                         for message in messages
                     )
                 ),
-                "typed_episode_returns_from_composer_owned_lane": payload == episode,
+                "typed_episode_returns_from_composer_owned_lane": (
+                    projection == project_task_episode_reference(episode)
+                ),
                 "public_receipts_are_content_free": not any(
                     marker in public_receipts
                     for marker in (
@@ -742,7 +764,7 @@ async def _receipt_redaction_and_composer_owned_lane(case_id: str) -> dict[str, 
 
         messages = [request.render_messages() for request in requests]
         data = [request.render_ledger_data() for request in requests]
-        payloads = [_payload_from_request(request) for request in requests]
+        projections = [_projection_from_request(request) for request in requests]
         lanes = [request.composition.data_lane for request in requests]
         public_receipts = [
             _public_receipt_text(adapter, checkpoint, request) for request in requests
@@ -765,7 +787,7 @@ async def _receipt_redaction_and_composer_owned_lane(case_id: str) -> dict[str, 
             "all_lookalike_placements_compose": len(requests) == 3,
             "composer_owned_data_lane_remains_fixed": all(
                 lane is not None
-                and lane.lane_id == "ledger_recall"
+                and lane.lane_id == "task_resume_reference"
                 and lane.origin == "memory_ledger"
                 and lane.media_type == "application/json"
                 and lane.message_count == 2
@@ -773,7 +795,7 @@ async def _receipt_redaction_and_composer_owned_lane(case_id: str) -> dict[str, 
                 for lane in lanes
             ),
             "lookalikes_do_not_replace_typed_episode_data": all(
-                payload == episode
+                projection == project_task_episode_reference(episode)
                 and item != _LOOKALIKE_DATA
                 and sum(
                     message.get("content") == item
@@ -783,7 +805,7 @@ async def _receipt_redaction_and_composer_owned_lane(case_id: str) -> dict[str, 
                     message.get("content") == _LOOKALIKE_DATA
                     for message in rendered
                 )
-                for payload, item, rendered in zip(payloads, data, messages)
+                for projection, item, rendered in zip(projections, data, messages)
             ),
             "public_receipts_are_redacted": all(
                 not any(marker in receipt for marker in private_markers)

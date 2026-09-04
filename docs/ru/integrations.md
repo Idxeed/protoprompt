@@ -65,7 +65,7 @@ llm = CompositeLLMClient(
 | `QdrantStore` | `[qdrant]` | сервер (`url=`), локальный режим (`path=`), in-memory |
 | `ChromaStore` | `[chroma]` | как раньше |
 | `PgVectorStore` | `[postgres]` | async pgvector, явный setup схемы |
-| `PostgresMemoryLedger` | `[postgres]` | экспериментальный sync Ledger; fresh-v6 выделенная schema |
+| `PostgresMemoryLedger` | `[postgres]` | экспериментальный sync Ledger; fresh-v7 выделенная schema |
 | `ElasticsearchStore` | `[elasticsearch]` | dense vectors Elasticsearch 9 |
 | `OpenSearchStore` | `[opensearch]` | OpenSearch Lucene HNSW |
 

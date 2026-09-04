@@ -58,8 +58,13 @@ nav:
       - Токен-бюджет: concepts/budget.md
   - Память:
       - Экспериментальный memory ledger: memory-ledger.md
+      - Очистка payload в точном scope (кандидат v1): ledger-scope-payload-purge.md
+      - Контракт политики памяти (кандидат v1): memory-policy.md
+      - Storage conformance Ledger (кандидат v1): ledger-storage-conformance.md
       - Bounded recall из ledger: ledger-recall.md
+      - "RFC: strict recall candidate projection (v7)": rfc-v7-strict-recall-projection.md
       - Возобновление задачи (experimental): task-resume.md
+      - Локальное task-resume демо для Ollama (experimental): ollama-task-resume-demo.md
       - Память чат-бота: memory.md
       - RAG по документам: rag.md
       - Профиль пользователя: profile.md
@@ -87,5 +92,6 @@ nav:
   - Провайдеры и фреймворки: providers-frameworks.md
   - Миграция 0.3 → 0.4: migration-0.4.md
   - Миграция 0.3 → 0.6: migration-0.6.md
+  - Миграция 0.6 → линия Ledger 1.0: migration-0.6-to-1.0.md
   - Changelog: changelog.md
   - License: license.md

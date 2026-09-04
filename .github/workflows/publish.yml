@@ -115,6 +115,7 @@ jobs:
           python scripts/run_memory_benchmark.py --suite v0.2 --verify
           python scripts/run_memory_benchmark.py --suite v0.3 --verify
           python scripts/run_memory_benchmark.py --suite v0.4 --verify
+          python scripts/run_memory_benchmark.py --suite v0.5 --verify
           python scripts/run_memory_benchmark.py --suite v1.0 --ledger-backend all --verify
 
       - name: Build strict Russian and English documentation

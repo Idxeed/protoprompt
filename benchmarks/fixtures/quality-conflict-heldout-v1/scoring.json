@@ -1,0 +1,20 @@
+{
+  "schema_version": 1,
+  "protocol_id": "protoprompt-local-heldout-quality-conflict-v1",
+  "scoring_id": "protoprompt-bounded-fact-selection-score-v1",
+  "scoring_version": "v1",
+  "delayed_recall": {
+    "metric_id": "target_context_selection_rate",
+    "success_rule": "the delayed target fact is included in the bounded selected_fact_ids",
+    "denominator": "all delayed_recall cases"
+  },
+  "conflict": {
+    "metric_id": "contradictory_selection_case_rate",
+    "event_rule": "one or more facts marked contradictory are included in bounded selected_fact_ids",
+    "denominator": "all conflict cases"
+  },
+  "roadmap_goals": {
+    "delayed_recall_improvement_percentage_points": 15.0,
+    "conflict_fact_rate_percent_maximum": 2.0
+  }
+}

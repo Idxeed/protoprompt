@@ -3,7 +3,9 @@
 `TaskResumePlanner` — намеренно узкий host-only adapter для возобновления
 одной задачи из долговременной Ledger-памяти. Он построен поверх [bounded
 Ledger recall](ledger-recall.md), но не является workflow engine, checkpoint-ом
-агента или интеграцией с Ollama.
+агента либо browser/task-control-plane API. У reference Ollama-приложения есть
+отдельный local-only demonstration host — [локальное task-resume демо для
+Ollama](ollama-task-resume-demo.md); он не расширяет этот core-контракт.
 
 Adapter выбирает только host-confirmed typed `TaskEpisode` из одного
 task-specific scope, запечатывает выбор как durable Ledger checkpoint и
@@ -35,7 +37,9 @@ correlation marker родителя, так и task reference. Поэтому о
 Host обязан использовать этот **точно такой же** derived scope и для
 `MemoryWriter`/`LedgerRecallPlanner`, и для `TokenBudgetedContextBuilder`.
 `TaskResumePlanner` проверяет это при создании и отвергает mismatched или
-widened boundary.
+widened boundary. Recall planner и request builder также обязаны использовать
+один и тот же **экземпляр counter**: выбор checkpoint-а, reduced reference
+lane и итоговый provider receipt — единый accounting contract.
 
 Каждая выбранная запись должна быть canonical JSON `TaskEpisode`:
 
@@ -188,6 +192,39 @@ checkpoint-integrity работы adapter-а. `ContextInput.query` остаёт�
 текущего запроса, включая live RAG retrieval. Поэтому текущий вопрос может
 касаться PDF, не перебиндивая незаметно task selection checkpoint-а.
 
+## Provider-safe projection
+
+Raw выбранный `TaskEpisode` остаётся только у host-а. Перед сборкой provider
+request `TaskResumePlanner` проверяет его относительно task boundary и
+проецирует в фиксированную форму `TaskEpisodeReference`:
+
+```json
+{
+  "schema_version": 1,
+  "type": "protoprompt.task-episode-reference",
+  "kind": "episode",
+  "goal": "...",
+  "completed_action_count": 2,
+  "outcome": "interrupted",
+  "next_action": "...",
+  "lesson": "..."
+}
+```
+
+Provider lane имеет fixed envelope и содержит только эти reduced fields.
+`task_ref`, отдельные `completed_action_refs`, descriptor, checkpoint ID,
+scope, record ID, source/evidence references и host checkpoint secret
+структурно отсутствуют. Aggregate count сохраняет информацию о прогрессе, но
+не раскрывает action identifiers. Текстовые поля всё равно являются
+**недоверенными reference data**, а не tool instructions или authority.
+
+`compose_checkpoint()` возвращает opaque `TaskResumeReferenceRequest`, а не
+generic serializable context object. Отправляйте `request.render_messages()`
+только из trusted host code. Не сериализуйте capability через dataclass/web
+framework и не возвращайте его из web route. Для совместимости
+`render_ledger_data()` теперь возвращает ту же reduced projection, что и
+`render_reference_data()`; raw Ledger episode он не возвращает никогда.
+
 ## Fresh validation и recovery
 
 Каждая композиция проходит durable checkpoint через public resume path,
@@ -212,14 +249,15 @@ mapping host-а имеет вид:
 `TaskResumePlanner.explain()`, checkpoint receipts и composed-request receipts
 content-free. Они не раскрывают task references, descriptor, scope,
 checkpoint identity, record IDs, source/evidence references или Ledger
-payloads. Сам transient `LedgerComposedRequest` неизбежно содержит provider
-messages с выбранными reference data; держите его у host-а и отправляйте сразу,
-не превращая в durable state.
+payloads. Transient `TaskResumeReferenceRequest` содержит только
+provider-safe projection вместе с private host internals; держите его у host-а
+и отправляйте сразу, не превращая в durable state.
 
 ## Явные non-goals
 
-Этот experimental adapter не делает auto-wiring reference Ollama app и не
-предоставляет Ollama control plane. Он также не предоставляет:
+Этот experimental adapter не предоставляет общий Ollama/browser control plane.
+Опциональное local demo намеренно получает seed только от host-а и не имеет
+task-management route. Adapter также не предоставляет:
 
 - automatic extraction, admission, confirmation или task handoff;
 - procedure execution, dependency/conflict semantics или workflow planning;

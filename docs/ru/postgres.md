@@ -30,7 +30,7 @@ ledger = PostgresMemoryLedger(
     schema="app_memory_ledger",
 )
 print(ledger.dry_run_setup())  # только проверка, без DDL
-ledger.setup()                 # явный идемпотентный fresh-v6 setup
+ledger.setup()                 # явный идемпотентный fresh-v7 setup
 ledger.close()
 ```
 
@@ -58,9 +58,9 @@ Text-колонки Ledger должны использовать deterministic P
 setup и последующей валидации. Не отдавайте internal database connection
 адаптера plugin-коду и не исполняйте через него произвольный SQL.
 
-Этот backend принимает **только свежую Ledger schema v6**. Он не мигрирует
+Этот backend принимает **только свежую Ledger schema v7**. Он не мигрирует
 старую PostgreSQL Ledger schema, не импортирует SQLite Ledger file и не делает
-destructive downgrade. Найденная v1–v5 или partial layout — сигнал оператору
+destructive downgrade. Найденная v1–v6 или partial layout — сигнал оператору
 остановиться, а не best-effort upgrade. Сохраните старую систему, при
 необходимости export/re-ingest-ите данные через reviewed host flow и
 переключайте traffic только после проверки.
