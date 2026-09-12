@@ -3,7 +3,7 @@
 > Статус: опубликованный `0.18.0` добавил provider-safe task projection,
 > explicit loopback/local-Ollama demo host, non-destructive v0.6 cutover
 > evidence, v1-candidate policy/storage receipts и SQLite crash/concurrency
-> evidence. Рабочая линия `0.19.0` закрывает live PostgreSQL
+> evidence. Release candidate `0.19.0` закрывает live PostgreSQL
 > crash/reconnect/retry и bounded multiwriter gate. После неё остаются API
 > freeze, managed recovery, independent installs, security/quality/performance
 > evidence к `1.0.0`, а не расширение workflow surface.

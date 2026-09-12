@@ -1,122 +1,102 @@
-# protoprompt 0.18.0
+# protoprompt 0.19.0
 
-ProtoPrompt 0.18.0 hardens the path from durable task memory to one bounded
-provider request. It adds a provider-safe task projection, an explicit local
-Ollama/PDF demonstration, v1-candidate policy and storage-conformance receipts,
-non-destructive v0.6 cutover evidence, and SQLite crash/concurrency coverage.
+ProtoPrompt 0.19.0 closes the local PostgreSQL fault-recovery and bounded
+multiwriter evidence gate on the road to 1.0. The runtime contract remains the
+same as 0.18.0; this release adds executable proof around ambiguous connection
+loss, whole-command retry, exact-scope purge, and independent writers.
 
-This remains an alpha release. The new Ledger, task-resume, policy, and
-conformance APIs are experimental until the 1.0 freeze is complete.
+This is still an alpha release. PostgreSQL Ledger, task resume, `MemoryPolicy`,
+and storage-conformance APIs remain experimental until the 1.0 public API
+freeze and the remaining deployment/quality gates are complete.
 
-## Provider-safe task resume
+## Real connection-abort recovery
 
-`TaskResumePlanner.compose_checkpoint()` now returns an opaque
-`TaskResumeReferenceRequest`. The host validates the selected raw
-`TaskEpisode`, then reduces it to a fixed `TaskEpisodeReference` containing
-only:
+The new live integration matrix runs against a disposable PostgreSQL 17
+service and terminates the worker's actual server backend at two points inside
+`MemoryWriter.purge_payloads()`:
 
-- goal;
-- aggregate completed-action count;
-- outcome;
-- next action;
-- lesson.
+- after canonical payload deletion has started;
+- after the aggregate purge receipt has been inserted but before commit.
 
-Raw task/action references, descriptor, checkpoint, scope, record/provenance
-identifiers, and secrets are structurally absent from the provider lane.
-Builder and recall planner must use the same exact token-counter instance, and
-the selected lifecycle/payload is revalidated before composition.
+A fresh client connection must then observe the exact pre-command state: both
+records remain active at the original revisions, payload/source sidecars and
+events remain coherent, and no aggregate receipt is visible. Repeating the
+same immutable host command must complete exactly once.
 
-## Local Ollama and PDF demonstration
+A separate worker exits after the transaction committed but before returning
+its result. The new connection must replay the durable content-free receipt
+without appending events or applying deletion again.
 
-The source-only `protoprompt-ollama-chat` reference app can opt into a private
-host-seeded task-resume mode. It keeps normal PDF RAG live while binding one
-conversation to one reviewed host assertion through an HMAC-authenticated
-mapping stored separately from the Ledger.
+## Bounded independent-writer evidence
 
-The mode is deliberately local:
+Two synchronized process waves open independent PostgreSQL connections against
+one dedicated Ledger schema:
 
-- browser and provider endpoints must be loopback;
-- the browser cannot create or alter task bindings;
-- model context is capped at 2048 tokens with an explicit output reserve;
-- generation is serialized through one in-process queue;
-- ordinary transcript/PDF/model text is never auto-admitted as task memory;
-- deletion makes the binding non-resumable before Ledger cleanup.
+- three duplicate proposals, one independent proposal, and one proposal using
+  the same opaque identifiers in a sibling scope;
+- four duplicate scope purges in one scope and two duplicate purges using the
+  same operation ID in a sibling scope.
 
-See `docs/en/ollama-task-resume-demo.md` and
-`docs/ru/ollama-task-resume-demo.md`.
+The expected durable result is exact: one event per idempotent command, no
+cross-scope collision, one sealed purge receipt per exact scope, successful
+fresh-connection reopen, no lingering advisory lock, and survival of a later
+record when an old purge receipt is replayed.
 
-## Memory policy and storage evidence
+These are bounded correctness cases, not a throughput or latency benchmark.
+Schema-wide writes remain intentionally serialized by a transaction-scoped
+PostgreSQL advisory lock.
 
-- `MemoryPolicy` immutably pairs explicit admission and recall rules. It
-  rejects a recall configuration that is weaker than its paired admission
-  boundary and exposes a content-free receipt.
-- SQLite v7 and fresh-schema PostgreSQL v7 expose one named strict-host
-  storage-conformance profile with a sealed, content-free report.
-- `MemoryWriter.purge_payloads(operation_id)` performs exact-scope canonical
-  payload deletion across every payload-bearing lifecycle state and replays a
-  durable aggregate receipt after restart.
-- SQLite process-death and bounded multi-process matrices cover observe,
-  lifecycle transition, source revocation, hard erase, checkpoint
-  invalidation, scope purge, idempotent retry, and sibling-scope isolation.
+## Release-gate integration
 
-These checks do not claim managed PostgreSQL recovery, physical WAL/backup
-erasure, or a general storage-plugin contract. PostgreSQL recovery/concurrency
-evidence remains a 1.0 release gate.
+The recovery/concurrency file is now:
 
-## Migration and evaluation protocols
+- executed by the normal PostgreSQL/Redis CI integration job;
+- executed explicitly by the tag-triggered publication workflow;
+- required to be present in the core source distribution.
 
-- A frozen v0.6.1 SQLite fixture proves non-destructive cutover: legacy
-  vector/session/profile bytes remain unchanged, no record is auto-imported or
-  admitted, and rollback selects the preserved source rather than attempting a
-  destructive schema downgrade.
-- Frozen task-resume projection benchmark v0.5 adds three cases and fifteen
-  semantic checks for identifier omission, receipt integrity, and binding or
-  lifecycle rejection.
-- The versioned v1.0 dual-backend semantic fixture remains exact across SQLite
-  and PostgreSQL.
-- Raw 10k performance and held-out quality/conflict protocols are included as
-  strict evidence scaffolds. They do not establish a public performance or
-  model-quality claim.
+The existing catalog, guard-tamper, lifecycle, property, deletion, checkpoint,
+storage-conformance, and frozen SQLite/PostgreSQL semantic parity checks remain
+mandatory.
 
 ## Install
 
 ```bash
-python -m pip install "protoprompt==0.18.0"
-python -m pip install "protoprompt[documents,fastapi,ollama]==0.18.0"
-python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.18.0#subdirectory=apps/ollama-chat"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.18.0/protoprompt_cli-0.18.0-py3-none-any.whl"
+python -m pip install "protoprompt==0.19.0"
+python -m pip install "protoprompt[documents,fastapi,ollama]==0.19.0"
+python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.19.0#subdirectory=apps/ollama-chat"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.19.0/protoprompt_cli-0.19.0-py3-none-any.whl"
 ```
 
-`protoprompt-cli` is distributed as verified GitHub Release wheel/sdist assets,
-not as a separate PyPI project. The Ollama app remains source-only and is built
-and tested by the same release workflow.
+`protoprompt-cli` is distributed as checksum-verified GitHub Release
+wheel/sdist assets, not as a separate PyPI project. The local Ollama/PDF app
+remains source-only and is built and tested by the same release workflow.
 
 ## Verification
 
-The release candidate was checked locally on Python 3.12 from a clean Git
-archive:
+Before the version cut, the exact recovery branch passed:
 
-- core non-integration suite: 766 passed, 3 skipped, 27 deselected;
-- deterministic agent CLI and Ollama reference-app suites: 321 passed,
-  50 platform skips, 10 integration tests deselected;
-- PostgreSQL integration suite: 18 passed, 1 environment-specific collation
-  skip;
-- frozen benchmarks v0.1 through v0.5 and v1.0 dual-backend parity verified;
-- strict Russian and English documentation builds succeeded;
-- core wheel/sdist, CLI wheel/sdist, and Ollama app wheel passed `twine check`.
+- live PostgreSQL Ledger matrix: 23 passed, one environment-specific
+  non-deterministic-collation skip;
+- new recovery/concurrency file alone: 5 passed on Windows and in GitHub's
+  Ubuntu integration job;
+- GitHub Actions branch run `34725995940`: every required Python 3.11/3.12/3.13,
+  Windows CLI, Ollama app, package, docs, benchmark, and PostgreSQL/Redis job
+  succeeded.
 
-The tag-triggered workflow repeats the release checks on Python 3.12 with a
-fresh PostgreSQL service, verifies package/version alignment, publishes the
-core artifacts to PyPI via OIDC, checks their SHA-256 digests against PyPI,
-and creates a GitHub Release from the same verified artifacts.
+The final tag workflow repeats the complete deterministic core/app suites,
+PostgreSQL recovery matrix, frozen benchmarks v0.1 through v1.0, strict RU/EN
+documentation, wheel/sdist metadata checks, and clean-install smoke tests. It
+publishes only artifacts derived from that verified tag and reconciles PyPI
+SHA-256 digests before creating the GitHub Release.
 
 ## Explicit boundaries
 
-0.18.0 is not a workflow engine, agent checkpoint, tool-authority system,
-network service, automatic memory extractor, or infinite-memory claim. A safe
-projection is data, not trusted instruction. Operators remain responsible for
-filesystem protection, deployment secrets, backup/PITR, external indexes and
-provider copies, and the threat model of any non-local deployment.
+0.19.0 proves logical transaction rollback/retry on the tested disposable
+server. It does not prove database-server crash recovery, managed PostgreSQL
+restore/PITR, WAL or replica erasure, physical-media deletion, distributed
+exactly-once execution, or high-throughput writes.
 
-See [SECURITY_REVIEW-v0.18.0.md](SECURITY_REVIEW-v0.18.0.md) and
+The product is not a workflow engine, agent checkpoint, tool-authority system,
+network service, automatic memory extractor, or infinite-memory claim. See
+[SECURITY_REVIEW-v0.19.0.md](SECURITY_REVIEW-v0.19.0.md) and
 [ROADMAP.md](ROADMAP.md).

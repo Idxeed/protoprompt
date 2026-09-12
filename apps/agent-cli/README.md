@@ -26,18 +26,18 @@ pp-agent C:\path\to\project
 ```
 
 При установке из checkout сначала ставьте корневой пакет: агент требует
-ProtoPrompt `>=0.18.0,<0.19.0`, потому что использует `ContextPlan` и exact
+ProtoPrompt `>=0.19.0,<0.20.0`, потому что использует `ContextPlan` и exact
 request receipt.
 
-### Из релиза 0.18.0
+### Из релиза 0.19.0
 
-`protoprompt-cli` 0.18.0 распространяется как wheel и sdist в соответствующем
+`protoprompt-cli` 0.19.0 распространяется как wheel и sdist в соответствующем
 GitHub Release, а не как отдельный PyPI upload. Сначала установите версию
 ядра с нужным backend, затем соответствующий wheel из GitHub Release:
 
 ```powershell
-python -m pip install "protoprompt[ollama]==0.18.0"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.18.0/protoprompt_cli-0.18.0-py3-none-any.whl"
+python -m pip install "protoprompt[ollama]==0.19.0"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.19.0/protoprompt_cli-0.19.0-py3-none-any.whl"
 pp-agent --version
 ```
 
@@ -45,7 +45,7 @@ pp-agent --version
 прямо из соответствующего тега (например, чтобы проверить исходный код):
 
 ```powershell
-python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.18.0#subdirectory=apps/agent-cli"
+python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.19.0#subdirectory=apps/agent-cli"
 ```
 
 Ollama должна иметь модели `llama3.1:8b` и `nomic-embed-text`.

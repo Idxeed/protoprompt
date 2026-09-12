@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-09-13
+
 ### Added
 - Live PostgreSQL crash/reconnect/retry evidence for exact-scope payload
   purge. The integration matrix terminates a real server backend after payload
