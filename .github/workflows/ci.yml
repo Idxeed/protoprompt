@@ -209,6 +209,7 @@ jobs:
                   "benchmarks/fixtures/v1.0/suite.json",
                   "benchmarks/fixtures/v1.0/expected.json",
                   "benchmarks/fixtures/v1.0/manifest.json",
+                  "tests/integration/test_postgres_recovery_concurrency.py",
                   "docs/en/migration-0.6.md",
                   "docs/ru/migration-0.6.md",
                   "docs/en/task-resume.md",

@@ -1,10 +1,12 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: release candidate `0.18.0` добавляет provider-safe task projection,
+> Статус: опубликованный `0.18.0` добавил provider-safe task projection,
 > explicit loopback/local-Ollama demo host, non-destructive v0.6 cutover
 > evidence, v1-candidate policy/storage receipts и SQLite crash/concurrency
-> evidence. Следующий этап — PostgreSQL recovery/concurrency и остальные
-> RC-gates к `1.0.0`, а не расширение workflow surface.
+> evidence. Рабочая линия `0.19.0` закрывает live PostgreSQL
+> crash/reconnect/retry и bounded multiwriter gate. После неё остаются API
+> freeze, managed recovery, independent installs, security/quality/performance
+> evidence к `1.0.0`, а не расширение workflow surface.
 > Обновлён: 2026-09-13.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
@@ -540,7 +542,7 @@ dependency/conflict planner, tool authority, exactly-once semantics, provider
 conversation snapshot или workflow/agent checkpoint. Это не claim о model
 quality, unlimited context или «бесконечной памяти».
 
-## RC gate — Fault recovery and bounded concurrency evidence (SQLite completed in 0.18.0)
+## 0.19.0 — PostgreSQL fault recovery and bounded multiwriter evidence
 
 Это local conformance milestone для RC, а не package release, managed-database
 recovery claim или замена независимому deployment review.
@@ -565,11 +567,18 @@ recovery claim или замена независимому deployment review.
 
 ### Остаётся обязательным
 
-- [ ] Повторить scope-purge crash/reconnect/retry guarantees и bounded
-  multiwriter stress на disposable реальном PostgreSQL; контрактный test может
-  collect/skip без DSN, но это не доказательство.
-- [ ] Добавить PostgreSQL concurrency/restart matrix в release evidence. Это
-  не доказывает managed PostgreSQL PITR, backup или replica erasure.
+- [x] Live disposable PostgreSQL matrix завершает server-side client backend
+  после payload delete и после aggregate receipt insert внутри scope purge.
+  Fresh connection видит точное pre-command состояние и идемпотентно повторяет
+  всю host-команду; отдельный post-commit process loss возвращает durable
+  receipt без повторной мутации.
+- [x] Bounded multi-process PostgreSQL waves проверяют duplicate propose и
+  scope-purge retry, independent record, одинаковые IDs/operation ID в sibling
+  scope, fresh reconnect и отсутствие lingering advisory lock. Matrix включена
+  в CI и tag publication gate.
+- [ ] Подтвердить backup/restore или PITR recovery на управляемом PostgreSQL
+  deployment. Локальный disposable server не доказывает managed backup,
+  replica, WAL или physical-media erasure.
 
 ## v1.0 evidence protocol — dual-backend semantic recall
 

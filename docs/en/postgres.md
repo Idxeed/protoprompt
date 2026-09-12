@@ -120,6 +120,16 @@ guide; they do not erase historical database backups, WAL, replicas, or a
 separate vector/FTS projection. Do not claim physical erasure without a
 documented platform retention and key-management process.
 
+The live recovery integration matrix terminates a disposable PostgreSQL client
+backend after payload deletion and after aggregate-receipt insertion inside a
+scope purge. A fresh connection must observe the exact pre-command state and
+successfully retry the whole immutable host command. A separate post-commit
+process loss must replay the durable receipt without deleting later data.
+Bounded independent-process waves also cover duplicate proposal and purge
+retries plus sibling-scope isolation. This proves transaction/reconnect
+semantics on the tested server; it does not prove database-server crash
+recovery, managed backup/PITR, replica behavior, or physical erasure.
+
 ## Explicit setup
 
 Constructing or opening a store never runs DDL. Run setup from a migration job
@@ -191,7 +201,8 @@ The integration suite selects this loop only on Windows.
 docker compose -f docker-compose.postgres.yml up -d --wait
 export PROTOPROMPT_POSTGRES_DSN="postgresql://protoprompt:protoprompt@localhost:55432/protoprompt_test"
 pytest tests/integration/test_postgres_integration.py -v
-pytest tests/integration/test_postgres_memory_ledger.py -v
+pytest tests/integration/test_postgres_memory_ledger.py \
+  tests/integration/test_postgres_recovery_concurrency.py -v
 docker compose -f docker-compose.postgres.yml down
 ```
 

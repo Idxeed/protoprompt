@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- Live PostgreSQL crash/reconnect/retry evidence for exact-scope payload
+  purge. The integration matrix terminates a real server backend after payload
+  deletion and after aggregate-receipt insertion, proves full rollback through
+  a fresh connection, and retries the complete immutable host command. A
+  separate post-commit process loss proves durable receipt replay without
+  reapplying deletion.
+- Bounded multi-process PostgreSQL write waves for duplicate proposal retry,
+  independent writes, same identifiers in a sibling scope, duplicate scope
+  purge, fresh-connection reopen, and post-purge receipt replay.
+
+### Changed
+- The tag publication gate now runs the PostgreSQL recovery/concurrency matrix
+  in addition to the existing live catalog, lifecycle, tamper, and semantic
+  conformance suite.
+
+### Security
+- PostgreSQL recovery evidence now checks that connection loss cannot expose a
+  partial payload/event/receipt state and that concurrent operation IDs remain
+  bound to an exact scope and immutable command identity. This does not claim
+  managed-service restore, PITR, replica, WAL, or physical-media erasure.
+
 ## [0.18.0] - 2026-09-13
 
 ### Added

@@ -107,7 +107,11 @@ jobs:
         run: python -m pytest -q apps/ollama-chat/tests
 
       - name: Verify PostgreSQL Ledger release conformance
-        run: python -m pytest -q tests/integration/test_postgres_memory_ledger.py -m integration
+        run: >-
+          python -m pytest -q
+          tests/integration/test_postgres_memory_ledger.py
+          tests/integration/test_postgres_recovery_concurrency.py
+          -m integration
 
       - name: Verify frozen semantic memory and dual-backend Ledger evidence
         run: |

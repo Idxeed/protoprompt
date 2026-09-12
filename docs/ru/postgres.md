@@ -120,6 +120,16 @@ content-free receipts/tombstones, что описаны в [Memory Ledger](memor
 projection. Не заявляйте physical erasure без документированной platform
 retention и key-management process.
 
+Live recovery integration matrix завершает backend-соединение disposable
+PostgreSQL после удаления payload и после вставки aggregate receipt внутри
+scope purge. Fresh connection обязана увидеть точное pre-command состояние и
+успешно повторить всю immutable host-команду. Отдельная потеря процесса после
+commit обязана вернуть durable receipt, не удаляя более поздние данные.
+Bounded волны независимых процессов также покрывают duplicate proposal/purge
+retry и sibling-scope isolation. Это доказывает transaction/reconnect семантику
+на проверенном сервере, но не server-crash recovery, managed backup/PITR,
+поведение replica или physical erasure.
+
 ## Явный setup
 
 Конструктор и открытие store никогда не выполняют DDL. Запускайте setup из
@@ -191,7 +201,8 @@ Integration suite выбирает этот loop только в Windows.
 docker compose -f docker-compose.postgres.yml up -d --wait
 export PROTOPROMPT_POSTGRES_DSN="postgresql://protoprompt:protoprompt@localhost:55432/protoprompt_test"
 pytest tests/integration/test_postgres_integration.py -v
-pytest tests/integration/test_postgres_memory_ledger.py -v
+pytest tests/integration/test_postgres_memory_ledger.py \
+  tests/integration/test_postgres_recovery_concurrency.py -v
 docker compose -f docker-compose.postgres.yml down
 ```
 
