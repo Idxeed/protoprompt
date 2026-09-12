@@ -1,14 +1,11 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: опубликованный `0.17.0` добавил узкую experimental границу
-> host-only task-episode resume. Локальная рабочая линия `0.18.0` исправляет
-> provider boundary: raw episode сворачивается в fixed safe projection и
-> подключается только к explicit loopback/local-Ollama demo host без browser
-> control plane. `0.16.1` остаётся hardening reference-agent boundary,
-> `0.15.0` — frozen dual-backend semantic evidence для strict Ledger recall.
-> Следующий этап — остальные RC-gates к `1.0.0`, а не расширение workflow
-> surface.
-> Обновлён: 2026-08-31.
+> Статус: release candidate `0.18.0` добавляет provider-safe task projection,
+> explicit loopback/local-Ollama demo host, non-destructive v0.6 cutover
+> evidence, v1-candidate policy/storage receipts и SQLite crash/concurrency
+> evidence. Следующий этап — PostgreSQL recovery/concurrency и остальные
+> RC-gates к `1.0.0`, а не расширение workflow surface.
+> Обновлён: 2026-09-13.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
 > проверяемых критериев готовности.
@@ -436,7 +433,7 @@ authorization layer, PostgreSQL migration toolkit, performance claim или
 benchmark и reference hardware manifest остаются необходимы для target
 planning p95.
 
-## 0.19.0 — Non-destructive v0.6 cutover evidence
+## RC gate — Non-destructive v0.6 cutover evidence (completed in 0.18.0)
 
 **Цель:** проверить операторский путь от legacy v0.6 stores к отдельному
 Ledger, не выдавая source data за автоматически подтверждённую память и не
@@ -543,7 +540,7 @@ dependency/conflict planner, tool authority, exactly-once semantics, provider
 conversation snapshot или workflow/agent checkpoint. Это не claim о model
 quality, unlimited context или «бесконечной памяти».
 
-## 0.20.0 — Fault recovery and bounded concurrency evidence
+## RC gate — Fault recovery and bounded concurrency evidence (SQLite completed in 0.18.0)
 
 Это local conformance milestone для RC, а не package release, managed-database
 recovery claim или замена независимому deployment review.

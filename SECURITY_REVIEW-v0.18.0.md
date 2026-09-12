@@ -1,13 +1,14 @@
-# ProtoPrompt 0.18.0 — local internal security review
+# ProtoPrompt 0.18.0 release candidate security review
 
-**Release-gate status:** local working-tree evidence only. This record is not
-a release approval, external penetration test, security certification, or a
+**Release-gate status:** release-candidate review. This record is not an
+external penetration test, security certification, deployment approval, or a
 claim that 0.18.0 has been published.
 
-This review covers the unpublished v0.18 task-resume demo delta relative to
-the v0.17.0 tag. It was performed from the local source tree because external
-code scanning and publication are out of scope for the current local-only
-work mode.
+This review covers the unpublished v0.18 delta relative to the v0.17.0 tag:
+provider-safe task projection, the local task-resume demo host, exact-scope
+payload purge, policy/storage conformance, migration evidence, and SQLite
+fault/concurrency hardening. Final publication remains conditional on the
+tag-triggered release workflow verifying the exact source and artifacts.
 
 ## Result
 
@@ -47,18 +48,45 @@ model. The new boundary is deliberately narrow:
 
 ## Local evidence
 
-- Focused application task-resume host/parser/state suite: `18 passed` after
-  malformed seed and conversation/reference validation hardening.
-- Complete core non-integration suite at the v0.18 working-tree checkpoint:
-  `669 passed, 3 skipped, 26 deselected`.
-- Complete local Ollama/PDF reference-app suite at that checkpoint:
-  `43 passed, 1 skipped`.
-- Frozen offline memory benchmark protocol versions v0.1–v0.5 verified
-  locally. These are contract checks, not model-quality or universal latency
-  claims.
+- Clean-archive Python 3.12 core non-integration suite on 2026-09-10:
+  `766 passed, 3 skipped, 27 deselected`.
+- Deterministic agent CLI and Ollama/PDF reference-app suites:
+  `321 passed, 50 platform-specific skips, 10 integration tests deselected`.
+- Disposable PostgreSQL 17/pgvector integration suite:
+  `18 passed, 1 environment-specific collation skip`.
+- Frozen offline memory benchmark protocol versions v0.1–v0.5 and exact
+  v1.0 SQLite/PostgreSQL semantic parity verified locally. These are contract
+  checks, not model-quality or universal latency claims.
+- Core wheel/sdist, CLI wheel/sdist, and source-only Ollama app wheel built and
+  passed `twine check` from the same clean archive.
 - English and Russian documentation builds succeeded with MkDocs strict mode;
   existing Material/MkDocs 2 compatibility advisories are not security test
   results.
+
+## Static analysis triage (2026-09-13)
+
+Bandit 1.9.4 scanned 30,670 lines across the core package, agent CLI, and
+Ollama reference app. The unfiltered medium/high report contains one B602
+finding and 17 B608 findings. Each was reviewed at its call site rather than
+suppressed:
+
+- B602 identifies the agent CLI's intentional shell-tool boundary. Arbitrary
+  browser or model input cannot invoke it directly: the host permission layer
+  must approve the command, the project identity is checked before and after
+  execution, and descriptor-pinned jailed execution fails closed outside its
+  supported Linux environment. The jail is documented as containment for the
+  working directory, not as a general shell sandbox. This remains an accepted
+  risk of the experimental CLI and is one reason the CLI is not classified as
+  a stable public API.
+- The B608 findings are fixed table names, identifiers validated before
+  quoting, boolean-selected constant clauses, or generated placeholder lists.
+  Payload values remain parameter-bound. Review found no untrusted SQL
+  identifier interpolation in those paths.
+
+A second medium/high, medium-confidence pass excluding only the two reviewed
+rule classes (`B602,B608`) reported no additional issues. The scan contained
+zero `# nosec` skips. This triage is not a substitute for an independent
+penetration test or a deployment-specific security review.
 
 ## Remote CI evidence (2026-09-04)
 
@@ -101,7 +129,8 @@ Primary regression coverage lives in:
   correctness, CRM/lead extraction, human handoff, model quality, or latency
   outside the measured local protocol.
 
-Before any public release, repeat the complete local gates on the final
-source, perform an independently scoped security review under an approved
-code-sharing policy, verify build artifacts from the exact source revision,
-and record the deployment-specific threat model.
+The tag workflow must repeat the complete deterministic, PostgreSQL,
+benchmark, documentation, clean-install, and artifact-integrity gates on the
+final source revision before publication. Any non-local deployment still
+requires its own independently scoped security review and deployment-specific
+threat model.

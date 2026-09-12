@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-09-13
+
 ### Added
 - Experimental v1-candidate exact-scope canonical payload purge for the
   scope-pinned `MemoryWriter`: `payload_readback()` and durable

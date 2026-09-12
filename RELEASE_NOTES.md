@@ -1,108 +1,122 @@
-# protoprompt 0.17.0
+# protoprompt 0.18.0
 
-ProtoPrompt 0.17.0 adds an experimental, deliberately narrow foundation for
-resuming one host-owned task from durable Ledger memory. It does **not** turn
-Ledger into a workflow engine, an agent-state checkpoint, or an "infinite
-memory" product.
+ProtoPrompt 0.18.0 hardens the path from durable task memory to one bounded
+provider request. It adds a provider-safe task projection, an explicit local
+Ollama/PDF demonstration, v1-candidate policy and storage-conformance receipts,
+non-destructive v0.6 cutover evidence, and SQLite crash/concurrency coverage.
 
-## What is new
+This remains an alpha release. The new Ledger, task-resume, policy, and
+conformance APIs are experimental until the 1.0 freeze is complete.
 
-- `TaskEpisode` and `TaskProcedure` are canonical, versioned reference-data
-  contracts. Strict decoding rejects malformed JSON, duplicate or unknown
-  fields, unsupported schemas, non-finite constants, and mismatched data.
-- `TaskResumePlanner` selects only host-confirmed, admitted
-  `host_assertion` `TaskEpisode` records. Procedures are typed data only in
-  this release; they are not selected or executed.
-- A host-minted `task_ref` derives a task-specific Ledger scope from the full
-  parent-scope correlation. Equal task references under different parent
-  thread/kind scopes cannot cross-read or resume each other.
-- A sealed Ledger checkpoint binds the opaque continuation reference. On every
-  compose, the adapter freshly verifies the checkpoint, lifecycle, typed
-  records, and the composer-owned JSON data lane before returning a request.
-- The frozen descriptor remains an in-memory host capability. The live
-  `ContextInput.query` remains the current request/RAG query, so a task resume
-  does not silently replace current PDF retrieval with stale task text.
-- Frozen offline benchmark v0.4 adds five SQLite semantic cases / 21 checks:
-  restart reconstruction, strict host-origin typed admission, parent/task
-  isolation, continuation/lifecycle rejection, and receipt/lane boundaries.
+## Provider-safe task resume
 
-Full trusted-host integration guidance is available in the English and Russian
-[task-resume documentation](docs/en/task-resume.md).
+`TaskResumePlanner.compose_checkpoint()` now returns an opaque
+`TaskResumeReferenceRequest`. The host validates the selected raw
+`TaskEpisode`, then reduces it to a fixed `TaskEpisodeReference` containing
+only:
 
-## Host integration and recovery
+- goal;
+- aggregate completed-action count;
+- outcome;
+- next action;
+- lesson.
 
-The public constructor is:
+Raw task/action references, descriptor, checkpoint, scope, record/provenance
+identifiers, and secrets are structurally absent from the provider lane.
+Builder and recall planner must use the same exact token-counter instance, and
+the selected lifecycle/payload is revalidated before composition.
 
-```python
-TaskResumePlanner(
-    builder,
-    recall,
-    parent_scope=parent_scope,
-    task_ref=task_ref,
-    task_descriptor=descriptor,
-)
-```
+## Local Ollama and PDF demonstration
 
-The host, not the Ledger checkpoint, must durably retain the mapping:
+The source-only `protoprompt-ollama-chat` reference app can opt into a private
+host-seeded task-resume mode. It keeps normal PDF RAG live while binding one
+conversation to one reviewed host assertion through an HMAC-authenticated
+mapping stored separately from the Ledger.
 
-```text
-{ task_ref, descriptor, checkpoint_id }
-```
+The mode is deliberately local:
 
-Reconstruct the same parent scope, derived task scope, strict recall policy,
-counter identity, checkpoint secret, and descriptor after restart. Do not send
-`task_ref`, descriptor, checkpoint IDs, a `MemoryWriter`, review gate, or the
-planner through a client request or model tool.
+- browser and provider endpoints must be loopback;
+- the browser cannot create or alter task bindings;
+- model context is capped at 2048 tokens with an explicit output reserve;
+- generation is serialized through one in-process queue;
+- ordinary transcript/PDF/model text is never auto-admitted as task memory;
+- deletion makes the binding non-resumable before Ledger cleanup.
 
-## Compatibility
+See `docs/en/ollama-task-resume-demo.md` and
+`docs/ru/ollama-task-resume-demo.md`.
 
-This is an additive experimental API. Existing `LedgerContextComposer` callers
-retain their prior behavior when they do not explicitly pass a host recall
-task. No Ledger storage-schema migration is required.
+## Memory policy and storage evidence
 
-The core package, `protoprompt-cli`, and the local Ollama/PDF reference app
-ship at 0.17.0. The task-resume adapter is intentionally **not** auto-wired
-into the CLI or browser-facing Ollama app; a trusted host must own admission
-and task mapping first.
+- `MemoryPolicy` immutably pairs explicit admission and recall rules. It
+  rejects a recall configuration that is weaker than its paired admission
+  boundary and exposes a content-free receipt.
+- SQLite v7 and fresh-schema PostgreSQL v7 expose one named strict-host
+  storage-conformance profile with a sealed, content-free report.
+- `MemoryWriter.purge_payloads(operation_id)` performs exact-scope canonical
+  payload deletion across every payload-bearing lifecycle state and replays a
+  durable aggregate receipt after restart.
+- SQLite process-death and bounded multi-process matrices cover observe,
+  lifecycle transition, source revocation, hard erase, checkpoint
+  invalidation, scope purge, idempotent retry, and sibling-scope isolation.
 
-Install the core from PyPI, the local Ollama/PDF reference app from the
-matching tag, and the CLI from the checksum-verified GitHub Release asset:
+These checks do not claim managed PostgreSQL recovery, physical WAL/backup
+erasure, or a general storage-plugin contract. PostgreSQL recovery/concurrency
+evidence remains a 1.0 release gate.
+
+## Migration and evaluation protocols
+
+- A frozen v0.6.1 SQLite fixture proves non-destructive cutover: legacy
+  vector/session/profile bytes remain unchanged, no record is auto-imported or
+  admitted, and rollback selects the preserved source rather than attempting a
+  destructive schema downgrade.
+- Frozen task-resume projection benchmark v0.5 adds three cases and fifteen
+  semantic checks for identifier omission, receipt integrity, and binding or
+  lifecycle rejection.
+- The versioned v1.0 dual-backend semantic fixture remains exact across SQLite
+  and PostgreSQL.
+- Raw 10k performance and held-out quality/conflict protocols are included as
+  strict evidence scaffolds. They do not establish a public performance or
+  model-quality claim.
+
+## Install
 
 ```bash
-python -m pip install "protoprompt[documents,fastapi,ollama]==0.17.0"
-python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.17.0#subdirectory=apps/ollama-chat"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.17.0/protoprompt_cli-0.17.0-py3-none-any.whl"
+python -m pip install "protoprompt==0.18.0"
+python -m pip install "protoprompt[documents,fastapi,ollama]==0.18.0"
+python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.18.0#subdirectory=apps/ollama-chat"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.18.0/protoprompt_cli-0.18.0-py3-none-any.whl"
 ```
 
-After installing the matching core, the CLI can instead be installed directly
-from the tag with
-`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.17.0#subdirectory=apps/agent-cli"`.
+`protoprompt-cli` is distributed as verified GitHub Release wheel/sdist assets,
+not as a separate PyPI project. The Ollama app remains source-only and is built
+and tested by the same release workflow.
 
 ## Verification
 
-The release gates run the complete non-integration core suite, app suites,
-strict Russian/English documentation builds, package smoke checks, and these
-offline semantic checks:
+The release candidate was checked locally on Python 3.12 from a clean Git
+archive:
 
-```bash
-python scripts/run_memory_benchmark.py --suite v0.1 --verify
-python scripts/run_memory_benchmark.py --suite v0.2 --verify
-python scripts/run_memory_benchmark.py --suite v0.3 --verify
-python scripts/run_memory_benchmark.py --suite v0.4 --verify
-```
+- core non-integration suite: 766 passed, 3 skipped, 27 deselected;
+- deterministic agent CLI and Ollama reference-app suites: 321 passed,
+  50 platform skips, 10 integration tests deselected;
+- PostgreSQL integration suite: 18 passed, 1 environment-specific collation
+  skip;
+- frozen benchmarks v0.1 through v0.5 and v1.0 dual-backend parity verified;
+- strict Russian and English documentation builds succeeded;
+- core wheel/sdist, CLI wheel/sdist, and Ollama app wheel passed `twine check`.
 
-The separate v1.0 evidence protocol remains a dual-backend SQLite/PostgreSQL
-Ledger recall gate; it is not a claim that package 1.0.0 has shipped. See the
-[benchmark guide](benchmarks/README.md) and the [internal security review
-record](SECURITY_REVIEW-v0.17.0.md).
+The tag-triggered workflow repeats the release checks on Python 3.12 with a
+fresh PostgreSQL service, verifies package/version alignment, publishes the
+core artifacts to PyPI via OIDC, checks their SHA-256 digests against PyPI,
+and creates a GitHub Release from the same verified artifacts.
 
 ## Explicit boundaries
 
-0.17.0 does not provide automatic extraction/admission, automatic task handoff,
-procedure execution, dependency/conflict planning, tool authority, side
-effects, exactly-once semantics, provider conversation snapshots, or a
-workflow/agent checkpoint. It makes no model-quality, latency, throughput,
-prompt-injection-immunity, unlimited-context, or infinite-memory claim.
+0.18.0 is not a workflow engine, agent checkpoint, tool-authority system,
+network service, automatic memory extractor, or infinite-memory claim. A safe
+projection is data, not trusted instruction. Operators remain responsible for
+filesystem protection, deployment secrets, backup/PITR, external indexes and
+provider copies, and the threat model of any non-local deployment.
 
-It is a bounded host-side reference-data continuation boundary on the path
-described in [ROADMAP.md](ROADMAP.md), not the final 1.0 release.
+See [SECURITY_REVIEW-v0.18.0.md](SECURITY_REVIEW-v0.18.0.md) and
+[ROADMAP.md](ROADMAP.md).

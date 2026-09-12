@@ -172,14 +172,17 @@ jobs:
         run: |
           mkdir release-metadata
           cp RELEASE_NOTES.md release-metadata/RELEASE_NOTES.md
-          cp SECURITY_REVIEW-v0.17.0.md release-metadata/SECURITY_REVIEW-v0.17.0.md
+          release_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          security_review="SECURITY_REVIEW-v${release_version}.md"
+          test -f "${security_review}"
+          cp "${security_review}" "release-metadata/${security_review}"
           (cd dist && sha256sum *.whl *.tar.gz) > release-metadata/PYPI_SHA256SUMS
           {
             (cd dist && sha256sum *.whl *.tar.gz)
             (cd dist-agent-cli && sha256sum *.whl *.tar.gz)
-            (cd release-metadata && sha256sum SECURITY_REVIEW-v0.17.0.md)
+            (cd release-metadata && sha256sum "${security_review}")
           } | sort -k 2 > release-metadata/SHA256SUMS
-          python - <<'PY'
+          SECURITY_REVIEW_FILE="${security_review}" python - <<'PY'
           import json
           import subprocess
           import tomllib
@@ -195,7 +198,7 @@ jobs:
                   "name": agent_cli["name"],
                   "version": agent_cli["version"],
               },
-              "security_review": "SECURITY_REVIEW-v0.17.0.md",
+              "security_review": __import__("os").environ["SECURITY_REVIEW_FILE"],
               "tag": __import__("os").environ["GITHUB_REF_NAME"],
               "commit": subprocess.check_output(
                   ["git", "rev-parse", "HEAD"], text=True
@@ -434,7 +437,8 @@ jobs:
           if not isinstance(agent_cli.get("name"), str) or not isinstance(agent_cli.get("version"), str):
               raise SystemExit("release manifest has invalid agent CLI package metadata")
           security_review = manifest.get("security_review")
-          if security_review != "SECURITY_REVIEW-v0.17.0.md":
+          package_version = manifest.get("version")
+          if security_review != f"SECURITY_REVIEW-v{package_version}.md":
               raise SystemExit("release manifest has no valid security review asset")
           expected_commit = manifest.get("commit")
           if not isinstance(expected_commit, str) or len(expected_commit) != 40:
@@ -553,7 +557,8 @@ jobs:
             verify_release_with_retry
             exit 0
           fi
-          gh release create "${RELEASE_TAG}" *.whl *.tar.gz SECURITY_REVIEW-v0.17.0.md SHA256SUMS \
+          security_review="$(python3 -c 'import json; print(json.load(open("RELEASE_MANIFEST.json", encoding="utf-8"))["security_review"])')"
+          gh release create "${RELEASE_TAG}" *.whl *.tar.gz "${security_review}" SHA256SUMS \
             --title "${RELEASE_TAG}" \
             --notes-file RELEASE_NOTES.md \
             --verify-tag

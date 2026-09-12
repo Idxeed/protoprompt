@@ -8,7 +8,7 @@
 [![RU](https://img.shields.io/badge/%D0%AF%D0%B7%D1%8B%D0%BA-RU-blue)](README.md)
 [![EN](https://img.shields.io/badge/Language-EN-blue)](README.en.md)
 
-[Русская версия](README.md) · [v0.17.0 launch kit](LAUNCH-v0.17.0.md)
+[Русская версия](README.md) · [v0.18.0 launch kit](LAUNCH-v0.18.0.md)
 
 **Reliable agent memory under a fixed context budget.** ProtoPrompt is an
 embeddable context runtime for LLM applications. The core combines **RAG over
@@ -71,14 +71,14 @@ is currently typed reference data only and is not selected. This is not an
 agent/workflow checkpoint, tool authority, or automatic wiring for
 `pp-ollama-chat` or `pp-agent`; see [Task-resume memory](docs/en/task-resume.md).
 
-The current unpublished local-only `0.18` line fixes that feature's provider
+The `0.18` line fixes that feature's provider
 boundary: a raw episode is first reduced to a fixed projection with no host
 control-plane IDs. In the reference Ollama/PDF app it is available only from a
 private host seed, loopback client, local Ollama, `num_ctx=2048`, and one local
 generation queue. It is not a network service, automatic admission, or an
 "infinite memory" claim; see the [local task-resume demo](docs/en/ollama-task-resume-demo.md).
 
-The same unpublished line begins the v1 policy freeze with additive
+The same release line begins the v1 policy freeze with additive
 `MemoryPolicy`: one immutable content-free wrapper pairs explicit admission
 and recall policies and rejects a recall configuration that is weaker than its
 paired admission rule. It does not auto-wire legacy stores or adapters; see
@@ -306,17 +306,17 @@ pip install -e "apps/agent-cli[ollama]"
 pp-agent /path/to/project
 ```
 
-For 0.17.0, `protoprompt-cli` is not separately uploaded to PyPI. Its matching
+For 0.18.0, `protoprompt-cli` is not separately uploaded to PyPI. Its matching
 wheel and sdist are attached to the GitHub Release; install the matching core
 with the desired backend first:
 
 ```bash
-python -m pip install "protoprompt[ollama]==0.17.0"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.17.0/protoprompt_cli-0.17.0-py3-none-any.whl"
+python -m pip install "protoprompt[ollama]==0.18.0"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.18.0/protoprompt_cli-0.18.0-py3-none-any.whl"
 ```
 
 Alternatively, after installing the matching core, install the tagged source:
-`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.17.0#subdirectory=apps/agent-cli"`.
+`python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.18.0#subdirectory=apps/agent-cli"`.
 
 It supports sessions, hot/cold memory, planning mode, and confirmation for
 dangerous tools. Every provider request goes through an immutable `ContextPlan`:
