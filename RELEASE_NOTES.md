@@ -1,102 +1,118 @@
-# protoprompt 0.19.0
+# protoprompt 0.20.0
 
-ProtoPrompt 0.19.0 closes the local PostgreSQL fault-recovery and bounded
-multiwriter evidence gate on the road to 1.0. The runtime contract remains the
-same as 0.18.0; this release adds executable proof around ambiguous connection
-loss, whole-command retry, exact-scope purge, and independent writers.
+ProtoPrompt 0.20.0 defines the narrow public API boundary intended to become
+stable at 1.0. It preserves historical imports while giving applications one
+machine-checked seam for explainable context plans, durable memory lifecycle,
+scope, policy, and the two built-in storage backends.
 
-This is still an alpha release. PostgreSQL Ledger, task resume, `MemoryPolicy`,
-and storage-conformance APIs remain experimental until the 1.0 public API
-freeze and the remaining deployment/quality gates are complete.
+This is still an alpha release. `protoprompt.api` is a **v1 candidate**, not a
+claim that all remaining 1.0 deployment, security, quality, performance, and
+independent-install gates are complete.
 
-## Real connection-abort recovery
+## One deliberate import seam
 
-The new live integration matrix runs against a disposable PostgreSQL 17
-service and terminates the worker's actual server backend at two points inside
-`MemoryWriter.purge_payloads()`:
+New 1.0-targeted code can import from `protoprompt.api`:
 
-- after canonical payload deletion has started;
-- after the aggregate purge receipt has been inserted but before commit.
+```python
+from protoprompt.api import (
+    MemoryKind,
+    MemoryScope,
+    MemoryWriter,
+    SqliteMemoryLedger,
+)
 
-A fresh client connection must then observe the exact pre-command state: both
-records remain active at the original revisions, payload/source sidecars and
-events remain coherent, and no aggregate receipt is visible. Repeating the
-same immutable host command must complete exactly once.
+ledger = SqliteMemoryLedger("memory.db")
+ledger.setup()
+writer = MemoryWriter(
+    ledger,
+    scope=MemoryScope(tenant="acme", user="alice", thread="support"),
+)
+candidate = writer.assert_candidate(
+    kind=MemoryKind.FACT,
+    content="The approved support tier is enterprise.",
+    source_ref="host:crm:account-42",
+)
+active = writer.confirm(candidate.record_id, expected_revision=candidate.revision)
+```
 
-A separate worker exits after the transaction committed but before returning
-its result. The new connection must replay the durable content-free receipt
-without appending events or applying deletion again.
+The seam includes the core `ContextPlan` result family; `MemoryRecord`,
+`MemoryEvent`, lifecycle enums and receipts; `MemoryScope`; `MemoryWriter`;
+`MemoryPolicy.safe_default()`; Ledger errors; built-in SQLite/PostgreSQL
+classes; and their sealed storage-capability descriptor.
 
-## Bounded independent-writer evidence
+## Executable contract
 
-Two synchronized process waves open independent PostgreSQL connections against
-one dedicated Ledger schema:
+Every wheel and sdist contains `protoprompt/api_contract_v1.json`. Its canonical
+SHA-256 is exposed as `V1_API_MANIFEST_SHA256`, and
+`v1_api_manifest()` returns a detached JSON-safe copy without opening storage,
+loading credentials, calling a network, or importing optional provider SDKs.
 
-- three duplicate proposals, one independent proposal, and one proposal using
-  the same opaque identifiers in a sibling scope;
-- four duplicate scope purges in one scope and two duplicate purges using the
-  same operation ID in a sibling scope.
+The contract tests freeze:
 
-The expected durable result is exact: one event per idempotent command, no
-cross-scope collision, one sealed purge receipt per exact scope, successful
-fresh-connection reopen, no lingering advisory lock, and survival of a later
-record when an old purge receipt is replayed.
+- exact exports and implementation identities;
+- documented public fields and readers on result/value types;
+- public `MemoryWriter` lifecycle, read, export, and scoped-erasure methods;
+- lifecycle/provenance/trust/relation/storage enum values;
+- the supported setup/close boundary of both built-in backends;
+- the explicit list of experimental namespaces;
+- canonical manifest digest and package inclusion.
 
-These are bounded correctness cases, not a throughput or latency benchmark.
-Schema-wide writes remain intentionally serialized by a transaction-scoped
-PostgreSQL advisory lock.
+Result objects such as `ContextPlan`, `MemoryRecord`, and `MemoryEvent` freeze
+their public fields and readers, not their direct constructor signatures.
+Private `_` names remain implementation details. For `MemoryPolicy`, only
+`safe_default()`, fingerprint, and explanation enter this candidate boundary;
+custom admission/recall policy composition remains experimental.
 
-## Release-gate integration
+## PostgreSQL operational visibility
 
-The recovery/concurrency file is now:
+`PostgresMemoryLedger.dry_run_setup()`, `setup()`, and `schema_version()` are
+now explicit class methods rather than dynamically delegated attributes. This
+does not change their behavior; it makes the candidate storage boundary visible
+to IDEs, type tools, documentation, and contract tests.
 
-- executed by the normal PostgreSQL/Redis CI integration job;
-- executed explicitly by the tag-triggered publication workflow;
-- required to be present in the core source distribution.
-
-The existing catalog, guard-tamper, lifecycle, property, deletion, checkpoint,
-storage-conformance, and frozen SQLite/PostgreSQL semantic parity checks remain
-mandatory.
+PostgreSQL backup mode remains `operator_managed`. This release does not claim
+managed restore/PITR, replica or WAL guarantees, or physical-media erasure.
 
 ## Install
 
 ```bash
-python -m pip install "protoprompt==0.19.0"
-python -m pip install "protoprompt[documents,fastapi,ollama]==0.19.0"
-python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.19.0#subdirectory=apps/ollama-chat"
-python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.19.0/protoprompt_cli-0.19.0-py3-none-any.whl"
+python -m pip install "protoprompt==0.20.0"
+python -m pip install "protoprompt[documents,fastapi,ollama]==0.20.0"
+python -m pip install "git+https://github.com/Idxeed/protoprompt.git@v0.20.0#subdirectory=apps/ollama-chat"
+python -m pip install "https://github.com/Idxeed/protoprompt/releases/download/v0.20.0/protoprompt_cli-0.20.0-py3-none-any.whl"
 ```
 
-`protoprompt-cli` is distributed as checksum-verified GitHub Release
-wheel/sdist assets, not as a separate PyPI project. The local Ollama/PDF app
-remains source-only and is built and tested by the same release workflow.
+`protoprompt-cli` is a checksum-verified GitHub Release wheel/sdist rather than
+a separate PyPI project. The Ollama/PDF reference app remains source-only.
 
-## Verification
+## Verification before the version cut
 
-Before the version cut, the exact recovery branch passed:
+- exact contract branch core suite: `773 passed, 3 skipped, 32 deselected`;
+- combined local PostgreSQL v7 and crash/concurrency suite: `23 passed, 1`
+  environment-specific collation skip;
+- deterministic agent CLI + Ollama application suites: `321 passed, 50`
+  platform/optional skips, `10` integration deselected;
+- frozen semantic memory benchmarks v0.1 through v0.5 verified;
+- wheel/sdist inclusion and Twine metadata validation passed;
+- strict Russian and English documentation builds passed;
+- GitHub Actions branch run `34729177663` concluded `success` for commit
+  `a6ddbe5ed819f61c2f6bd644cc1905a3558ca2dd` across Python 3.11–3.13,
+  integration, package, docs, benchmark, Windows CLI, and Ollama jobs.
 
-- live PostgreSQL Ledger matrix: 23 passed, one environment-specific
-  non-deterministic-collation skip;
-- new recovery/concurrency file alone: 5 passed on Windows and in GitHub's
-  Ubuntu integration job;
-- GitHub Actions branch run `34725995940`: every required Python 3.11/3.12/3.13,
-  Windows CLI, Ollama app, package, docs, benchmark, and PostgreSQL/Redis job
-  succeeded.
-
-The final tag workflow repeats the complete deterministic core/app suites,
-PostgreSQL recovery matrix, frozen benchmarks v0.1 through v1.0, strict RU/EN
-documentation, wheel/sdist metadata checks, and clean-install smoke tests. It
-publishes only artifacts derived from that verified tag and reconciles PyPI
-SHA-256 digests before creating the GitHub Release.
+The final tag workflow repeats the full deterministic core/app suites, live
+PostgreSQL matrix, frozen v0.1–v1.0 benchmarks, docs, package metadata, clean
+install smokes, and artifact/PyPI digest reconciliation from the exact tag.
 
 ## Explicit boundaries
 
-0.19.0 proves logical transaction rollback/retry on the tested disposable
-server. It does not prove database-server crash recovery, managed PostgreSQL
-restore/PITR, WAL or replica erasure, physical-media deletion, distributed
-exactly-once execution, or high-throughput writes.
+Existing `protoprompt`, `protoprompt.ledger`, and subpackage imports remain
+available, but are not all covered by the future 1.x promise. Custom admission
+and recall policy languages, checkpoint/task-resume workflows,
+`protoprompt.agent`, provider/framework adapters, reference apps, and any
+third-party Ledger backend remain experimental or separately scoped.
 
-The product is not a workflow engine, agent checkpoint, tool-authority system,
-network service, automatic memory extractor, or infinite-memory claim. See
-[SECURITY_REVIEW-v0.19.0.md](SECURITY_REVIEW-v0.19.0.md) and
-[ROADMAP.md](ROADMAP.md).
+The manifest hash detects accidental drift; it is not a signature and does not
+replace trusted package channels or release checksums. See
+[SECURITY_REVIEW-v0.20.0.md](SECURITY_REVIEW-v0.20.0.md), the
+[API stability guide](https://idxeed.github.io/protoprompt/en/api-stability/),
+and [ROADMAP.md](ROADMAP.md).

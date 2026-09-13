@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-09-13
+
 ### Added
 - A narrow `protoprompt.api` v1-candidate import seam plus a packaged,
   content-free `api_contract_v1.json` manifest. Contract tests freeze its exact
