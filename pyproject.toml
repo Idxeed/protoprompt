@@ -111,6 +111,7 @@ where = ["."]
 include = ["protoprompt*"]
 
 [tool.setuptools.package-data]
+"protoprompt" = ["api_contract_v1.json"]
 "protoprompt.profile" = ["schema.json"]
 
 [tool.pytest.ini_options]

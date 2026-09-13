@@ -1,4 +1,4 @@
-"""PostgreSQL v7 implementation of the experimental Memory Ledger.
+"""PostgreSQL v7 implementation of the durable Memory Ledger.
 
 The public Ledger command surface is synchronous because ``MemoryWriter``,
 admission, recall, and the composed-request boundary are synchronous at their
@@ -1371,7 +1371,7 @@ class _PostgresLedgerEngine(SqliteMemoryLedger):
 
 
 class PostgresMemoryLedger(_LedgerCommandBackend):
-    """Explicit-setup PostgreSQL backend for the experimental v7 Ledger.
+    """Explicit-setup PostgreSQL backend for the v7 Ledger.
 
     ``conninfo`` is a normal psycopg connection string. ``schema`` is owned by
     this Ledger instance; no DDL runs at import time or when the module is
@@ -1381,6 +1381,8 @@ class PostgresMemoryLedger(_LedgerCommandBackend):
     PostgreSQL uses an isolated schema and a transaction-scoped advisory lock
     for write/final-validation linearization. It does not offer SQLite's
     file-copy ``backup`` method; use the database platform's backup policy.
+    Its documented operational boundary is a v1 candidate when imported from
+    :mod:`protoprompt.api`; managed recovery remains operator evidence.
     """
 
     MIGRATION_VERSION = _PostgresLedgerEngine.MIGRATION_VERSION
@@ -1398,6 +1400,21 @@ class PostgresMemoryLedger(_LedgerCommandBackend):
         """
 
         return postgres_v7_storage_capabilities()
+
+    def dry_run_setup(self) -> dict[str, Any]:
+        """Inspect the owned schema without applying setup changes."""
+
+        return self._engine.dry_run_setup()
+
+    def setup(self) -> None:
+        """Create or validate the fresh-v7-only owned schema explicitly."""
+
+        self._engine.setup()
+
+    def schema_version(self) -> int:
+        """Return the validated storage schema version."""
+
+        return self._engine.schema_version()
 
     @property
     def schema(self) -> str:

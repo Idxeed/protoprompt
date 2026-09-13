@@ -16,5 +16,6 @@ recursive-include benchmarks *.py *.json *.md
 recursive-include examples *.py *.md *.yaml Dockerfile
 recursive-include tests *.py
 include protoprompt/profile/schema.json
+include protoprompt/api_contract_v1.json
 include mkdocs.ru.yml
 include mkdocs.en.yml

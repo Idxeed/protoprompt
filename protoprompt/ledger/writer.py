@@ -1,9 +1,11 @@
-"""Host-owned facade for the experimental memory ledger.
+"""Host-owned facade for the durable memory ledger.
 
 The important constraint is structural: none of the mutating methods accept a
 tenant, user, thread, trust level or lifecycle event supplied by a model.  A
 host creates one writer for one scope and explicitly confirms candidates after
-its own policy/review step.
+its own policy/review step. The documented public surface is a ProtoPrompt v1
+candidate when imported from :mod:`protoprompt.api`; private planner/admission
+helpers remain implementation details.
 """
 
 from __future__ import annotations

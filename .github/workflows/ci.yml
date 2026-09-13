@@ -128,7 +128,7 @@ jobs:
         run: |
           ! grep -RInE "TODO|FIXME|XXX|HACK" protoprompt tests || (echo "found debug markers"; exit 1)
       - name: Verify import surface
-        run: python -c "import protoprompt; assert hasattr(protoprompt, '__version__')"
+        run: python -c "import protoprompt; from protoprompt.api import v1_api_manifest; assert hasattr(protoprompt, '__version__'); assert v1_api_manifest()['target_major'] == 1"
 
   package:
     name: wheel + sdist smoke test
@@ -155,6 +155,7 @@ jobs:
           wheel = glob.glob("dist-check/*.whl")[0]
           with zipfile.ZipFile(wheel) as archive:
               assert "protoprompt/profile/schema.json" in archive.namelist()
+              assert "protoprompt/api_contract_v1.json" in archive.namelist()
               metadata_name = next(name for name in archive.namelist() if name.endswith(".dist-info/METADATA"))
               metadata = email.message_from_bytes(archive.read(metadata_name))
               requirements = metadata.get_all("Requires-Dist") or []
@@ -174,6 +175,7 @@ jobs:
               root = next(name.split("/", 1)[0] for name in names if "/" in name)
               expected = {
                   "protoprompt/profile/schema.json",
+                  "protoprompt/api_contract_v1.json",
                   "pyproject.toml",
                   ".dockerignore",
                   "CHANGELOG.md",

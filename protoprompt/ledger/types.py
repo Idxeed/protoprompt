@@ -1,10 +1,14 @@
-"""Typed, scope-pinned primitives for the experimental memory ledger.
+"""Typed, scope-pinned primitives for the durable memory ledger.
 
 The ledger deliberately separates a record's operational history from its
 plaintext payload. Events contain only opaque identifiers, lifecycle changes,
 and metadata-only command fingerprints; the payload can therefore be removed
 on a real ``forget`` request without leaving a second copy in an append-only
 event log.
+
+The selected records, receipts, and enums re-exported by
+``protoprompt.api`` form the narrow ProtoPrompt v1 candidate contract. Other
+helpers in this implementation module are not automatically frozen.
 """
 
 from __future__ import annotations

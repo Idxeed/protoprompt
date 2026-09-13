@@ -5,6 +5,10 @@ their own public API as well, so both styles work:
 
     from protoprompt import ContextBuilder
     from protoprompt.context import ContextInput
+
+The narrower ``protoprompt.api`` module is the machine-checked stability
+boundary being frozen for ProtoPrompt 1.x. Historical exports here remain
+available but are not all part of that stronger contract.
 """
 
 from protoprompt.cache import (

@@ -1,4 +1,4 @@
-"""SQLite implementation of the experimental scope-pinned memory ledger.
+"""SQLite implementation of the durable scope-pinned memory ledger.
 
 It is intentionally separate from :class:`protoprompt.store.sqlite.SqliteStore`.
 The vector store remains a legacy recall projection; this ledger is an opt-in
