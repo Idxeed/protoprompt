@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- A narrow `protoprompt.api` v1-candidate import seam plus a packaged,
+  content-free `api_contract_v1.json` manifest. Contract tests freeze its exact
+  exports, implementation identities, public result fields/readers,
+  `MemoryWriter` methods, enum values, built-in storage operations, manifest
+  digest, experimental exclusions, and optional-dependency-free import.
+- English and Russian API-stability guides define the pre-1.0 candidate rule,
+  intended 1.x SemVer promise, result-only construction boundary, and the
+  surfaces that remain experimental.
+
+### Changed
+- `PostgresMemoryLedger` now exposes `dry_run_setup()`, `setup()`, and
+  `schema_version` directly instead of relying on dynamic delegation for these
+  candidate-stable operational methods. Runtime behavior is unchanged.
+
+### Security
+- The frozen boundary keeps private backend commands, custom admission/recall
+  policy languages, task-resume workflows, adapters, and demos outside the
+  stable seam. A passing descriptor still does not claim managed PostgreSQL
+  restore/PITR or authorize a third-party storage plugin.
+
 ## [0.19.0] - 2026-09-13
 
 ### Added

@@ -57,6 +57,7 @@ nav:
       - Сжатие сессии: concepts/compression.md
       - Токен-бюджет: concepts/budget.md
   - Память:
+      - Граница API ProtoPrompt v1: api-stability.md
       - Экспериментальный memory ledger: memory-ledger.md
       - Очистка payload в точном scope (кандидат v1): ledger-scope-payload-purge.md
       - Контракт политики памяти (кандидат v1): memory-policy.md

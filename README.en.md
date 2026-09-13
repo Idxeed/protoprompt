@@ -244,8 +244,15 @@ asyncio.run(main())
 
 ## Public API
 
+For the upcoming stable `1.x` line, prefer the narrow
+[`protoprompt.api`](https://idxeed.github.io/protoprompt/en/api-stability/)
+import seam. In pre-1.0 releases it is a machine-checked **v1 candidate**;
+historical imports remain compatible without silently inheriting that stronger
+stability promise.
+
 | Module                   | Exports                                                           |
 |--------------------------|-------------------------------------------------------------------|
+| `protoprompt.api` *(v1 candidate)* | frozen core planning/memory types, `MemoryWriter`, `MemoryPolicy.safe_default()`, built-in Ledger storage contract |
 | `protoprompt`            | `Pipeline`, `ContextBuilder`, `ContextInput`, `ContextOutput`     |
 | `protoprompt.store`      | `StoreProtocol`, `AsyncStoreProtocol`, `InMemStore`, `SqliteStore`, `as_async` |
 | `protoprompt.session`    | `Session`, `CompressedBlock`, `HeuristicStrategy`, `LLMSummaryStrategy` |

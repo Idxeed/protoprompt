@@ -239,6 +239,11 @@ OpenAI с токен-бюджетом, локальные embeddings, сжати
 
 ## Основные точки входа
 
+Для будущей стабильной линии `1.x` используйте узкую точку импорта
+[`protoprompt.api`](https://idxeed.github.io/protoprompt/ru/api-stability/).
+До `1.0` это машинно проверяемый **v1 candidate**; старые импорты сохраняются,
+но не получают неявно более сильную гарантию стабильности.
+
 ```python
 from protoprompt import (
     ContextBuilder,

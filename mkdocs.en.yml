@@ -57,6 +57,7 @@ nav:
       - Compression: concepts/compression.md
       - Token budget: concepts/budget.md
   - Memory:
+      - ProtoPrompt v1 API boundary: api-stability.md
       - Experimental memory ledger: memory-ledger.md
       - Exact-scope payload purge (v1 candidate): ledger-scope-payload-purge.md
       - Memory policy contract (v1 candidate): memory-policy.md

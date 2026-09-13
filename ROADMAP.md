@@ -1,12 +1,11 @@
 # Roadmap to 1.0 — ProtoPrompt
 
-> Статус: опубликованный `0.18.0` добавил provider-safe task projection,
-> explicit loopback/local-Ollama demo host, non-destructive v0.6 cutover
-> evidence, v1-candidate policy/storage receipts и SQLite crash/concurrency
-> evidence. Release candidate `0.19.0` закрывает live PostgreSQL
-> crash/reconnect/retry и bounded multiwriter gate. После неё остаются API
-> freeze, managed recovery, independent installs, security/quality/performance
-> evidence к `1.0.0`, а не расширение workflow surface.
+> Статус: опубликованные `0.18.0` и `0.19.0` закрыли provider-safe task
+> projection, local-Ollama demo host, non-destructive v0.6 cutover, SQLite и
+> live PostgreSQL crash/concurrency gates. В работе `0.20.0`: узкая
+> machine-readable API freeze boundary. После неё остаются managed recovery,
+> independent installs и security/quality/performance evidence к `1.0.0`, а
+> не расширение workflow surface.
 > Обновлён: 2026-09-13.
 >
 > Это не календарное обещание. Каждый minor-релиз выходит только после своих
@@ -544,8 +543,8 @@ quality, unlimited context или «бесконечной памяти».
 
 ## 0.19.0 — PostgreSQL fault recovery and bounded multiwriter evidence
 
-Это local conformance milestone для RC, а не package release, managed-database
-recovery claim или замена независимому deployment review.
+Это опубликованный local conformance milestone для RC, но не managed-database
+recovery claim и не замена независимому deployment review.
 
 ### Выполнено
 
@@ -579,6 +578,26 @@ recovery claim или замена независимому deployment review.
 - [ ] Подтвердить backup/restore или PITR recovery на управляемом PostgreSQL
   deployment. Локальный disposable server не доказывает managed backup,
   replica, WAL или physical-media erasure.
+
+## 0.20.0 — Narrow v1 API freeze candidate
+
+Это compatibility milestone: он уменьшает обещанную поверхность до ядра,
+не удаляя legacy imports и не объявляя пакет `1.0.0` раньше evidence gates.
+
+### В работе
+
+- [x] Добавлен `protoprompt.api` с явным списком core planning/memory типов,
+  `MemoryWriter`, safe-default `MemoryPolicy` и built-in storage boundary.
+- [x] Добавлен устанавливаемый content-free `api_contract_v1.json` с version,
+  status, exact exports, public fields/members, enum values и experimental
+  exclusions; digest зафиксирован в Python API.
+- [x] Result-типы отделены от supported constructors; private `_` fields и
+  методы не входят в promise, custom admission/recall остаются experimental.
+- [x] PostgreSQL setup boundary сделан статически видимым для IDE/type tools
+  без изменения runtime semantics.
+- [x] RU/EN guide и package checks описывают и проверяют contract boundary.
+- [ ] Пройти полный Python/package/docs/benchmark release gate и опубликовать
+  `0.20.0` только из точного проверенного commit/tag.
 
 ## v1.0 evidence protocol — dual-backend semantic recall
 
@@ -615,7 +634,7 @@ recovery claim или замена независимому deployment review.
 
 ### Работа
 
-- Зафиксировать stable public APIs: `ContextPlan`, `MemoryRecord`,
+- [x] Зафиксировать v1-candidate public APIs: `ContextPlan`, `MemoryRecord`,
   `MemoryEvent`, `MemoryWriter`, `MemoryPolicy` и storage conformance contract.
 - [x] Добавить additive v1-candidate `MemoryPolicy`, который content-free
   связывает explicit admission и recall и отвергает recall слабее paired
@@ -625,7 +644,7 @@ recovery claim или замена независимому deployment review.
   SQLite/PostgreSQL: один named strict-host semantic profile, content-free
   report и явные различия migration/backup. Это не public backend plugin API
   и не доказательство managed PostgreSQL recovery/PITR.
-- Явно отделить stable API от experimental/research: old `WorkingMemory`,
+- [x] Явно отделить stable API от experimental/research: old `WorkingMemory`,
   policy experiments и non-core adapters не получают гарантию 1.x молча.
 - Провести stress, concurrency и crash-recovery tests SQLite/Postgres.
 - Сохранить PostgreSQL Ledger catalog/tamper conformance как обязательный
